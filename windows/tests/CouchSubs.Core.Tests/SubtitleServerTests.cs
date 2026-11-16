@@ -38,7 +38,7 @@ public class SubtitleServerTests
 
         using var response = await Http.GetAsync($"http://127.0.0.1:{port}/events", HttpCompletionOption.ResponseHeadersRead);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("*", response.Headers.GetValues("Access-Control-Allow-Origin").Single());
+        Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
         Assert.StartsWith("text/event-stream", response.Content.Headers.ContentType?.ToString());
 
         await WaitUntil(() => server.ConnectedClients == 1);
@@ -279,7 +279,9 @@ public class SubtitleServerTests
         using var server = new SubtitleServer(0) { InstanceId = "3f2a-b9" };
         var port = await server.StartAsync();
         using var http = new HttpClient();
-        Assert.Equal("{\"app\":\"couchsubs\",\"id\":\"3f2a-b9\",\"tvs\":0}", await http.GetStringAsync($"http://127.0.0.1:{port}/hello"));
+        var body = await http.GetStringAsync($"http://127.0.0.1:{port}/hello");
+        Assert.Equal("{\"app\":\"couchsubs\",\"auth\":1,\"id\":\"3f2a-b9\",\"tvs\":0}", body);
+        Assert.DoesNotContain(server.AccessKey, body);
     }
 
     /// <summary>Kurulum kimliği kalıcıdır: aynı ağdaki iki CouchSubs'ı TV bununla ayırır (GitHub #425).</summary>
@@ -290,7 +292,7 @@ public class SubtitleServerTests
         using var second = new SubtitleServer(0);
         Assert.False(string.IsNullOrEmpty(first.InstanceId));
         Assert.Equal(first.InstanceId, second.InstanceId);
-        Assert.Equal("{\"app\":\"couchsubs\",\"id\":\"ab\",\"tvs\":2}", SubtitleServer.HelloBody("a\"b", 2));
+        Assert.Equal("{\"app\":\"couchsubs\",\"auth\":1,\"id\":\"ab\",\"tvs\":2}", SubtitleServer.HelloBody("a\"b", 2));
     }
 
     // Yeni tarayıcılı TV'ler (Tizen 9.0) yerel ağdaki sunucuya ön istekte izin başlığı ister.
@@ -300,12 +302,15 @@ public class SubtitleServerTests
         using var server = new SubtitleServer(0);
         var port = await server.StartAsync();
         using var http = new HttpClient();
-        using var request = new HttpRequestMessage(HttpMethod.Options, $"http://127.0.0.1:{port}/events");
+        // TV uygulamasının kökeni paketli uygulamadır (webOS/Tizen "null"); yabancı kökenlere izin verilmez.
+        using var request = new HttpRequestMessage(HttpMethod.Options, $"http://127.0.0.1:{port}/events?k={server.AccessKey}");
+        request.Headers.Add("Origin", "null");
         request.Headers.Add("Access-Control-Request-Private-Network", "true");
         using var response = await http.SendAsync(request);
         Assert.Equal(System.Net.HttpStatusCode.NoContent, response.StatusCode);
         Assert.Equal("true", Assert.Single(response.Headers.GetValues("Access-Control-Allow-Private-Network")));
-        Assert.Equal("*", Assert.Single(response.Headers.GetValues("Access-Control-Allow-Origin")));
+        Assert.Equal("null", Assert.Single(response.Headers.GetValues("Access-Control-Allow-Origin")));
+        Assert.Contains("POST", Assert.Single(response.Headers.GetValues("Access-Control-Allow-Methods")));
     }
 
     [Fact]

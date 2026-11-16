@@ -81,6 +81,7 @@ class MainActivity : ComponentActivity() {
             CouchSubsTheme {
                 val navigation = rememberNavController()
                 val status by LiveState.status.collectAsState()
+                TvPairingDialog(status.pairing)
                 LaunchedEffect(status.running) {
                     if (status.running && settings.keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

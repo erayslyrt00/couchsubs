@@ -193,7 +193,7 @@ internal sealed class FakeServices : IAppServices
         TvCalls++;
         return Task.FromResult<IReadOnlyList<LgTv>>(Tvs);
     }
-    public Task<TvPairing> PairTvAsync(LgTv tv, string? key, string server)
+    public Task<TvPairing> PairTvAsync(LgTv tv, string? key, string server, string accessKey)
     {
         LaunchedServer = server;
         PairCount++;
@@ -1369,8 +1369,8 @@ public class AppControllerRunTests
         var settings = new MemorySettings();
         var controller = AppControllerTests.Make(store: store, settings: settings);
         controller.Settings = controller.Settings with { Style = new SubtitleStyle(58, 7) };
-        // Güvenli depoda yalnız kurulumun bitip bitmediği durur.
-        Assert.Equal([StoreKeys.SetupComplete], store.Values.Keys);
+        // Görünüm ayarları ayrı; kurulum durumu ve TV erişim anahtarı güvenli depodadır.
+        Assert.Equal(new[] { StoreKeys.SetupComplete, StoreKeys.SubtitleAccessKey }.Order(), store.Values.Keys.Order());
         Assert.Equal(58, AppControllerTests.Make(store: store, settings: settings).Settings.Style.FontSize);
     }
 
