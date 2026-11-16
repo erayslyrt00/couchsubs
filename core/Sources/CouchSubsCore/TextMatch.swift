@@ -41,6 +41,8 @@ public enum TextMatch {
     public static func isSameSubtitle(_ reread: String, _ sent: String) -> Bool {
         let rows = sent.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let flat = rows.joined(separator: " ")
+        // Gönderilende olmayan olumsuzluk ya da sayı taşıyan okuma, karakterce ne kadar benzese de başka bir cümledir.
+        if addsMeaning(reread, to: flat) { return false }
         let x = cleanWords(reread), y = cleanWords(flat)
         // Uzayan metin (daktilo efekti ya da aynı sözlerle başlayan yeni satır) karakterce benzese de yenidir.
         if !y.isEmpty, x.count > y.count, x.starts(with: y) || x.suffix(y.count).elementsEqual(y) { return false }
@@ -98,9 +100,59 @@ public enum TextMatch {
     public static func isWorseReread(_ reread: String, of sent: String) -> Bool {
         let a = normalize(reread), b = normalize(sent)
         let x = cleanWords(a), y = cleanWords(b)
-        guard x.count >= 5, !y.isEmpty, !isGrowth(reread, of: sent), !isGrowth(sent, of: reread) else { return false }
+        guard x.count >= 5, !y.isEmpty, !isGrowth(reread, of: sent), !isGrowth(sent, of: reread),
+              !addsMeaning(reread, to: sent) else { return false }
         let reads = similarity(x, y) >= 0.65 || isSimilar(a, b, threshold: 0.75)
         return reads && OcrNoise.score(reread) < OcrNoise.score(sent) + 4
+    }
+
+    /// Olumsuzluk sözcükleri; kesme işaretini kaçıran okumalar ("dont", "cant") da sayılır.
+    private static let negations: Set<String> = [
+        "not", "no", "never", "nothing", "nobody", "none", "nowhere", "neither", "nor", "cannot",
+        "dont", "doesnt", "didnt", "cant", "wont", "isnt", "arent", "wasnt", "werent", "aint",
+        "couldnt", "shouldnt", "wouldnt", "havent", "hasnt", "hadnt", "mustnt", "neednt",
+    ]
+
+    /// `reread`, `sent`'te olmayan bir anlam işareti taşıyor mu: daha çok olumsuzluk ya da gönderilende bulunmayan bir
+    /// sayı. Bu farklar karakterce küçüktür ("I can do that for you right now." / "I can't do that for you right now.": 0.94, "at 5" / "at 6": 0.92) ama
+    /// cümleyi tersine çevirir; altyazının ilk karesi olumsuzluğu kaçırıp hızlı yoldan gittiyse doğru okuma yeniden okuma
+    /// sayılıp atılıyor, TV'de ters çeviri kalıyordu. Yalnız EKLENEN işaret sayılır: işareti düşüren okuma ("can't" →
+    /// "can") çoğu zaman OCR kaybıdır ve gösterileni bozmamalıdır. Rakam karışmış sözcük ("n0t") OCR karışıklıklarına göre
+    /// harfe çevrilip sayılır; kesmenin tek başına kalan "t"si ("can t") bilinen bir olumsuz kısaltmayı tamamladığında
+    /// olumsuzluktur. Ham ya da sadeleştirilmiş metin verilebilir (Windows: TextMatch.AddsMeaning).
+    public static func addsMeaning(_ reread: String, to sent: String) -> Bool {
+        let (negations, numbers) = meaningMarks(reread)
+        let sentMarks = meaningMarks(sent)
+        if negations > sentMarks.negations { return true }
+        var sentNumbers = sentMarks.numbers
+        for number in numbers {
+            guard let index = sentNumbers.firstIndex(of: number) else { return true }
+            sentNumbers.remove(at: index)
+        }
+        return false
+    }
+
+    private static func meaningMarks(_ text: String) -> (negations: Int, numbers: [String]) {
+        let words = normalize(text).split(separator: " ").map(String.init)
+        var negations = 0
+        var numbers: [String] = []
+        for (i, original) in words.enumerated() {
+            if original.allSatisfy(isAsciiDigit) {
+                numbers.append(original)
+                continue
+            }
+            let word = original.contains(where: isAsciiDigit) ? foldDigits(original) : original
+            if Self.negations.contains(word) || (word == "t" && i > 0 && Self.negations.contains(foldDigits(words[i - 1]) + "t")) { negations += 1 }
+        }
+        return (negations, numbers)
+    }
+
+    private static func isAsciiDigit(_ c: Character) -> Bool { c.isASCII && c.isNumber }
+
+    /// OCR'ın harfle karıştırdığı rakamlar harfe çevrilir ("n0t" → "not").
+    private static func foldDigits(_ word: String) -> String {
+        let folds: [Character: Character] = ["0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b"]
+        return String(word.map { folds[$0] ?? $0 })
     }
 
     /// Levenshtein oranı (sözcük dizileri için).

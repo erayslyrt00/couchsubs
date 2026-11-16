@@ -42,6 +42,8 @@ object TextMatch {
     fun isSameSubtitle(reread: String, sent: String): Boolean {
         val rows = sent.split('\n')
         val flat = rows.joinToString(" ")
+        // Gönderilende olmayan olumsuzluk ya da sayı taşıyan okuma, karakterce ne kadar benzese de başka bir cümledir.
+        if (addsMeaning(reread, flat)) return false
         val x = cleanWords(reread)
         val y = cleanWords(flat)
         // Uzayan metin (daktilo efekti ya da aynı sözlerle başlayan yeni satır) karakterce benzese de yenidir.
@@ -96,10 +98,53 @@ object TextMatch {
         val b = normalize(sent)
         val x = cleanWords(a)
         val y = cleanWords(b)
-        if (x.size < 5 || y.isEmpty() || isGrowth(reread, sent) || isGrowth(sent, reread)) return false
+        if (x.size < 5 || y.isEmpty() || isGrowth(reread, sent) || isGrowth(sent, reread) || addsMeaning(reread, sent)) return false
         val reads = similarity(x, y) >= 0.65 || isSimilar(a, b, 0.75)
         return reads && OcrNoise.score(reread) < OcrNoise.score(sent) + 4
     }
+
+    /** Olumsuzluk sözcükleri; kesme işaretini kaçıran okumalar ("dont", "cant") da sayılır. */
+    private val negations = setOf(
+        "not", "no", "never", "nothing", "nobody", "none", "nowhere", "neither", "nor", "cannot",
+        "dont", "doesnt", "didnt", "cant", "wont", "isnt", "arent", "wasnt", "werent", "aint",
+        "couldnt", "shouldnt", "wouldnt", "havent", "hasnt", "hadnt", "mustnt", "neednt",
+    )
+
+    /**
+     * [reread], [sent]'te olmayan bir anlam işareti taşıyor mu: daha çok olumsuzluk ya da gönderilende bulunmayan bir sayı.
+     * Bu farklar karakterce küçüktür ("I can do that for you right now." / "I can't do that for you right now.": 0.94) ama cümleyi tersine çevirir; ilk kare
+     * olumsuzluğu kaçırıp hızlı yoldan gittiyse doğru okuma yeniden okuma sayılıp atılıyordu. Yalnız EKLENEN işaret
+     * sayılır: işareti düşüren okuma çoğu zaman OCR kaybıdır. Rakam karışmış sözcük ("n0t") harfe çevrilip sayılır;
+     * kesmenin tek başına kalan "t"si bilinen bir olumsuz kısaltmayı tamamladığında olumsuzluktur (Windows: TextMatch.AddsMeaning).
+     */
+    fun addsMeaning(reread: String, sent: String): Boolean {
+        val (rereadNegations, numbers) = meaningMarks(reread)
+        val (sentNegations, sentNumbers) = meaningMarks(sent)
+        if (rereadNegations > sentNegations) return true
+        val remaining = sentNumbers.toMutableList()
+        for (number in numbers) if (!remaining.remove(number)) return true
+        return false
+    }
+
+    private fun meaningMarks(text: String): Pair<Int, List<String>> {
+        val words = normalize(text).split(' ').filter { it.isNotEmpty() }
+        var count = 0
+        val numbers = mutableListOf<String>()
+        for ((i, original) in words.withIndex()) {
+            if (original.all { it in '0'..'9' }) {
+                numbers.add(original)
+                continue
+            }
+            val word = if (original.any { it in '0'..'9' }) foldDigits(original) else original
+            if (word in negations || (word == "t" && i > 0 && (foldDigits(words[i - 1]) + "t") in negations)) count++
+        }
+        return count to numbers
+    }
+
+    /** OCR'ın harfle karıştırdığı rakamlar harfe çevrilir ("n0t" → "not"). */
+    private fun foldDigits(word: String): String = word.map {
+        when (it) { '0' -> 'o'; '1' -> 'i'; '3' -> 'e'; '4' -> 'a'; '5' -> 's'; '7' -> 't'; '8' -> 'b'; else -> it }
+    }.joinToString("")
 
     /** [new], [old]'un sonuna sözcük eklenmiş hali mi (daktilo efekti; satırın başı okunmamışsa başına eklenmiş hali). */
     fun isGrowth(new: String, old: String): Boolean {

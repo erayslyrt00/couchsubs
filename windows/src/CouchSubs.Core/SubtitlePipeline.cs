@@ -265,6 +265,21 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
                         held = null;
                         Write($"bekleyen atıldı: {SubtitleLog.Excerpt(waiting.Source)} yerine paketteki satır geldi");
                     }
+                    else if (TextMatch.AddsMeaning(source, waiting.Source)
+                        && TextMatch.IsSimilar(TextMatch.Normalize(source), TextMatch.Normalize(waiting.Source)))
+                    {
+                        // Olumsuzluk/sayı düzeltmesi eşit puanla da bekleyenin yerini alır; yanlış ilk okuma çevrilmez.
+                        // Bekleme süresi yeniden başlamaz, bağımsız eksik satırlar korunur.
+                        var merged = KeepMissingLines(source, waiting.Source);
+                        held = (merged, box ?? waiting.Box, waiting.Since, wait, ReadingScore(merged), waiting.Read);
+                        action = StabilizerAction.None;
+                        LineLeft();
+                        if (now() - waiting.Since >= wait)
+                        {
+                            held = null;
+                            after = Enqueue(merged, box ?? waiting.Box, waiting.Read);
+                        }
+                    }
                     else if ((IsRereadOf(source, waiting.Source) || IsRereadOf(waiting.Source, source)) && now() - waiting.Since < wait)
                     {
                         // Aynı satırın başka bir okuması: daha iyisi tutulur, süre baştan başlamaz.
@@ -411,8 +426,12 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     /// </summary>
     private string KeepMissingLines(string better, string older)
     {
+        var correctedLines = better.Split('\n');
         var extra = older.Split('\n').Select(line => line.Trim())
             .Where(line => line.Length > 0 && !LooksMisread(line) && !Covered(line, better))
+            // Sayısı düzeltilen satır eksik değildir; eski sayıyla ikinci kez alta eklenmemeli.
+            .Where(line => !correctedLines.Any(corrected => TextMatch.AddsMeaning(corrected, line)
+                && TextMatch.IsSimilar(TextMatch.Normalize(corrected), TextMatch.Normalize(line))))
             .ToList();
         return extra.Count == 0 ? better : better.TrimEnd() + "\n" + string.Join('\n', extra);
     }
@@ -446,6 +465,8 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     /// </summary>
     private bool IsRereadOf(string newer, string older)
     {
+        // Eskide olmayan olumsuzluk ya da sayı taşıyan okuma ("at 5." / "at 6.") yeniden okuma değil, düzeltmedir.
+        if (TextMatch.AddsMeaning(newer, older)) return false;
         // Harf harf çok benzeyen, aynı sayıda sözcüklü okuma aynı satırın gürültülü hâlidir ("Yeah? Damme" /
         // "Yeäh? Damn." / "Yeah? Damn."): sözlük büyük harfli bozuk sözcüğü özel ad sanabiliyor.
         var normNewer = TextMatch.Normalize(newer);
