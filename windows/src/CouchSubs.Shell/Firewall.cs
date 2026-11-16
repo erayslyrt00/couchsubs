@@ -8,7 +8,7 @@ namespace CouchSubs.Shell;
 /// </summary>
 public interface IFirewall
 {
-    /// <summary>Bu exe için her profilde (Etki alanı, Özel, Ortak) TCP ve UDP'ye açık, engellenmemiş izin kuralı var mı. Yönetici gerekmez.</summary>
+    /// <summary>Bu exe için Özel ağdaki yerel cihazlardan TCP/UDP izni hazır mı. Ortak/Etki alanı izni aranmaz. Yönetici gerekmez.</summary>
     bool HasRule();
 
     /// <summary>Yönetici izniyle (UAC) kuralı ekler; kullanıcı izin vermezse ya da kural yine yoksa false.</summary>

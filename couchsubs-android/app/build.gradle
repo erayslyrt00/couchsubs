@@ -254,6 +254,7 @@ if ((findProperty('couchsubs.patchChiaki') ?: 'false').toString().toBoolean()) {
 // Testler, gömülü paketleri depodaki yerinden okur.
 tasks.withType(Test).configureEach {
     systemProperty 'couchsubs.packs', "$repoRoot/core/Sources/CouchSubsCore/Resources/packs"
+    systemProperty 'couchsubs.glossary', "$repoRoot/core/Sources/CouchSubsCore/Resources/glossary-en-tr.json"
     systemProperty 'couchsubs.tvPackages', tvReleaseDir.absolutePath
     systemProperty 'couchsubs.requireTvPackages', requireTvPackages.toString()
 }

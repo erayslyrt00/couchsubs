@@ -159,8 +159,18 @@ class TranslationCache(private val file: File? = null, limit: Int = DEFAULT_LIMI
  * `terms` İngilizce terimi verilen Türkçeyle değiştirir, `keep` adları olduğu gibi bırakır; `keepExact` adları yalnız
  * yazıldığı gibi (büyük/küçük harf aynı) geçince bırakır. Eşleşme büyük/küçük harfe bakmaz, yalnız tam sözcüklerde olur,
  * uzun terim önce gelir. Uygulamayla gelen genel sözlüğün üstüne files/glossary klasöründeki JSON dosyaları eklenir.
+ * `phrases` çeviriden önce oyun argosunu düz İngilizceye çevirir (anahtar düzenli ifade: "toss a smoke" → "throw a smoke
+ * grenade"); `lines` kısa ünlem satırlarının hazır Türkçesidir ("Reloading!" → "Şarjör değiştiriyorum!"), satır motora gitmez.
  */
-class Glossary private constructor(private val terms: Map<String, Term>) {
+class Glossary private constructor(
+    private val terms: Map<String, Term>,
+    private val phrases: Map<String, String> = emptyMap(),
+    private val lines: Map<String, String> = emptyMap(),
+) {
+    /** Düzenli ifade → düz İngilizce; anahtar sırasıyla (bayt) uygulanır. */
+    private val phrasePatterns: List<Pair<Regex, String>> = phrases.keys.sortedWith { a, b -> compareBytes(a.toByteArray(), b.toByteArray()) }
+        .mapNotNull { key -> runCatching { Regex("\\b(?:$key)\\b", RegexOption.IGNORE_CASE) }.getOrNull()?.let { it to phrases.getValue(key) } }
+
     /** Metinde bulunan terim: konumu (UTF-16), sözlükteki İngilizcesi ve Türkçesi. */
     data class TermMatch(val start: Int, val length: Int, val english: String, val turkish: String)
 
@@ -177,7 +187,7 @@ class Glossary private constructor(private val terms: Map<String, Term>) {
     }
 
     /** Sözlüğün içeriğinden kısa bir iz; terim içeren satırların önbellek anahtarına girer. */
-    val fingerprint: String = makeFingerprint(ordered)
+    val fingerprint: String = makeFingerprint(ordered, phrases, lines)
 
     val size: Int get() = terms.size
     val isEmpty: Boolean get() = terms.isEmpty()
@@ -196,8 +206,31 @@ class Glossary private constructor(private val terms: Map<String, Term>) {
             root.optJSONArray("keepExact")?.let { list ->
                 for (i in 0 until list.length()) (list.opt(i) as? String)?.let { add(terms, it, it, exact = true) }
             }
-            return Glossary(terms)
+            val phrases = mutableMapOf<String, String>()
+            root.optJSONObject("phrases")?.let { map ->
+                for (key in map.keys()) {
+                    val plain = map.opt(key) as? String ?: continue
+                    // Bozuk düzenli ifade alınmaz.
+                    if (key.isEmpty() || plain.isEmpty() || runCatching { Regex(key) }.isFailure) continue
+                    phrases[key] = plain
+                }
+            }
+            val lines = mutableMapOf<String, String>()
+            root.optJSONObject("lines")?.let { map ->
+                for (key in map.keys()) {
+                    val turkish = collapse(map.opt(key) as? String ?: continue)
+                    val line = lineKey(key)
+                    if (line.isNotEmpty() && turkish.isNotEmpty()) lines[line] = turkish
+                }
+            }
+            return Glossary(terms, phrases, lines)
         }
+
+        private val ENDINGS = setOf('.', '!', '?', '…')
+
+        /** `lines` anahtarı: küçük harf, düz kesme, tek boşluk; baştaki ve sondaki harf/rakam dışı karakterler atılır. */
+        internal fun lineKey(text: String): String =
+            collapse(text.lowercase(Locale.ROOT).replace('’', '\'').replace('‘', '\'')).trim { !it.isLetterOrDigit() }
 
         private fun add(terms: MutableMap<String, Term>, english: String, turkish: String, exact: Boolean = false) {
             val en = collapse(english)
@@ -210,8 +243,14 @@ class Glossary private constructor(private val terms: Map<String, Term>) {
         /** Sözlükleri birleştirir; aynı terimde sonraki kazanır. */
         fun merge(glossaries: List<Glossary>): Glossary {
             val terms = mutableMapOf<String, Term>()
-            for (glossary in glossaries) terms.putAll(glossary.terms)
-            return Glossary(terms)
+            val phrases = mutableMapOf<String, String>()
+            val lines = mutableMapOf<String, String>()
+            for (glossary in glossaries) {
+                terms.putAll(glossary.terms)
+                phrases.putAll(glossary.phrases)
+                lines.putAll(glossary.lines)
+            }
+            return Glossary(terms, phrases, lines)
         }
 
         /** Genel sözlük ([builtIn], uygulamayla gelen metin) ve klasördeki `*.json` dosyaları; bozuk dosya atlanır. */
@@ -233,15 +272,19 @@ class Glossary private constructor(private val terms: Map<String, Term>) {
         private fun collapse(text: String) = text.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
 
         /** FNV-1a (32 bit), terimler İngilizcesine göre sıralı (Mac/iPhone ile aynı hesap). */
-        private fun makeFingerprint(terms: List<Term>): String {
+        private fun makeFingerprint(terms: List<Term>, phrases: Map<String, String>, lines: Map<String, String>): String {
             var hash = 2_166_136_261L
-            val sorted = terms.sortedWith { a, b -> compareBytes(a.english.lowercase(Locale.ROOT).toByteArray(), b.english.lowercase(Locale.ROOT).toByteArray()) }
-            for (term in sorted) {
-                val text = term.english.lowercase(Locale.ROOT) + "\u0001" + term.turkish + (if (term.exact) "\u0003" else "") + "\u0002"
+            fun mix(text: String) {
                 for (byte in text.toByteArray(Charsets.UTF_8)) {
                     hash = ((hash xor (byte.toLong() and 0xff)) * 16_777_619L) and 0xffffffffL
                 }
             }
+            val sorted = terms.sortedWith { a, b -> compareBytes(a.english.lowercase(Locale.ROOT).toByteArray(), b.english.lowercase(Locale.ROOT).toByteArray()) }
+            for (term in sorted) mix(term.english.lowercase(Locale.ROOT) + "\u0001" + term.turkish + (if (term.exact) "\u0003" else "") + "\u0002")
+            // `phrases` ve `lines` de yalnız varsa girer.
+            val byBytes = Comparator<String> { a, b -> compareBytes(a.toByteArray(), b.toByteArray()) }
+            for (key in phrases.keys.sortedWith(byBytes)) mix(key + "\u0004" + phrases.getValue(key) + "\u0005")
+            for (key in lines.keys.sortedWith(byBytes)) mix(key + "\u0006" + lines.getValue(key) + "\u0007")
             return "g" + String.format(Locale.ROOT, "%08x", hash)
         }
 
@@ -276,6 +319,29 @@ class Glossary private constructor(private val terms: Map<String, Term>) {
     }
 
     fun matches(text: String): Boolean = find(text).isNotEmpty()
+
+    /** Satırın hazır Türkçesi (`lines`); Türkçede son noktalama yoksa kaynağınki eklenir. Yoksa null. */
+    fun line(sentence: String): String? {
+        if (lines.isEmpty()) return null
+        val turkish = lines[lineKey(sentence)] ?: return null
+        if (turkish.last() in ENDINGS) return turkish
+        return turkish + sentence.trim().takeLastWhile { it in ENDINGS }
+    }
+
+    /** Oyun argosu düz İngilizceye çevrilir (`phrases`); eşleşmenin baş harfi büyükse karşılığınınki de büyük olur. */
+    fun plain(text: String): String {
+        var result = text
+        for ((pattern, plain) in phrasePatterns) {
+            result = pattern.replace(result) { match ->
+                if (match.value.firstOrNull()?.isUpperCase() == true) plain.replaceFirstChar { it.uppercaseChar() } else plain
+            }
+        }
+        return result
+    }
+
+    /** Metin bir `lines` ya da `phrases` kuralına giriyor mu (önbellek anahtarına sözlüğün izi girsin diye). */
+    fun rewrites(text: String): Boolean =
+        (lines.isNotEmpty() && lines.containsKey(lineKey(text))) || phrasePatterns.any { it.first.containsMatchIn(text) }
 
     private fun isBoundary(text: String, index: Int): Boolean =
         index < 0 || index >= text.length || !text[index].isLetterOrDigit()
@@ -466,7 +532,7 @@ class TermProtector(private val glossary: Glossary, sources: List<String>) {
  */
 object FreeTranslation {
     /** Çeviri öncesi/sonrası kuralların sürümü; kalıcı önbelleğin motor adına girer (iPhone ile aynı sayı). */
-    const val PIPELINE_VERSION = 2
+    const val PIPELINE_VERSION = 3
 
     /** Bu sözcük sayısının altındaki cümle önceki cümleyle birlikte çevrilir. */
     const val SHORT_LINE_WORDS = 4
@@ -486,7 +552,8 @@ object FreeTranslation {
     /** Cümlenin önbellek anahtarı: bağlamla çevrildiyse bağlam da, sözlük terimi içeriyorsa sözlüğün izi de girer. */
     fun cacheKey(sentence: String, context: String?, glossary: Glossary): String {
         val basis = context?.let { it + KEY_JOIN + sentence } ?: sentence
-        return if (glossary.matches(basis)) glossary.fingerprint + KEY_JOIN + basis else basis
+        val uses = glossary.matches(basis) || glossary.rewrites(sentence) || (context != null && glossary.rewrites(context))
+        return if (uses) glossary.fingerprint + KEY_JOIN + basis else basis
     }
 
     /** Ayraçtan sonraki kısım; ayraç tam bir kez geçmiyorsa, iki yan da harf içermiyorsa ya da kısım çok uzunsa null. */
@@ -506,12 +573,14 @@ object FreeTranslation {
     fun apostrophe(source: String): Char = if ('’' in source) '’' else '\''
 
     /**
-     * Tek cümleyi çevirir. [normalize] büyük harf düzenini yapar, [engine] çeviri motorudur. Önce bağlamla (verildiyse),
-     * olmazsa tek başına, terimler korunamadıysa korumasız çevrilir.
+     * Tek cümleyi çevirir. [normalize] büyük harf düzenini yapar, [engine] çeviri motorudur. Sözlükte hazır Türkçesi olan
+     * kısa satır ("Reloading!") motora gitmez. Kalanı önce bağlamla (verildiyse), olmazsa tek başına, terimler
+     * korunamadıysa korumasız çevrilir.
      */
     fun translate(sentence: String, context: String?, glossary: Glossary, normalize: (String) -> String, engine: (String) -> String): String {
+        glossary.line(sentence)?.let { return TurkishPostEdit.apply(sentence, it) }
         val apostrophe = apostrophe(sentence)
-        fun prepare(text: String) = GameEnglish.plain(normalize(text))
+        fun prepare(text: String) = GameEnglish.plain(glossary.plain(normalize(text)))
 
         if (context != null) {
             val protector = TermProtector(glossary, listOf(sentence, context))

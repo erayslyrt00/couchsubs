@@ -201,6 +201,17 @@ Mac ve Windows paketleri bu dosyayı içerir, bu yüzden Mac paketinden önce de
 
 Sürümler `v*` etiketiyle `.github/workflows/release.yml` tarafından derlenip yayınlanır.
 
+**PR kontrolleri**
+
+`.github/workflows/pr-tests.yml`, dış katkılar dahil pull request'lerde, yalnız ilgili klasör değiştiyse, üç ayrı kontrol çalıştırır:
+Windows'ta .NET test projeleri, macOS'ta `core/` için `swift test`, Android telefonda JVM birim testleri.
+Native kütüphane derlemez, çeviri/TTS modeli veya TV kurulum paketi indirmez; paketleme, imzalama ve yayın yapmaz.
+Native/model dosyası ya da özel benchmark girdisi isteyen testler, Android TV paket testiyle birlikte,
+bağımlılıkları yoksa atlanmış olarak raporlanır. Sonuçlar Actions kayıtlarında ve 7 gün saklanan
+`pr-*-test-results` çıktılarındadır (Windows TRX, Swift test kaydı, Android JUnit XML/HTML).
+Bu kontroller gerçek TV/PS5 bağlantısı, model kalitesi veya uçtan uca gecikme testinin yerine geçmez;
+mevcut paketleme ve sürüm iş akışları ayrıca çalışmaya devam eder.
+
 ## Klasörler
 
 - `mac/` – macOS uygulaması (SwiftUI, Vision, Translation)
