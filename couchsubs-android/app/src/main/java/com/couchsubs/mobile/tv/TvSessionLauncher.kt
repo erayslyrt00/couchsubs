@@ -56,7 +56,10 @@ object TvSessionLauncher {
         }
         val tls = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }
         val client = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS)
-            .dns { hostname -> if (hostname == tv.host) listOf(remote) else throw java.net.UnknownHostException(hostname) }
+            .dns(object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> =
+                    if (hostname == tv.host) listOf(remote) else throw java.net.UnknownHostException(hostname)
+            })
             .sslSocketFactory(tls.socketFactory, trust).hostnameVerifier { host, _ -> host == tv.host }.build()
         val token = settings.secrets.get(tokenKey)
         val host = if (tv.host.contains(':')) "[${tv.host}]" else tv.host
