@@ -299,7 +299,12 @@ class RegionWatcher(
         val reading = try {
             read(crop)
         } catch (error: Exception) {
-            Reading.Empty
+            // OCR hatası boş alan değildir. Eski kutuyu koru; aynı kareyi sonraki normal turda yeniden oku.
+            // Başarısız kare, önceki adayın kararlılığını da doğrulayamaz.
+            state.signature = null
+            state.lastRead = null
+            state.candidate = null
+            return
         }
         if (started != session) return
         reads++

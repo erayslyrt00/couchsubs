@@ -11,10 +11,16 @@ final class RegionWatcherTests: XCTestCase {
     private final class Reader: TextReader, @unchecked Sendable {
         var lines: [TextLine] = []
         var count = 0
+        var failuresRemaining = 0
+        private enum Failure: Error { case expected }
         func read(_ image: CGImage) throws -> String { lines.map(\.text).joined(separator: "\n") }
         func read(_ image: CGImage, deep: Bool) throws -> String { try read(image) }
         func readLines(_ image: CGImage, deep: Bool) throws -> Reading {
             count += 1
+            if failuresRemaining > 0 {
+                failuresRemaining -= 1
+                throw Failure.expected
+            }
             return Reading(lines: lines)
         }
     }
@@ -55,6 +61,67 @@ final class RegionWatcherTests: XCTestCase {
     private let quest = ExtraArea(id: "q", name: "Quest", region: ExtraAreaPreset.quest.region)
     private func line(_ text: String, top: Double = 0.2) -> TextLine {
         TextLine(text, box: TextBox(left: 0.1, top: top, right: 0.9, bottom: top + 0.1))
+    }
+
+    func testFailedReadRetriesOnAnUnchangedFrameThenStopsReading() async {
+        let reader = Reader(), translator = Translator(), server = Server()
+        let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
+        reader.lines = [line("Find the blacksmith")]
+        reader.failuresRemaining = 1
+        await watcher.pass(frame(10), areas: [quest])
+        await watcher.pass(frame(10), areas: [quest])
+        XCTAssertTrue(server.sent.isEmpty)
+        for _ in 0..<4 { await watcher.pass(frame(10), areas: [quest]) }
+        XCTAssertEqual(reader.count, 2)
+        XCTAssertEqual(translator.calls, ["Find the blacksmith"])
+        XCTAssertEqual(server.sent.map(\.text), ["TR: Find the blacksmith"])
+    }
+
+    func testFailedReadKeepsShownTextAndDiscardsUnconfirmedReading() async {
+        let reader = Reader(), translator = Translator(), server = Server()
+        let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
+        reader.lines = [line("Talk to Arthur")]
+        await watcher.pass(frame(10), areas: [quest])
+        await watcher.pass(frame(10), areas: [quest])
+        reader.lines = [line("Meet Arthur at the barn")]
+        await watcher.pass(frame(60), areas: [quest])
+        reader.failuresRemaining = 1
+        await watcher.pass(frame(100), areas: [quest])
+        reader.lines = [line("Find the blacksmith")]
+        await watcher.pass(frame(100), areas: [quest])
+        XCTAssertEqual(server.sent.map(\.text), ["TR: Talk to Arthur"])
+        await watcher.pass(frame(100), areas: [quest])
+        XCTAssertEqual(translator.calls, ["Talk to Arthur", "Find the blacksmith"])
+        XCTAssertEqual(server.sent.map(\.text), ["TR: Talk to Arthur", "TR: Find the blacksmith"])
+    }
+
+    func testFailedReadDoesNotBlockAnotherArea() async {
+        let reader = Reader(), server = Server()
+        let watcher = RegionWatcher(reader: reader, translator: Translator(), server: server)
+        let phone = ExtraArea(id: "p", name: "Phone", region: ExtraAreaPreset.phone.region)
+        reader.lines = [line("Find the blacksmith")]
+        reader.failuresRemaining = 1
+        await watcher.pass(frame(10), areas: [quest, phone])
+        await watcher.pass(frame(10), areas: [quest, phone])
+        XCTAssertEqual(server.sent.map(\.id), ["p"])
+        await watcher.pass(frame(10), areas: [quest, phone])
+        XCTAssertEqual(server.sent.map(\.id), ["p", "q"])
+        XCTAssertEqual(reader.count, 3)
+    }
+
+    func testRepeatedReadFailuresStillRespectThePassInterval() async {
+        var clock = 0
+        let reader = Reader(), server = Server()
+        let watcher = RegionWatcher(reader: reader, translator: Translator(), server: server, clock: { clock })
+        reader.failuresRemaining = 10
+        for step in 0...20 {
+            clock = step * 100
+            watcher.offer(frame(10), areas: [quest])
+            while watcher.isBusy { await Task.yield() }
+        }
+        XCTAssertEqual(watcher.passes, 3)
+        XCTAssertEqual(reader.count, 3)
+        XCTAssertTrue(server.sent.isEmpty)
     }
 
     func testStableTextIsTranslatedOnceAndPlacedInItsArea() async {

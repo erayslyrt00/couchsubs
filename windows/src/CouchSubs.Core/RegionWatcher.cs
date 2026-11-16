@@ -139,7 +139,15 @@ public sealed class RegionWatcher
         var clock = now();
         Reading reading;
         try { reading = reader.ReadLines(crop, false); }
-        catch { reading = new Reading([]); }
+        catch
+        {
+            // OCR hatası boş alan değildir. Eski kutuyu koru; aynı kareyi sonraki normal turda yeniden oku.
+            // Başarısız kare, önceki adayın kararlılığını da doğrulayamaz.
+            state.Signature = null;
+            state.LastRead = null;
+            state.Candidate = null;
+            return;
+        }
         if (Volatile.Read(ref session) != started) return;
         Interlocked.Increment(ref reads);
         ReadMeasured?.Invoke(now() - clock);

@@ -132,8 +132,17 @@ public final class RegionWatcher {
         let started = now()
         let session = self.session
         let reader = self.reader
-        let reading = await Task.detached(priority: .utility) { (try? reader.readLines(crop, deep: false)) ?? .empty }.value
+        let reading = await Task.detached(priority: .utility) { try? reader.readLines(crop, deep: false) }.value
         guard session == self.session else { return }
+        guard let reading else {
+            // OCR hatası boş alan değildir. Eski kutuyu koru; aynı kareyi sonraki normal turda yeniden oku.
+            // Başarısız kare, önceki adayın kararlılığını da doğrulayamaz.
+            state.signature = nil
+            state.lastRead = nil
+            state.candidate = nil
+            states[area.id] = state
+            return
+        }
         reads += 1
         onReadMs?(now() - started)
         let candidate = Self.candidate(reading, in: region)
