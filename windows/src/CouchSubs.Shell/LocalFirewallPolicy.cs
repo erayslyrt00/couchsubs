@@ -84,25 +84,36 @@ public static class LocalFirewallPolicy
     }
 
     /// <summary>
-    /// Önce dar kurallar eklenir ve doğrulanır, ancak sonra eski geniş kural kaldırılır. Kullanıcının/Windows'un
-    /// engelleme kuralları silinmez. Aynı adlı yabancı kurallar varsa adla yapılan COM işlemi onlara dokunmamalı.
+    /// Önce dar kurallar eklenir ve doğrulanır, ancak sonra eski geniş kural kaldırılır. Silinen engeller yalnız bu
+    /// exe'yi Özel profilde hedefleyen yerel engellerdir (ör. Windows'un ilk açılış sorusu kapatılınca yazdığı kural); kullanıcı
+    /// "izin ver" dediği için kaldırılır. Genel, başka programın, servisin ya da gruplu kuralların engelleri korunur.
+    /// Aynı adlı yabancı kural varsa adla yapılan COM silmesi ona da dokunabileceği için o ad hiç silinmez.
     /// </summary>
     public static bool Apply(IFirewallRuleStore store, string exe)
     {
         var before = store.Read();
-        var legacy = before.Where(r => IsLegacy(r, exe)).ToList();
         if (before.Any(r => (SameName(r.Name, TcpName) || SameName(r.Name, UdpName)) && !IsManaged(r, exe))) return false;
-        if (legacy.Count > 0 && before.Any(r => SameName(r.Name, LegacyName) && !IsLegacy(r, exe))) return false;
-        // Engelleme kuralı varsa silerek geçmeyiz; önce kullanıcı/yönetici bu engeli değerlendirmeli.
-        var intended = before.Where(r => !IsManaged(r, exe)).Concat(Required(exe)).ToList();
+        var groups = before.GroupBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        if (groups.Any(g => g.Any(r => IsLegacy(r, exe)) && !g.All(r => SameProgram(r.Program, exe)))) return false;
+        // Silinecek ad grupları: içinde eski geniş kural ya da bu exe'nin yerel engeli olan, tamamı bu exe'ye ait gruplar.
+        var obsolete = groups.Where(g => g.All(r => SameProgram(r.Program, exe) && !IsManaged(r, exe))
+            && g.Any(r => IsLegacy(r, exe) || IsOwnBlock(r, exe))).SelectMany(g => g).ToList();
+        var intended = before.Where(r => !IsManaged(r, exe) && !obsolete.Contains(r)).Concat(Required(exe)).ToList();
         if (!CoversLocalTraffic(intended, exe)) return false;
         foreach (var rule in Required(exe)) store.Put(rule);
         // Eski geniş izin yeni kuralların yazılamamasını maskelemesin.
         var installed = store.Read();
         if (!Required(exe).All(expected => installed.Any(r => r == expected))) return false;
-        foreach (var rule in legacy) store.Remove(rule.Name);
+        // COM'da Remove(ad) aynı adlı kurallardan birini ya da hepsini silebilir; ad kalmayana dek tekrarlanır.
+        foreach (var group in obsolete.GroupBy(r => r.Name, StringComparer.OrdinalIgnoreCase))
+            for (var i = 0; i < group.Count() && store.Read().Any(r => SameName(r.Name, group.Key)); i++)
+                store.Remove(group.Key);
         return HasRules(store.Read(), exe);
     }
+
+    private static bool IsOwnBlock(FirewallRule r, string exe) => r.Action == Block && r.Direction == Inbound
+        && (r.Profiles & PrivateProfile) != 0
+        && SameProgram(r.Program, exe) && r.Grouping.Length == 0 && r.ServiceName.Length == 0;
 
     public static void RemoveOwned(IFirewallRuleStore store, string exe)
     {

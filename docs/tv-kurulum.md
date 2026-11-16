@@ -23,8 +23,9 @@ seçebildiğinden ve PS5 keşfi/yayını değişken portlar kullanabildiğinden 
 Uygulama ağ profilini kendiliğinden değiştirmez; yalnız güvendiğiniz ev ağını Windows Ayarları'nda **Özel** yapın.
 Ortak ve Etki alanı profilleri için bu düğme izin açmaz. Ayrı alt ağ/VLAN veya VPN üzerinden bağlantı bu otomatik
 kuralın kapsamı dışındadır; gerekirse ağ yöneticisi yalnız ilgili cihazlara özel izin düzenlemelidir.
-Önceki CouchSubs sürümünün oluşturduğu geniş kural yeni izinler doğrulandıktan sonra taşınır. Kullanıcının,
-Windows'un veya kurumun engelleme kuralları otomatik silinmez. İzin doğrulanamıyorsa mevcut engelleme kurallarını
+Önceki CouchSubs sürümünün oluşturduğu geniş kural yeni izinler doğrulandıktan sonra taşınır. Yalnız CouchSubs'ı
+hedefleyen engel kuralları (ör. Windows'un ilk açılış sorusu kapatılınca yazdığı kural) kaldırılır; genel, başka
+programların ve kurumun engelleme kuralları otomatik silinmez. İzin doğrulanamıyorsa mevcut engelleme kurallarını
 Windows Güvenlik Duvarı'nda kontrol edin; güvenlik duvarını bütünüyle kapatmayın.
 
 **Bilgisayarsız: telefondan kurulum ve güncelleme.** Bilgisayarınız yoksa TV uygulamasını CouchSubs telefon

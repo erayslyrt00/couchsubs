@@ -97,14 +97,29 @@ public class LocalFirewallPolicyTests
     }
 
     [Fact]
-    public void PrivateBlockIsPreservedAndPermissionIsNotClaimed()
+    public void OwnExeBlockFromWindowsPromptIsReplacedByPrivatePermission()
+    {
+        // Windows ilk açılış sorusu kapatılınca exe için TCP/UDP engel kuralları yazar; "izin ver" bunları kaldırır.
+        var tcpBlock = Legacy with { Action = 0, Profiles = 2, Protocol = 6 };
+        var udpBlock = tcpBlock with { Protocol = 17 };
+        var store = new Store(tcpBlock, udpBlock);
+        Assert.False(LocalFirewallPolicy.HasRules(store.Read(), Exe));
+        Assert.True(LocalFirewallPolicy.Apply(store, Exe));
+        Assert.DoesNotContain(tcpBlock, store.Rules);
+        Assert.DoesNotContain(udpBlock, store.Rules);
+        Assert.True(LocalFirewallPolicy.HasRules(store.Read(), Exe));
+    }
+
+    [Fact]
+    public void BlockSharingNameWithForeignRuleIsPreservedAndPermissionIsNotClaimed()
     {
         var block = Legacy with { Name = "User block", Action = 0, Profiles = 2 };
-        var store = new Store(Legacy, block);
+        var foreign = block with { Program = @"C:\Other.exe" };
+        var store = new Store(Legacy, block, foreign);
         Assert.False(LocalFirewallPolicy.Apply(store, Exe));
         Assert.Empty(store.Removed);
         Assert.Equal(0, store.Puts);
-        Assert.Equal(new[] { Legacy, block }, store.Rules);
+        Assert.Equal(new[] { Legacy, block, foreign }, store.Rules);
     }
 
     [Fact]
