@@ -118,18 +118,40 @@ object TextMatch {
      * kesmenin tek başına kalan "t"si bilinen bir olumsuz kısaltmayı tamamladığında olumsuzluktur (Windows: TextMatch.AddsMeaning).
      */
     fun addsMeaning(reread: String, sent: String): Boolean {
-        val (rereadNegations, numbers) = meaningMarks(reread)
-        val (sentNegations, sentNumbers) = meaningMarks(sent)
+        val words = normalize(reread).split(' ').filter { it.isNotEmpty() }
+        val sentWords = normalize(sent).split(' ').filter { it.isNotEmpty() }
+        val (rereadNegations, numbers) = meaningMarks(words)
+        val (sentNegations, sentNumbers) = meaningMarks(sentWords)
         if (rereadNegations > sentNegations) return true
+        if (numbers.isEmpty()) return false
         val remaining = sentNumbers.toMutableList()
-        val sentWords = normalize(sent).split(' ').filter { it.isNotEmpty() }.toSet()
-        // Harfin rakam okunuşu ("I" → "1", "O" → "0") sayı değildir.
-        for (number in numbers) if (!remaining.remove(number) && foldDigits(number) !in sentWords) return true
+        val added = numbers.toMutableList()
+        // Eşit uzunlukta sözcük konumunu, eksik/ek sözcükte eşleşen baş/son bölümü kullan.
+        // Baştaki "I", başka konumdaki gerçek "5 → 1" değişimini gizlememeli.
+        if (words.size == sentWords.size) {
+            for (i in words.indices)
+                if (words[i] != sentWords[i] && sameGlyphWord(words[i], sentWords[i])) added.remove(words[i])
+        } else {
+            var prefix = 0
+            while (prefix < minOf(words.size, sentWords.size) && sameGlyphWord(words[prefix], sentWords[prefix])) {
+                if (words[prefix] != sentWords[prefix]) added.remove(words[prefix])
+                prefix++
+            }
+            var i = words.lastIndex
+            var j = sentWords.lastIndex
+            while (i >= prefix && j >= prefix && sameGlyphWord(words[i], sentWords[j])) {
+                if (words[i] != sentWords[j]) added.remove(words[i])
+                i--; j--
+            }
+        }
+        for (number in added) if (!remaining.remove(number)) return true
         return false
     }
 
-    private fun meaningMarks(text: String): Pair<Int, List<String>> {
-        val words = normalize(text).split(' ').filter { it.isNotEmpty() }
+    private fun sameGlyphWord(word: String, sent: String): Boolean =
+        word == sent || (word.all { it in '0'..'9' } && foldDigits(word) == sent)
+
+    private fun meaningMarks(words: List<String>): Pair<Int, List<String>> {
         var count = 0
         val numbers = mutableListOf<String>()
         for ((i, original) in words.withIndex()) {

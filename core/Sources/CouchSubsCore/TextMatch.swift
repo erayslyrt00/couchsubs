@@ -121,22 +121,42 @@ public enum TextMatch {
     /// harfe çevrilip sayılır; kesmenin tek başına kalan "t"si ("can t") bilinen bir olumsuz kısaltmayı tamamladığında
     /// olumsuzluktur. Ham ya da sadeleştirilmiş metin verilebilir (Windows: TextMatch.AddsMeaning).
     public static func addsMeaning(_ reread: String, to sent: String) -> Bool {
-        let (negations, numbers) = meaningMarks(reread)
-        let sentMarks = meaningMarks(sent)
-        if negations > sentMarks.negations { return true }
-        var sentNumbers = sentMarks.numbers
-        let sentWords = Set(normalize(sent).split(separator: " ").map(String.init))
+        let words = normalize(reread).split(separator: " ").map(String.init)
+        let sentWords = normalize(sent).split(separator: " ").map(String.init)
+        let marks = meaningMarks(words), sentMarks = meaningMarks(sentWords)
+        if marks.negations > sentMarks.negations { return true }
+        var numbers = marks.numbers, sentNumbers = sentMarks.numbers
+        if numbers.isEmpty { return false }
+        // Eşit uzunlukta sözcük konumunu, eksik/ek sözcükte eşleşen baş/son bölümü kullan.
+        // Baştaki "I", başka konumdaki gerçek "5 → 1" değişimini gizlememeli.
+        if words.count == sentWords.count {
+            for i in words.indices where words[i] != sentWords[i] && sameGlyphWord(words[i], sentWords[i]) {
+                if let index = numbers.firstIndex(of: words[i]) { numbers.remove(at: index) }
+            }
+        } else {
+            var prefix = 0
+            while prefix < min(words.count, sentWords.count), sameGlyphWord(words[prefix], sentWords[prefix]) {
+                if words[prefix] != sentWords[prefix], let index = numbers.firstIndex(of: words[prefix]) { numbers.remove(at: index) }
+                prefix += 1
+            }
+            var i = words.count - 1, j = sentWords.count - 1
+            while i >= prefix, j >= prefix, sameGlyphWord(words[i], sentWords[j]) {
+                if words[i] != sentWords[j], let index = numbers.firstIndex(of: words[i]) { numbers.remove(at: index) }
+                i -= 1; j -= 1
+            }
+        }
         for number in numbers {
-            if let index = sentNumbers.firstIndex(of: number) { sentNumbers.remove(at: index); continue }
-            // Harfin rakam okunuşu ("I" → "1", "O" → "0") sayı değildir.
-            if sentWords.contains(foldDigits(number)) { continue }
-            return true
+            guard let index = sentNumbers.firstIndex(of: number) else { return true }
+            sentNumbers.remove(at: index)
         }
         return false
     }
 
-    private static func meaningMarks(_ text: String) -> (negations: Int, numbers: [String]) {
-        let words = normalize(text).split(separator: " ").map(String.init)
+    private static func sameGlyphWord(_ word: String, _ sent: String) -> Bool {
+        word == sent || (word.allSatisfy(isAsciiDigit) && foldDigits(word) == sent)
+    }
+
+    private static func meaningMarks(_ words: [String]) -> (negations: Int, numbers: [String]) {
         var negations = 0
         var numbers: [String] = []
         for (i, original) in words.enumerated() {

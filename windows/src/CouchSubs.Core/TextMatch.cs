@@ -136,19 +136,41 @@ public static class TextMatch
     /// </summary>
     public static bool AddsMeaning(string reread, string sent)
     {
-        var (negations, numbers) = MeaningMarks(reread);
-        var (sentNegations, sentNumbers) = MeaningMarks(sent);
+        var words = Normalize(reread).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var sentWords = Normalize(sent).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var (negations, numbers) = MeaningMarks(words);
+        var (sentNegations, sentNumbers) = MeaningMarks(sentWords);
         if (negations > sentNegations) return true;
-        var sentWords = Normalize(sent).Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
-        // Harfin rakam okunuşu ("I" → "1", "O" → "0") sayı değildir.
+        if (numbers.Count == 0) return false;
+        // Eşit uzunlukta sözcük konumunu, eksik/ek sözcükte eşleşen baş/son bölümü kullan.
+        // Baştaki "I", başka konumdaki gerçek "5 → 1" değişimini gizlememeli.
+        if (words.Length == sentWords.Length)
+        {
+            for (var i = 0; i < words.Length; i++)
+                if (words[i] != sentWords[i] && SameGlyphWord(words[i], sentWords[i])) numbers.Remove(words[i]);
+        }
+        else
+        {
+            var prefix = 0;
+            while (prefix < Math.Min(words.Length, sentWords.Length) && SameGlyphWord(words[prefix], sentWords[prefix]))
+            {
+                if (words[prefix] != sentWords[prefix]) numbers.Remove(words[prefix]);
+                prefix++;
+            }
+            for (int i = words.Length - 1, j = sentWords.Length - 1;
+                 i >= prefix && j >= prefix && SameGlyphWord(words[i], sentWords[j]); i--, j--)
+                if (words[i] != sentWords[j]) numbers.Remove(words[i]);
+        }
         foreach (var number in numbers)
-            if (!sentNumbers.Remove(number) && !sentWords.Contains(FoldDigits(number))) return true;
+            if (!sentNumbers.Remove(number)) return true;
         return false;
     }
 
-    private static (int Negations, List<string> Numbers) MeaningMarks(string text)
+    private static bool SameGlyphWord(string word, string sent) =>
+        word == sent || (word.All(char.IsAsciiDigit) && FoldDigits(word) == sent);
+
+    private static (int Negations, List<string> Numbers) MeaningMarks(string[] words)
     {
-        var words = Normalize(text).Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var negations = 0;
         var numbers = new List<string>();
         for (var i = 0; i < words.Length; i++)
