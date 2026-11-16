@@ -11,10 +11,16 @@ public class RegionWatcherTests
     {
         public List<TextLine> Lines { get; set; } = [];
         public int Count;
+        public int FailuresRemaining;
         public string Read(Frame image) => string.Join('\n', Lines.Select(line => line.Text));
         public Reading ReadLines(Frame image, bool deep)
         {
             Interlocked.Increment(ref Count);
+            if (FailuresRemaining > 0)
+            {
+                FailuresRemaining--;
+                throw new InvalidOperationException("Expected OCR failure");
+            }
             return new Reading(Lines);
         }
     }
@@ -58,6 +64,76 @@ public class RegionWatcherTests
     private static readonly WatchedArea Phone = new("p", "Phone", ExtraAreaPreset.Phone.Region());
 
     private static TextLine Line(string text, double top = 0.2) => new(text, new TextBox(0.1, top, 0.9, top + 0.1));
+
+    [Fact]
+    public async Task FailedReadRetriesOnAnUnchangedFrameThenStopsReading()
+    {
+        var reader = new Reader { Lines = [Line("Find the blacksmith")], FailuresRemaining = 1 };
+        var translator = new Translator();
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        Assert.Empty(server.Sent); // Başarılı yeni okuma yine kararlılık bekler.
+        for (var i = 0; i < 4; i++) await watcher.PassAsync(Shade(10), [Quest]);
+        Assert.Equal(2, reader.Count);
+        Assert.Equal(["Find the blacksmith"], translator.Calls);
+        Assert.Equal(["TR: Find the blacksmith"], server.Sent.Select(s => s.Text));
+    }
+
+    [Fact]
+    public async Task FailedReadKeepsShownTextAndDiscardsUnconfirmedReading()
+    {
+        var reader = new Reader { Lines = [Line("Talk to Arthur")] };
+        var translator = new Translator();
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        reader.Lines = [Line("Meet Arthur at the barn")];
+        await watcher.PassAsync(Shade(60), [Quest]);
+        reader.FailuresRemaining = 1;
+        await watcher.PassAsync(Shade(100), [Quest]);
+        reader.Lines = [Line("Find the blacksmith")];
+        await watcher.PassAsync(Shade(100), [Quest]);
+        Assert.Equal(["TR: Talk to Arthur"], server.Sent.Select(s => s.Text));
+        await watcher.PassAsync(Shade(100), [Quest]);
+        Assert.Equal(["Talk to Arthur", "Find the blacksmith"], translator.Calls);
+        Assert.Equal(["TR: Talk to Arthur", "TR: Find the blacksmith"], server.Sent.Select(s => s.Text));
+    }
+
+    [Fact]
+    public async Task FailedReadDoesNotBlockAnotherArea()
+    {
+        var reader = new Reader { Lines = [Line("Find the blacksmith")], FailuresRemaining = 1 };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, new Translator(), server);
+        await watcher.PassAsync(Shade(10), [Quest, Phone]);
+        await watcher.PassAsync(Shade(10), [Quest, Phone]);
+        Assert.Equal(["p"], server.Sent.Select(s => s.Id));
+        await watcher.PassAsync(Shade(10), [Quest, Phone]);
+        Assert.Equal(["p", "q"], server.Sent.Select(s => s.Id));
+        Assert.Equal(3, reader.Count);
+    }
+
+    [Fact]
+    public async Task RepeatedReadFailuresStillRespectThePassInterval()
+    {
+        long clock = 0;
+        var reader = new Reader { FailuresRemaining = 10 };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, new Translator(), server, clock: () => clock);
+        for (var step = 0; step <= 20; step++)
+        {
+            clock = step * 100;
+            watcher.Offer(Shade(10), [Quest]);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (watcher.IsBusy) await Task.Delay(5, timeout.Token);
+        }
+        Assert.Equal(3, watcher.Passes);
+        Assert.Equal(3, reader.Count);
+        Assert.Empty(server.Sent);
+    }
 
     [Fact]
     public async Task StableTextIsTranslatedOnceAndPlacedInItsArea()

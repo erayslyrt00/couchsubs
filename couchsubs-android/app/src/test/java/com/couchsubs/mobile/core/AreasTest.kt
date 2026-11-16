@@ -63,6 +63,90 @@ class AreasTest {
     private fun signature(value: Int) = ByteArray(RegionSignature.WIDTH * RegionSignature.HEIGHT) { value.toByte() }
 
     @Test
+    fun failedReadRetriesOnAnUnchangedFrameThenStopsReading() {
+        val recorder = Recorder()
+        var reads = 0
+        val calls = mutableListOf<String>()
+        val watcher = RegionWatcher({
+            reads++
+            if (reads == 1) throw IllegalStateException("Expected OCR failure")
+            Reading.fromText("Find the blacksmith")
+        }, { calls.add(it); "TR: $it" }, recorder)
+        val area = ExtraArea(id = "q", name = "Quest", region = ExtraAreaPreset.QUEST.region)
+        fun pass() = watcher.pass(setOf(area.id), listOf(area to RegionWatcher.Crop(Unit, signature(10))))
+        pass()
+        pass()
+        assertTrue(recorder.sent.isEmpty())
+        repeat(4) { pass() }
+        assertEquals(2, reads)
+        assertEquals(listOf("Find the blacksmith"), calls)
+        assertEquals(listOf("q" to "TR: Find the blacksmith"), recorder.sent)
+    }
+
+    @Test
+    fun failedReadKeepsShownTextAndDiscardsUnconfirmedReading() {
+        val recorder = Recorder()
+        var text = "Talk to Arthur"
+        var fail = false
+        val calls = mutableListOf<String>()
+        val watcher = RegionWatcher({
+            if (fail) { fail = false; throw IllegalStateException("Expected OCR failure") }
+            Reading.fromText(text)
+        }, { calls.add(it); "TR: $it" }, recorder)
+        val area = ExtraArea(id = "q", name = "Quest", region = ExtraAreaPreset.QUEST.region)
+        fun pass(value: Int) = watcher.pass(setOf(area.id), listOf(area to RegionWatcher.Crop(Unit, signature(value))))
+        pass(10)
+        pass(10)
+        text = "Meet Arthur at the barn"
+        pass(60)
+        fail = true
+        pass(100)
+        text = "Find the blacksmith"
+        pass(100)
+        assertEquals(listOf("q" to "TR: Talk to Arthur"), recorder.sent)
+        pass(100)
+        assertEquals(listOf("Talk to Arthur", "Find the blacksmith"), calls)
+        assertEquals(listOf("q" to "TR: Talk to Arthur", "q" to "TR: Find the blacksmith"), recorder.sent)
+    }
+
+    @Test
+    fun failedReadDoesNotBlockAnotherArea() {
+        val recorder = Recorder()
+        var reads = 0
+        val watcher = RegionWatcher({
+            reads++
+            if (reads == 1) throw IllegalStateException("Expected OCR failure")
+            Reading.fromText("Find the blacksmith")
+        }, { "TR: $it" }, recorder)
+        val areas = listOf(ExtraArea(id = "q", name = "Quest", region = ExtraAreaPreset.QUEST.region),
+            ExtraArea(id = "p", name = "Phone", region = ExtraAreaPreset.PHONE.region))
+        fun pass() = watcher.pass(areas.map { it.id }.toSet(), areas.map { it to RegionWatcher.Crop(Unit, signature(10)) })
+        pass()
+        pass()
+        assertEquals(listOf("p"), recorder.sent.map { it.first })
+        pass()
+        assertEquals(listOf("p", "q"), recorder.sent.map { it.first })
+        assertEquals(3, reads)
+    }
+
+    @Test
+    fun repeatedReadFailuresStillRespectThePassInterval() {
+        val recorder = Recorder()
+        var reads = 0
+        var now = 0L
+        val watcher = RegionWatcher({ reads++; throw IllegalStateException("Expected OCR failure") },
+            { "TR: $it" }, recorder, clock = { now })
+        val area = ExtraArea(id = "q", name = "Quest", region = ExtraAreaPreset.QUEST.region)
+        for (step in 0..20) {
+            now = step * 100L
+            watcher.offer(listOf(area), { RegionWatcher.Crop(Unit, signature(10)) }) { it.run() }
+        }
+        assertEquals(3, watcher.passes)
+        assertEquals(3, reads)
+        assertTrue(recorder.sent.isEmpty())
+    }
+
+    @Test
     fun stableTextIsTranslatedOnceAndClearedWhenGone() {
         val recorder = Recorder()
         var text = "Meet Lamar at the garage."
