@@ -265,7 +265,9 @@ struct SubtitleOverlayView: View {
     private func line(_ line: SubtitleStack.Line) -> some View {
         let style = model.settings.style
         let current = line.role == .current
-        let size = CGFloat(style.fontSize) * scale * (current ? 1 : 0.8)
+        // Uzun çeviri en çok 3 satıra dengeli bölünür; 3 satıra sığmazsa yazı biraz küçülür (bkz. SubtitleWrap).
+        let wrapped = line.wrapped
+        let size = CGFloat(style.fontSize) * scale * (current ? 1 : 0.8) * CGFloat(wrapped.scale)
         let alpha = Double(max(0, min(100, style.background))) / 100 * (current ? 1 : 0.83)
         let opacity: Double = switch line.role {
         case .current: 1
@@ -282,7 +284,7 @@ struct SubtitleOverlayView: View {
         let band = style.backgroundShape == .band
         let corner: CGFloat = band ? 0 : 10 * scale
         let shown: Double = line.fading ? 0 : opacity
-        let text = Text(verbatim: line.text)
+        let text = Text(verbatim: wrapped.text)
             .font(.system(size: size, weight: weight))
             .foregroundStyle(Self.color(style.textColor))
         return text

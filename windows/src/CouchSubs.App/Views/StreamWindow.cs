@@ -183,14 +183,15 @@ public sealed class StreamWindow : Window
         var style = controller.Settings.Style;
         var scale = Scale;
         var current = line.Role == SubtitleStack.Role.Current;
-        var size = Math.Max(1, OverlayPlacement.FontSize(style.FontSize) * scale * (current ? 1 : 0.8));
+        var wrapped = line.Wrapped;
+        var size = Math.Max(1, OverlayPlacement.FontSize(style.FontSize) * scale * (current ? 1 : 0.8) * wrapped.Scale);
         var boxed = StreamBackgrounds.BoxOpacity(style.Background) > 0;
         var dim = line.Role switch { SubtitleStack.Role.Current => 1.0, SubtitleStack.Role.Previous => 0.6, _ => 0.45 };
         var color = style.TextColor == SubtitleTextColor.Yellow ? Color.FromRgb(0xFF, 0xE1, 0x35) : Colors.White;
         if (boxed) color.A = (byte)Math.Round(dim * 255);
         var text = new TextBlock
         {
-            Text = line.Text,
+            Text = wrapped.Text,
             FontSize = size,
             FontWeight = style.Bold ? FontWeights.Bold : FontWeights.SemiBold,
             Foreground = new SolidColorBrush(color),

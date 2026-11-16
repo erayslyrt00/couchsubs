@@ -253,13 +253,15 @@ public sealed partial class SubtitleOverlayWindow : Window
         var scale = Scale;
         var current = line.Role == SubtitleStack.Role.Current;
         // Satır yüksekliği sıfır olursa WPF hata verir; boy en az 1.
-        var size = Math.Max(1, OverlayPlacement.FontSize(style.FontSize) * scale * (current ? 1 : 0.8));
+        // Uzun çeviri en çok 3 satıra dengeli bölünür; 3 satıra sığmazsa yazı biraz küçülür (bkz. SubtitleWrap).
+        var wrapped = line.Wrapped;
+        var size = Math.Max(1, OverlayPlacement.FontSize(style.FontSize) * scale * (current ? 1 : 0.8) * wrapped.Scale);
         var alpha = Math.Clamp(style.Background, 0, 100) / 100.0 * (current ? 1 : 0.83);
         // Bant: kutu pencerenin tüm genişliğini kaplar, oyundaki İngilizce yazıyı yan yana da gizler.
         var band = style.BackgroundShape == SubtitleBackgroundShape.Band;
         var text = new TextBlock
         {
-            Text = line.Text,
+            Text = wrapped.Text,
             FontSize = size,
             FontWeight = style.Bold ? FontWeights.Bold : FontWeights.SemiBold,
             Foreground = style.TextColor == SubtitleTextColor.Yellow ? new SolidColorBrush(Color.FromRgb(0xFF, 0xE1, 0x35)) : Brushes.White,

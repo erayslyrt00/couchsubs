@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 package com.couchsubs.mobile.ui
 
+import com.couchsubs.mobile.core.SubtitleWrap
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -83,11 +84,16 @@ class PhoneSubtitleActivity : ComponentActivity() {
                         verticalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
                         val style = Tokens.Type.subtitleLandscape
                         val previous = status.previous
-                        if (stackPrevious && previous.isNotEmpty() && status.current.isNotEmpty() && previous != status.current) Text(previous,
-                            style = style.copy(fontSize = style.fontSize * scale * 0.8f, lineHeight = style.lineHeight * scale * 0.8f),
-                            color = color.copy(alpha = 0.4f), textAlign = TextAlign.Center)
-                        Text(status.current.ifEmpty { if (status.running) "" else "CouchSubs" },
-                            style = style.copy(fontSize = style.fontSize * scale, lineHeight = style.lineHeight * scale),
+                        // Uzun çeviri en çok 3 satıra dengeli bölünür; sığmazsa yazı biraz küçülür (bkz. SubtitleWrap).
+                        if (stackPrevious && previous.isNotEmpty() && status.current.isNotEmpty() && previous != status.current) {
+                            val wrapped = SubtitleWrap.fit(previous)
+                            Text(wrapped.text,
+                                style = style.copy(fontSize = style.fontSize * scale * 0.8f * wrapped.scale, lineHeight = style.lineHeight * scale * 0.8f * wrapped.scale),
+                                color = color.copy(alpha = 0.4f), textAlign = TextAlign.Center)
+                        }
+                        val current = SubtitleWrap.fit(status.current.ifEmpty { if (status.running) "" else "CouchSubs" })
+                        Text(current.text,
+                            style = style.copy(fontSize = style.fontSize * scale * current.scale, lineHeight = style.lineHeight * scale * current.scale),
                             color = color, textAlign = TextAlign.Center)
                     }
                     Text(stringResource(R.string.subtitle_screen_note), style = Tokens.Type.caption, color = Tokens.Color.secondary,

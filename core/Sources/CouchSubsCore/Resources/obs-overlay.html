@@ -85,6 +85,65 @@
     hintBox.style.display = 'none';
   }
 
+  // Uzun çeviri tek uzun satır olarak taşmasın: satır başına en çok 42 karakter, en çok 3 satır, kelime sınırından ve
+  // dengeli bölünür; 3 satıra sığmazsa yazı biraz küçülür (en çok %75). Konuşan adı ("ARTHUR:") hep ilk satırdadır.
+  // Mac, Windows, Android ve TV (SubtitleWrap / tv-webos/app.js) aynı kuralları uygular.
+  var WRAP_MAX_CHARS = 42, WRAP_MAX_LINES = 3, WRAP_MIN_SCALE = 0.75;
+  var baseSize = 48, textScale = 1;
+
+  function wrapTokens(text) {
+    var words = text.split(/\s+/).filter(function (w) { return w; });
+    for (var i = 0; i < Math.min(3, words.length); i++) {
+      var last = words[i].charAt(words[i].length - 1);
+      if (last === ':' || last === '\uFF1A') {
+        if (i + 1 < words.length) words.splice(0, i + 2, words.slice(0, i + 2).join(' '));
+        break;
+      }
+    }
+    return words;
+  }
+
+  function wrapWidth(words, from, to) {
+    var sum = to - from - 1;
+    for (var i = from; i < to; i++) sum += words[i].length;
+    return sum;
+  }
+
+  function wrapBalance(words, lines) {
+    var count = words.length, best = null, a, b;
+    function consider(cuts) {
+      var edges = [0].concat(cuts, [count]), longest = 0, spread = 0;
+      for (var i = 0; i < edges.length - 1; i++) {
+        var width = wrapWidth(words, edges[i], edges[i + 1]);
+        longest = Math.max(longest, width);
+        spread += width * width;
+      }
+      if (!best || longest < best.longest || (longest === best.longest && spread < best.spread)) {
+        best = { longest: longest, spread: spread, cuts: cuts };
+      }
+    }
+    if (lines === 2 || count < 3) {
+      for (a = 1; a < count; a++) consider([a]);
+    } else {
+      for (a = 1; a < count - 1; a++) for (b = a + 1; b < count; b++) consider([a, b]);
+    }
+    if (!best) return words.join(' ');
+    var all = [0].concat(best.cuts, [count]), out = [];
+    for (var i = 0; i < all.length - 1; i++) out.push(words.slice(all[i], all[i + 1]).join(' '));
+    return out.join('\n');
+  }
+
+  function wrapSubtitle(text) {
+    var length = Array.from ? Array.from(text).length : text.length;
+    if (length <= WRAP_MAX_CHARS || text.indexOf('\n') >= 0) return { text: text, scale: 1 };
+    var words = wrapTokens(text);
+    if (words.length < 2) return { text: text, scale: 1 };
+    var scale = Math.min(1, Math.max(WRAP_MIN_SCALE, WRAP_MAX_CHARS * WRAP_MAX_LINES / length));
+    var cap = Math.floor(WRAP_MAX_CHARS / scale);
+    var lines = Math.min(WRAP_MAX_LINES, Math.max(2, Math.ceil(length / cap)));
+    return { text: wrapBalance(words, Math.min(lines, words.length)), scale: scale };
+  }
+
   /// Yazı boyu 1080 satırlık ekrana göredir; sayfanın gerçek yüksekliğinde tam piksele yuvarlanır (keskin yazı).
   function pixels(size) {
     return Math.max(8, Math.round(size * (window.innerHeight || 1080) / 1080)) + 'px';
@@ -101,7 +160,7 @@
     style = style || {};
     lastStyle = style;
     var size = Number(fixed.size || style.fontSize || 48);
-    if (size > 0) line.style.fontSize = pixels(size);
+    if (size > 0) { baseSize = size; line.style.fontSize = pixels(size * textScale); }
     hintBox.style.fontSize = pixels(Math.max(20, Math.round((size > 0 ? size : 48) * 0.6)));
     var bottom = Number(fixed.bottom || style.bottomPercent);
     if (bottom >= 0 && bottom <= 85) wrap.style.bottom = hintBox.style.bottom = bottom + '%';
@@ -124,7 +183,10 @@
     clearTimeout(timer);
     if (!text) return hide();
     hideHint();
-    line.textContent = text;
+    var wrapped = wrapSubtitle(text);
+    textScale = wrapped.scale;
+    line.textContent = wrapped.text;
+    line.style.fontSize = pixels(baseSize * textScale);
     var cover = box && placement === 'cover' && !fixed.bottom;
     if (cover) {
       // Kutu sayfanın tamamına göre yerleşir: kap tüm sayfayı kaplar.

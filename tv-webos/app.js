@@ -157,11 +157,93 @@
     return box.right > box.left && box.bottom > box.top ? box : null;
   }
 
+  // --- Uzun çeviriyi bölme ---
+  // Uzun çeviri ekranda tek uzun satır olarak taşmasın: satır başına en çok 42 karakter, en çok 3 satır, kelime
+  // sınırından ve dengeli bölünür; 3 satıra sığmazsa yazı biraz küçülür (en çok %75'e kadar). Konuşan adı ("ARTHUR:")
+  // sonraki sözcükle birleşik kalır, hep ilk satırdadır. Mac, Windows, Android ve OBS (SubtitleWrap) aynı kuralları uygular.
+  var WRAP_MAX_CHARS = 42;
+  var WRAP_MAX_LINES = 3;
+  var WRAP_MIN_SCALE = 0.75;
+  var fontBase = 46;
+
+  function wrapTokens(text) {
+    var words = text.split(/\s+/).filter(function (w) { return w; });
+    for (var i = 0; i < Math.min(3, words.length); i++) {
+      var w = words[i];
+      if (w.charAt(w.length - 1) === ':' || w.charAt(w.length - 1) === '\uFF1A') {
+        if (i + 1 < words.length) words.splice(0, i + 2, words.slice(0, i + 2).join(' '));
+        break;
+      }
+    }
+    return words;
+  }
+
+  function wrapWidth(words, from, to) {
+    var sum = to - from - 1;
+    for (var i = from; i < to; i++) sum += words[i].length;
+    return sum;
+  }
+
+  function wrapBalance(words, lines) {
+    var count = words.length;
+    var best = null;
+    function consider(cuts) {
+      var edges = [0].concat(cuts, [count]);
+      var longest = 0;
+      var spread = 0;
+      for (var i = 0; i < edges.length - 1; i++) {
+        var width = wrapWidth(words, edges[i], edges[i + 1]);
+        longest = Math.max(longest, width);
+        spread += width * width;
+      }
+      if (!best || longest < best.longest || (longest === best.longest && spread < best.spread)) {
+        best = { longest: longest, spread: spread, cuts: cuts };
+      }
+    }
+    var a, b;
+    if (lines === 2 || count < 3) {
+      for (a = 1; a < count; a++) consider([a]);
+    } else {
+      for (a = 1; a < count - 1; a++) for (b = a + 1; b < count; b++) consider([a, b]);
+    }
+    if (!best) return words.join(' ');
+    var all = [0].concat(best.cuts, [count]);
+    var out = [];
+    for (var i = 0; i < all.length - 1; i++) out.push(words.slice(all[i], all[i + 1]).join(' '));
+    return out.join('\n');
+  }
+
+  function wrapSubtitle(text) {
+    var length = Array.from ? Array.from(text).length : text.length;
+    if (length <= WRAP_MAX_CHARS || text.indexOf('\n') >= 0) return { text: text, scale: 1 };
+    var words = wrapTokens(text);
+    if (words.length < 2) return { text: text, scale: 1 };
+    var scale = Math.min(1, Math.max(WRAP_MIN_SCALE, WRAP_MAX_CHARS * WRAP_MAX_LINES / length));
+    var cap = Math.floor(WRAP_MAX_CHARS / scale);
+    var lines = Math.min(WRAP_MAX_LINES, Math.max(2, Math.ceil(length / cap)));
+    return { text: wrapBalance(words, Math.min(lines, words.length)), scale: scale };
+  }
+
+  // Satırı yazar. Sayfadaki metin bölünmüş hâlidir; karşılaştırmalar için özgün metin elementte kalır.
+  function setLineText(textId, text, paragraphs, baseSize) {
+    var el = $(textId);
+    var wrapped = paragraphs ? { text: text, scale: 1 } : wrapSubtitle(text);
+    el.rawText = text;
+    el.textContent = wrapped.text;
+    el.style.whiteSpace = 'pre-line';
+    el.style.fontSize = Math.round(baseSize * wrapped.scale) + 'px';
+  }
+
+  function rawText(id) {
+    var el = $(id);
+    return el.rawText !== undefined ? el.rawText : el.textContent;
+  }
+
   // paragraphs: görev paneli gibi başlık ve maddeli yazılar satır satır, sola yaslı gösterilir.
   // replaces: bilgisayar bu satırı öncekinin uzamış ya da düzelmiş okuması saydı (bkz. replacesCurrent).
   function showSubtitle(text, duration, box, paragraphs, replaces) {
     var now = Date.now();
-    var current = $('subtitle-text').textContent;
+    var current = rawText('subtitle-text');
     // Önceki satır kısa göründüyse yeni satırın üstünde kalır. Aynı cümlenin başka bir okunuşu (ya da yeniden gelen
     // satır) ikinci çeviri gibi durmasın diye üste çıkmaz; görev paneli gibi çok satırlı yazılar da üst üste binmez.
     if (replacesCurrent(replaces, paragraphs)) {
@@ -176,8 +258,7 @@
     shownParagraphs = !!paragraphs;
     holdUntil = shownAt + Math.min(HOLD_MAX_MS, 2000 + text.length * 60);
     currentBox = validBox(box);
-    $('subtitle-text').textContent = text;
-    $('subtitle-text').style.whiteSpace = paragraphs ? 'pre-line' : '';
+    setLineText('subtitle-text', text, paragraphs, fontBase);
     $('subtitle-text').style.textAlign = paragraphs ? 'left' : '';
     $('subtitle').className = '';
     layout();
@@ -230,7 +311,7 @@
   // Önceki satır üste çıkar. Orada hâlâ görünen bir satır varsa o da bir üst sıraya (iki önceki) kayar; en çok üç satır.
   function showPrevious(text) {
     var older = $('subtitle-prev');
-    var olderText = $('subtitle-prev-text').textContent;
+    var olderText = rawText('subtitle-prev-text');
     if (older.className === '' && olderText && !sameLine(olderText, text)) {
       showSlot('subtitle-prev2', olderText);
     } else {
@@ -243,7 +324,7 @@
     var timers = previousTimers[id];
     clearTimeout(timers[0]);
     clearTimeout(timers[1]);
-    $(id + '-text').textContent = text;
+    setLineText(id + '-text', text, false, Math.round(fontBase * 0.8));
     $(id).className = '';
     timers[0] = setTimeout(function () {
       $(id).className = 'fading';
@@ -502,7 +583,10 @@
 
   function applyStyle(style) {
     if (style.fontSize) {
-      $('subtitle-text').style.fontSize = style.fontSize + 'px';
+      fontBase = style.fontSize;
+      var shown = rawText('subtitle-text');
+      if ($('subtitle-text').rawText !== undefined && shown) setLineText('subtitle-text', shown, !!shownParagraphs, fontBase);
+      else $('subtitle-text').style.fontSize = style.fontSize + 'px';
       $('subtitle-prev-text').style.fontSize = Math.round(style.fontSize * 0.8) + 'px';
       $('subtitle-prev2-text').style.fontSize = Math.round(style.fontSize * 0.8) + 'px';
     }

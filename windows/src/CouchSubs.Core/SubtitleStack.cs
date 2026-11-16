@@ -25,7 +25,12 @@ public sealed class SubtitleStack
 
     /// <param name="Paragraphs">Başlık ve maddeli yazılar (görev paneli gibi) satır satır, sola yaslı gösterilir.</param>
     /// <param name="Fading">Üstteki satır solarak kalkıyor.</param>
-    public sealed record Line(int Id, string Text, Role Role, bool Paragraphs, bool Fading);
+    public sealed record Line(int Id, string Text, Role Role, bool Paragraphs, bool Fading)
+    {
+        /// <summary>Görünümde kullanılacak metin ve yazı boyu çarpanı: uzun çeviri en çok 3 satıra dengeli bölünür
+        /// (bkz. <see cref="SubtitleWrap"/>). Görev paneli gibi satır satır yazılar olduğu gibi kalır.</summary>
+        public SubtitleWrap.Result Wrapped => Paragraphs ? new SubtitleWrap.Result(Text, 1) : SubtitleWrap.Fit(Text);
+    }
 
     private sealed record Current(int Id, string Text, bool Paragraphs, double ShownAt, double HideAt, double HoldUntil);
 

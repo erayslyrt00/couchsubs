@@ -312,8 +312,10 @@ struct SubtitleScreen: View {
             Color.black.ignoresSafeArea()
             VStack(spacing: Mobile.Space.inline) {
                 ForEach(Array(model.phoneLines.enumerated()), id: \.element.id) { index, line in
-                    Text(verbatim: line.text)
-                        .font(Mobile.TypeScale.subtitle(landscape: true, scale: scale))
+                    // Uzun çeviri en çok 3 satıra dengeli bölünür; sığmazsa yazı biraz küçülür (bkz. SubtitleWrap).
+                    let wrapped = line.wrapped
+                    Text(verbatim: wrapped.text)
+                        .font(Mobile.TypeScale.subtitle(landscape: true, scale: scale * CGFloat(wrapped.scale)))
                         // Önceki satır soldurulmaz, sabit gri olur (#7C7A76).
                         .foregroundStyle(index < model.phoneLines.count - 1 ? Color(hex: 0x7C7A76) : textColor)
                         .opacity(line.fading ? 0.4 : 1)
