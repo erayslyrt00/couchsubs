@@ -38,6 +38,50 @@ public class AiTranslatorTests
         }
     }
 
+    /// <summary>İlk HTTP isteği yalnız iptalle biter; sonraki istek normal yanıt verir. Gerçek ağa çıkmaz.</summary>
+    private sealed class CancelFirstAi : HttpMessageHandler
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<string> Bodies { get; } = [];
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            Bodies.Add(UserText(request, body));
+            if (Bodies.Count == 1)
+            {
+                Started.SetResult();
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+            return Echo(request, body);
+        }
+    }
+
+    [Fact]
+    public async Task CancelledLocalRequestDoesNotFallbackCacheOrPauseNextTranslation()
+    {
+        using var handler = new CancelFirstAi();
+        using var http = new HttpClient(handler);
+        using var cancel = new CancellationTokenSource();
+        var fallback = new FakeLocal();
+        var cache = new TranslationCache();
+        var translator = new AiTranslator(AiProvider.Local, "", "qwen2.5:7b", fallback, http, cache);
+        var failures = new List<OnlineKeyState?>();
+        translator.FailureChanged += failures.Add;
+        var old = translator.TranslateAsync("Hold the gate.", cancel.Token);
+        await handler.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => old);
+        Assert.False(cache.TryGet("Hold the gate.", out _));
+        Assert.Equal("[tr] Run!", await translator.TranslateAsync("Run!"));
+        Assert.Empty(fallback.Calls);
+        Assert.Empty(failures);
+        Assert.Null(translator.LastError);
+        Assert.Equal(2, handler.Bodies.Count);
+        // İptal edilen repliğin kaynağı bağlamda kalır; üretilmemiş Türkçe sonuç eklenmez.
+        Assert.Contains("English: Hold the gate.", handler.Bodies[1]);
+        Assert.DoesNotContain("Turkish:", handler.Bodies[1]);
+    }
+
     private static HttpResponseMessage Json(string json, HttpStatusCode status = HttpStatusCode.OK) =>
         new(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 

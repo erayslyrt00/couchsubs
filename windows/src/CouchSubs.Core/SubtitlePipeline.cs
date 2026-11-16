@@ -106,6 +106,8 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         public long? LeftAt { get; set; }
         /// <summary>Yerine aynı cümlenin uzamış okuması geldi (daktilo efekti); çevirisi gösterilmez.</summary>
         public bool Superseded { get; set; }
+        /// <summary>Mevcut gösterim kurallarına göre elendi; iptali dinlemeyen motorun sonucu da gösterilmez.</summary>
+        public bool Abandoned { get; set; }
         /// <summary>Satırın okunduğu kare (ölçümler için).</summary>
         public ReadInfo Read { get; init; }
     }
@@ -227,6 +229,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
 
         Action? after = null;
         Action? flushed = null;
+        CancellationTokenSource? abandoned = null;
         lock (gate)
         {
             if (!sawText && reading.Text.Trim().Length > 0)
@@ -359,10 +362,41 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
                     after = Restore(action.Text!, box);
                     break;
             }
+            // Restore önce işlenir: geri görünen satırın LeftAt bilgisi temizlenmeden iptal edilmemeli.
+            abandoned = AbandonUndisplayableTranslation();
         }
-        // Olaylar kilidin dışında çağrılır.
-        flushed?.Invoke();
-        after?.Invoke();
+        // Olaylar ve iptal kilidin dışında çağrılır. Cancel, çevirmeni ve kuyruğu eşzamanlı ilerletebilir.
+        try
+        {
+            flushed?.Invoke();
+            after?.Invoke();
+        }
+        finally
+        {
+            try { if (abandoned is not null) lock (abandoned) abandoned.Cancel(); }
+            catch (ObjectDisposedException) { } // Bu sırada biten eski istektir; yeni isteğin token'ına dokunulmaz.
+        }
+    }
+
+    /// <summary>gate tutulurken çağrılır; motor bitmeden sıradaki üretimi başlatmaz, yalnız iptal sinyali hazırlar.</summary>
+    private CancellationTokenSource? AbandonUndisplayableTranslation()
+    {
+        if (inFlight is not { } current || current.Session != session || current.Superseded || current.Abandoned
+            || inFlightCancel is null) return null;
+        var time = now();
+        var replaced = current.Number < lastShown;
+        var expired = current.Number > lastShown && current.Number != lineOnScreen
+            && current.LeftAt is { } left && time - left > LateResultMs;
+        if (!replaced && !expired) return null;
+        var hasWaiting = waiting.Any(w => w.Session == session && !w.Superseded && !w.Abandoned
+            && !(w.LeftAt is { } gone && time - gone > LateResultMs));
+        if (!replaced && !(expired && hasWaiting)) return null;
+        current.Abandoned = true;
+        // Özellikle bekletilmiş okumanın paketle düzelmesi lastSent'i güncellemez. Eski kaynak geri gelirse
+        // iptal edilmiş işi bekleyen Restore/reread yolunda takılmadan yeniden çevrilebilmeli.
+        if (lastSent is { } sent && sent.Source == current.Source) lastSent = null;
+        Write(current, replaced ? "bırakıldı: daha yeni satır gösterildi" : "bırakıldı: gösterim süresi doldu, yeni satır bekliyor");
+        return inFlightCancel;
     }
 
     /// <summary>
@@ -554,7 +588,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             }
             // Süren çeviri bu cümlenin yarım okumasınınsa (daktilo efekti) beklenmez: bırakılır, tamamı hemen çevrilir.
             // İptal en sonda: sıra iptalle aynı iş parçacığında ilerleyebilir, yeni satır o zaman sırada olmalı.
-            if (!current.Superseded && current.Session == session && TextMatch.IsGrowth(source, current.Source))
+            if (!current.Superseded && !current.Abandoned && current.Session == session && TextMatch.IsGrowth(source, current.Source))
             {
                 Write(current, $"bırakıldı: uzamış okuması geldi (#{request.Number})");
                 current.Superseded = true;
@@ -647,7 +681,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         // Çevirisi henüz gelmediyse istek sürüyordur; satır yeniden ekranda sayılır.
         foreach (var request in Requests)
         {
-            if (request.Source != source || request.Session != session || request.Superseded) continue;
+            if (request.Source != source || request.Session != session || request.Superseded || request.Abandoned) continue;
             request.LeftAt = null;
             lineOnScreen = request.Number;
             return null;
@@ -668,10 +702,12 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             // Olay işleyicilerinden biri hata verse de sıra takılı kalmasın.
             try { await Translate(request, cancel.Token); }
             catch { }
+            // Yeni kare bu kaynağı yakalayamasın. Cancel ile Dispose aynı anda çalışmamalı; token kilidi
+            // gate dışında alınır, çünkü iptal callback'i kuyruğu aynı iş parçacığında ilerletebilir.
+            lock (gate) inFlightCancel = null;
+            lock (cancel) cancel.Dispose();
             lock (gate)
             {
-                inFlightCancel = null;
-                cancel.Dispose();
                 // Ekrandan çoktan kalkmış satır çevrilmez; çevirisi zaten gösterilmeyecekti.
                 var time = now();
                 foreach (var old in waiting)
@@ -723,7 +759,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             lock (gate)
             {
                 // Yerine uzamış okuması gelen satırın bırakılan çevirisi hata sayılmaz.
-                if (request.Session != session || request.Superseded) return;
+                if (request.Session != session || request.Superseded || request.Abandoned) return;
                 var retry = request.Number == lineOnScreen ? ", satır ekrandayken yeniden denenecek" : "";
                 Write(request, $"hata ({now() - started} ms): {(error as TranslatorException)?.Status.ToString() ?? error.GetType().Name}{retry}");
                 // Model eksikse ya da geçici bir hata olduysa satır ekranda kaldıkça (saniyede en çok bir kez) yeniden denenir.
@@ -739,9 +775,9 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         var result = $"{probe.Outcome()} {now() - started} ms";
         lock (gate)
         {
-            if (request.Session != session)
+            if (request.Session != session || request.Abandoned)
             {
-                Write(request, $"{result}, atıldı: oturum bitti");
+                Write(request, $"{result}, atıldı: {(request.Abandoned ? "istek bırakıldı" : "oturum bitti")}");
                 return;
             }
             LastError = null;
@@ -751,7 +787,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         LineMetrics metrics;
         lock (gate)
         {
-            if (request.Session != session) return;
+            if (request.Session != session || request.Abandoned) return;
             var shouldSend = stabilizer.ShouldSend(input, sentence);
             Remember(request.Number, source, shouldSend ? translated : null);
             if (request.Number <= lastShown || !shouldSend || request.Superseded)
