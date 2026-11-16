@@ -6247,18 +6247,18 @@
         }
       }
     },
-    "Windows Firewall now allows CouchSubs.": {
+    "Local-network permission is ready for Private networks.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Windows Firewall now allows CouchSubs."
+            "value": "Local-network permission is ready for Private networks."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Windows Güvenlik Duvarı artık CouchSubs'a izin veriyor."
+            "value": "Özel ağda yerel bağlantı izni hazır."
           }
         }
       }
@@ -6295,18 +6295,18 @@
         }
       }
     },
-    "The firewall rule was not added. Try again and choose Yes when Windows asks.": {
+    "Local-network permission could not be verified. Approve the Windows prompt, or review existing blocking rules in Windows Firewall.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The firewall rule was not added. Try again and choose Yes when Windows asks."
+            "value": "Local-network permission could not be verified. Approve the Windows prompt, or review existing blocking rules in Windows Firewall."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Güvenlik duvarı kuralı eklenmedi. Yeniden deneyin ve Windows sorduğunda Evet'i seçin."
+            "value": "Yerel bağlantı izni doğrulanamadı. Windows onayını verin veya Güvenlik Duvarı içindeki mevcut engelleme kurallarını kontrol edin."
           }
         }
       }
@@ -13818,50 +13818,50 @@
         }
       }
     },
-    "Windows Firewall already allows CouchSubs.": {
+    "Local-network permission is ready for CouchSubs on Private networks.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Windows Firewall already allows CouchSubs."
+            "value": "Local-network permission is ready for CouchSubs on Private networks."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Windows Güvenlik Duvarı CouchSubs'a zaten izin veriyor."
+            "value": "CouchSubs için Özel ağda yerel bağlantı izni hazır."
           }
         }
       }
     },
-    "Windows Firewall does not allow CouchSubs yet. The TV and the PS5 cannot reach this computer until you allow it.": {
+    "Configure local-network permission for TV and PS5 connections on a trusted Private network.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Windows Firewall does not allow CouchSubs yet. The TV and the PS5 cannot reach this computer until you allow it."
+            "value": "Configure local-network permission for TV and PS5 connections on a trusted Private network."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Windows Güvenlik Duvarı CouchSubs'a henüz izin vermiyor. İzin verene kadar TV ve PS5 bu bilgisayara ulaşamaz."
+            "value": "TV ve PS5 bağlantıları için güvendiğiniz Özel ağda yerel bağlantı iznini ayarlayın."
           }
         }
       }
     },
-    "This computer's network is set to Public. Windows then blocks the TV from finding it. Open Windows Settings › Network and set the network profile to Private.": {
+    "Permission applies only to Private networks. If this is your trusted home network, set it to Private in Windows Settings.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This computer's network is set to Public. Windows then blocks the TV from finding it. Open Windows Settings › Network and set the network profile to Private."
+            "value": "Permission applies only to Private networks. If this is your trusted home network, set it to Private in Windows Settings."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Bu bilgisayarın ağı \"Ortak\" olarak ayarlı. Windows bu durumda TV'nin bilgisayarı bulmasını engeller. Windows Ayarları › Ağ bölümünden ağ profilini \"Özel\" yapın."
+            "value": "İzin yalnız Özel ağlarda geçerlidir. Bu, güvendiğiniz ev ağıysa Windows Ayarları içinden ağ profilini Özel yapın."
           }
         }
       }

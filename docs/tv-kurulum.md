@@ -17,6 +17,16 @@ mağazası varsa ve Play Store yoksa büyük olasılıkla değildir.
 
 Bilgisayar ve TV aynı ev ağında olmalıdır.
 
+**Windows güvenlik duvarı:** Ayarlar › Windows Güvenlik Duvarı izni, yalnız CouchSubs uygulaması için
+**Özel ağdaki yerel cihazlardan TCP ve UDP bağlantılarını** açar. TV sunucusu 8787 doluysa başka bir port
+seçebildiğinden ve PS5 keşfi/yayını değişken portlar kullanabildiğinden izin tek porta bağlanmaz.
+Uygulama ağ profilini kendiliğinden değiştirmez; yalnız güvendiğiniz ev ağını Windows Ayarları'nda **Özel** yapın.
+Ortak ve Etki alanı profilleri için bu düğme izin açmaz. Ayrı alt ağ/VLAN veya VPN üzerinden bağlantı bu otomatik
+kuralın kapsamı dışındadır; gerekirse ağ yöneticisi yalnız ilgili cihazlara özel izin düzenlemelidir.
+Önceki CouchSubs sürümünün oluşturduğu geniş kural yeni izinler doğrulandıktan sonra taşınır. Kullanıcının,
+Windows'un veya kurumun engelleme kuralları otomatik silinmez. İzin doğrulanamıyorsa mevcut engelleme kurallarını
+Windows Güvenlik Duvarı'nda kontrol edin; güvenlik duvarını bütünüyle kapatmayın.
+
 **Bilgisayarsız: telefondan kurulum ve güncelleme.** Bilgisayarınız yoksa TV uygulamasını CouchSubs telefon
 uygulamasından ([Google Play](https://play.google.com/store/apps/details?id=com.couchsubs.mobile) ya da iPhone) da
 kurabilirsiniz; Android telefon da iPhone da Samsung, LG ve Android TV'ye kurar:

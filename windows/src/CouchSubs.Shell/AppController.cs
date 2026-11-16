@@ -2118,11 +2118,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         FirewallPrompt = await HasFirewallRuleAsync(firewall) ? FirewallPrompt.None : FirewallPrompt.Offer;
     }
 
-    /// <summary>Kurallar arka planda taranır; okunamazsa kural var sayılır (yersiz öneri yapılmaz).</summary>
+    /// <summary>Kurallar arka planda taranır; okunamayan izin verilmiş gibi gösterilmez.</summary>
     private static async Task<bool> HasFirewallRuleAsync(IFirewall firewall)
     {
         try { return await Task.Run(firewall.HasRule); }
-        catch (Exception) { return true; }
+        catch (Exception) { return false; }
     }
 
     private void ClearFirewallPrompt()

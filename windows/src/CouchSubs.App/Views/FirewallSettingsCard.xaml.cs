@@ -31,8 +31,8 @@ public partial class FirewallSettingsCard : UserControl
         var text = Localizer.Current;
         Visibility = Visibility.Visible;
         Status.Text = known.HasRule
-            ? text["Windows Firewall already allows CouchSubs."]
-            : text["Windows Firewall does not allow CouchSubs yet. The TV and the PS5 cannot reach this computer until you allow it."];
+            ? text["Local-network permission is ready for CouchSubs on Private networks."]
+            : text["Configure local-network permission for TV and PS5 connections on a trusted Private network."];
         Allow.Visibility = known.HasRule ? Visibility.Collapsed : Visibility.Visible;
         PublicHint.Visibility = known.PublicNetwork ? Visibility.Visible : Visibility.Collapsed;
     }
