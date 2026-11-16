@@ -203,7 +203,7 @@ Sürümler `v*` etiketiyle `.github/workflows/release.yml` tarafından derlenip 
 
 **PR kontrolleri**
 
-`.github/workflows/pr-tests.yml`, dış katkılar dahil pull request'lerde üç ayrı kontrol çalıştırır:
+`.github/workflows/pr-tests.yml`, dış katkılar dahil pull request'lerde, yalnız ilgili klasör değiştiyse, üç ayrı kontrol çalıştırır:
 Windows'ta .NET test projeleri, macOS'ta `core/` için `swift test`, Android telefonda JVM birim testleri.
 Native kütüphane derlemez, çeviri/TTS modeli veya TV kurulum paketi indirmez; paketleme, imzalama ve yayın yapmaz.
 Native/model dosyası ya da özel benchmark girdisi isteyen testler, Android TV paket testiyle birlikte,
