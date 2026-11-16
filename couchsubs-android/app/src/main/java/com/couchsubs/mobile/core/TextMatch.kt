@@ -122,7 +122,9 @@ object TextMatch {
         val (sentNegations, sentNumbers) = meaningMarks(sent)
         if (rereadNegations > sentNegations) return true
         val remaining = sentNumbers.toMutableList()
-        for (number in numbers) if (!remaining.remove(number)) return true
+        val sentWords = normalize(sent).split(' ').filter { it.isNotEmpty() }.toSet()
+        // Harfin rakam okunuşu ("I" → "1", "O" → "0") sayı değildir.
+        for (number in numbers) if (!remaining.remove(number) && foldDigits(number) !in sentWords) return true
         return false
     }
 

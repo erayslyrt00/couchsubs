@@ -139,8 +139,10 @@ public static class TextMatch
         var (negations, numbers) = MeaningMarks(reread);
         var (sentNegations, sentNumbers) = MeaningMarks(sent);
         if (negations > sentNegations) return true;
+        var sentWords = Normalize(sent).Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+        // Harfin rakam okunuşu ("I" → "1", "O" → "0") sayı değildir.
         foreach (var number in numbers)
-            if (!sentNumbers.Remove(number)) return true;
+            if (!sentNumbers.Remove(number) && !sentWords.Contains(FoldDigits(number))) return true;
         return false;
     }
 

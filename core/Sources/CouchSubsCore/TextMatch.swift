@@ -125,9 +125,12 @@ public enum TextMatch {
         let sentMarks = meaningMarks(sent)
         if negations > sentMarks.negations { return true }
         var sentNumbers = sentMarks.numbers
+        let sentWords = Set(normalize(sent).split(separator: " ").map(String.init))
         for number in numbers {
-            guard let index = sentNumbers.firstIndex(of: number) else { return true }
-            sentNumbers.remove(at: index)
+            if let index = sentNumbers.firstIndex(of: number) { sentNumbers.remove(at: index); continue }
+            // Harfin rakam okunuşu ("I" → "1", "O" → "0") sayı değildir.
+            if sentWords.contains(foldDigits(number)) { continue }
+            return true
         }
         return false
     }

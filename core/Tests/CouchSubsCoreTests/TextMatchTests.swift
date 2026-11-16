@@ -46,6 +46,7 @@ final class TextMatchTests: XCTestCase {
             ("Bring 5 and 5.", "Bring 5.", true),
             ("Bring 5.", "Bring 5 and 5.", false),
             ("It costs $500 now.", "It costs $500.", false),
+            ("1 can do that.", "I can do that.", false),
         ]
         for (reread, sent, expected) in cases {
             XCTAssertEqual(TextMatch.addsMeaning(reread, to: sent), expected, reread)

@@ -131,6 +131,7 @@ public class TextMatchTests
     [InlineData("Bring 5 and 5.", "Bring 5.", true)]
     [InlineData("Bring 5.", "Bring 5 and 5.", false)]
     [InlineData("It costs $500 now.", "It costs $500.", false)]
+    [InlineData("1 can do that.", "I can do that.", false)]
     public void AddsMeaningCountsOnlyAddedMarks(string reread, string sent, bool expected) =>
         Assert.Equal(expected, TextMatch.AddsMeaning(reread, sent));
 }

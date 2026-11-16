@@ -54,6 +54,7 @@ class StabilizerTest {
             ("Bring 5 and 5." to "Bring 5.") to true,
             ("Bring 5." to "Bring 5 and 5.") to false,
             ("It costs \$500 now." to "It costs \$500.") to false,
+            ("1 can do that." to "I can do that.") to false,
         )) assertEquals(pair.first, expected, TextMatch.addsMeaning(pair.first, pair.second))
     }
 
