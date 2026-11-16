@@ -51,4 +51,24 @@ class SubtitlePairingTest {
             assertTrue(call("GET", "/pair?id=$id").contains("expired"))
         } finally { server.stop() }
     }
+
+    @Test fun obsPageIsPublicButItsEventsNeedTheKeyOutsideTransition() {
+        val html = "<html>Türkçe altyazı</html>"
+        val server = SubtitleServer(0, allowLegacy = false, obsOverlay = html)
+        val port = server.start()
+        try {
+            java.net.Socket("127.0.0.1", port).use { socket ->
+                socket.getOutputStream().write("GET /obs HTTP/1.1\r\nHost: localhost\r\n\r\n".toByteArray())
+                val reply = socket.getInputStream().readBytes().toString(Charsets.UTF_8)
+                assertTrue(reply.startsWith("HTTP/1.1 200"))
+                assertTrue(reply.contains("Content-Type: text/html; charset=utf-8"))
+                assertTrue(reply.contains("Content-Length: ${html.toByteArray(Charsets.UTF_8).size}"))
+                assertTrue(reply.endsWith(html)); assertFalse(reply.contains(server.accessKey))
+            }
+            java.net.Socket("127.0.0.1", port).use { socket ->
+                socket.getOutputStream().write("GET /events?viewer=obs HTTP/1.1\r\nHost: localhost\r\n\r\n".toByteArray())
+                assertTrue(socket.getInputStream().readBytes().toString(Charsets.UTF_8).startsWith("HTTP/1.1 401"))
+            }
+        } finally { server.stop() }
+    }
 }

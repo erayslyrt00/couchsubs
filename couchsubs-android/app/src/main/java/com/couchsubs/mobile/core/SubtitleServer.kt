@@ -81,6 +81,7 @@ class SubtitleServer(
     val instanceId: String = "",
     key: String = SubtitleAccess.createKey(),
     private val allowLegacy: Boolean = SubtitleAccess.ALLOW_LEGACY_CLIENTS,
+    private val obsOverlay: String = "",
 ) : SubtitleSender, RegionSender {
     @Volatile var accessKey: String = key
         private set
@@ -329,6 +330,7 @@ class SubtitleServer(
                     openStream(socket, request.parameter("viewer") == "obs", cors, checkedKey)
                 }
                 // TV uygulaması ağdaki CouchSubs'ı bu yanıtla tanır.
+                method == "GET" && path == "/obs" && obsOverlay.isNotEmpty() -> respondAndClose(socket, "200 OK", obsOverlay, cors, "text/html; charset=utf-8")
                 method == "GET" && path == "/hello" -> respondAndClose(socket, "200 OK", helloBody(instanceId, connectedClients), cors)
                 else -> respondAndClose(socket, "404 Not Found", cors = cors)
             }
@@ -351,12 +353,10 @@ class SubtitleServer(
         return null
     }
 
-    private fun respondAndClose(socket: Socket, status: String, body: String = "", cors: String = "") {
-        val head = "HTTP/1.1 $status\r\n${cors}Cache-Control: no-store\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body"
-        socket.getOutputStream().apply {
-            write(head.toByteArray(Charsets.US_ASCII))
-            flush()
-        }
+    private fun respondAndClose(socket: Socket, status: String, body: String = "", cors: String = "", type: String = "application/json") {
+        val data = body.toByteArray(Charsets.UTF_8)
+        val head = "HTTP/1.1 $status\r\n${cors}Content-Type: $type\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nContent-Length: ${data.size}\r\nConnection: close\r\n\r\n"
+        socket.getOutputStream().apply { write(head.toByteArray(Charsets.US_ASCII)); write(data); flush() }
         closeQuietly(socket)
     }
 

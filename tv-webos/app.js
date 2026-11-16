@@ -1125,6 +1125,8 @@
     pairRequest('GET', address, '/hello', function (hello) {
       if (generation !== connectionGeneration) return;
       if (!hello || hello.app !== 'couchsubs') { scanForServer(); return; }
+      // Do not restart discovery while waiting for human approval.
+      cancelScan();
       if (hello.auth !== 1) { connectStream(address); return; }
       var identities;
       try { identities = JSON.parse(load('server-identities') || '{}'); } catch (e) { identities = {}; }

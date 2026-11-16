@@ -111,8 +111,8 @@ class TranslationService : Service() {
          * kaldırır (Mac ⌥⌘T ve iPhone ile aynı). Çeviri çalışmıyorsa false.
          */
         fun resolvePairing(id: String, accept: Boolean) {
-            liveServer?.pairing?.resolve(id, accept)
-            LiveState.update { it.copy(pairing = null) }
+            val resolved = liveServer?.pairing?.resolve(id, accept) == true
+            LiveState.update { it.copy(pairing = null, error = if (accept && !resolved) current?.getString(R.string.tv_pair_expired) else it.error) }
         }
         fun viewerAddress(): String? {
             val host = java.util.Collections.list(java.net.NetworkInterface.getNetworkInterfaces())
@@ -292,7 +292,7 @@ class TranslationService : Service() {
         glossaryInUse = glossary
         val free = MlKitTranslator(cache(MlKitTranslator.ENGINE_ID), glossary).also { freeTranslator = it }
         val translator = engineTranslator(free)
-        val subtitleServer = SubtitleServer(instanceId = installationId(this), key = settings.subtitleAccessKey).also { server = it }
+        val subtitleServer = SubtitleServer(instanceId = installationId(this), key = settings.subtitleAccessKey, obsOverlay = assets.open("obs-overlay.html").bufferedReader().use { it.readText() }).also { server = it }
         subtitleServer.pairing.setSession(true)
         subtitleServer.onPairingRequest = { ticket -> LiveState.update { it.copy(pairing = ticket) } }
         subtitleServer.onLegacyClient = { LiveState.update { it.copy(legacyTv = true) }; Log.i(TAG, "TV uygulamasını güncelleyin; geçiş bağlantısı.") }

@@ -3,6 +3,7 @@ package com.couchsubs.mobile.core
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import java.io.BufferedReader
 import java.io.InputStreamReader

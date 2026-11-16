@@ -691,3 +691,15 @@ test('anahtar yenilenince yanlış anahtarla sonsuz yeniden deneme yerine eşle�
   assert(tv.requests.some(r => r.method === 'POST'));
   assert.match(tv.element('pairing').textContent, /123456/);
 });
+
+
+test('discovery does not restart pairing while waiting for human approval', () => {
+  const auth = { key: secureKey, id: secureId, approved: false };
+  const tv = startTv({ saved: secureAddress, alive: new Set([secureAddress]), auth });
+  tv.clock.advance(90000);
+  assert.strictEqual(tv.lastOpened(), undefined);
+  assert.strictEqual(tv.requests.filter(r => r.method === 'POST').length, 1);
+  auth.approved = true;
+  tv.clock.advance(2000);
+  assert.strictEqual(tv.lastOpened(), secureAddress + '/events?k=' + secureKey);
+});
