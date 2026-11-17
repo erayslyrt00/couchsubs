@@ -52,11 +52,18 @@ public class QueuedRevisionTests
     [InlineData("Meet me at 06:40.", "Meet me at 06:50.")]
     [InlineData("I can do that for you right now.", "I can't do that for you right now.")]
     [InlineData("We have time to wait.", "We have no time to wait.")]
-    [InlineData("We do not have", "We do not have time.")]
+    [InlineData("We do not have...", "We do not have time.")]
     public async Task CorrectedReadingReplacesOlderQueuedReading(string old, string corrected)
     {
         var requested = await Replay(old, corrected);
         Assert.Equal(new[] { "Hold the gate.", corrected }, requested);
+    }
+
+    [Fact]
+    public async Task FullReadingReturningAfterRestoreWindowStillCoalescesTheQueue()
+    {
+        var readings = new[] { Full }.Concat(Enumerable.Repeat(Short, 18)).Append(Full).ToArray();
+        Assert.Equal(new[] { "Hold the gate.", Full }, await Replay(readings));
     }
 
     [Fact]

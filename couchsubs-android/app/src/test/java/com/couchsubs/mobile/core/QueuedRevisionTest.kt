@@ -60,9 +60,12 @@ class QueuedRevisionTest {
             "Meet me at 06:40." to "Meet me at 06:50.",
             "I can do that for you right now." to "I can't do that for you right now.",
             "We have time to wait." to "We have no time to wait.",
-            "We do not have" to "We do not have time.")) {
+            "We do not have..." to "We do not have time.")) {
             assertEquals(listOf(blocker, corrected), replay(listOf(old, corrected)))
         }
+    }
+    @Test fun fullReadingReturningAfterRestoreWindowStillCoalescesTheQueue() {
+        assertEquals(listOf(blocker, full), replay(listOf(full) + List(18) { short } + full))
     }
     @Test fun confirmedBlankKeepsTheInterveningShortUtterance() {
         assertEquals(listOf(blocker, full, short), replay(listOf(full, short) + List(12) { "" } + full))

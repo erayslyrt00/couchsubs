@@ -73,10 +73,14 @@ final class QueuedRevisionTests: XCTestCase {
             ("Meet me at 06:40.", "Meet me at 06:50."),
             ("I can do that for you right now.", "I can't do that for you right now."),
             ("We have time to wait.", "We have no time to wait."),
-            ("We do not have", "We do not have time.")] {
+            ("We do not have...", "We do not have time.")] {
             let requested = await replay([old, corrected])
             XCTAssertEqual(requested, [blocker, corrected])
         }
+    }
+    func testFullReadingReturningAfterRestoreWindowStillCoalescesTheQueue() async {
+        let requested = await replay([full] + Array(repeating: short, count: 18) + [full])
+        XCTAssertEqual(requested, [blocker, full])
     }
     func testConfirmedBlankKeepsTheInterveningShortUtterance() async {
         let requested = await replay([full, short] + Array(repeating: "", count: 12) + [full])
