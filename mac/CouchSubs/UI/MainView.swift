@@ -46,7 +46,9 @@ struct MainView: View {
         }
         .padding(Theme.space("screen"))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .sheet(isPresented: $model.showSettings) { SettingsView().appSurface() }
+        .sheet(isPresented: $model.showSettings, onDismiss: { model.settingsSection = .appearance }) {
+            SettingsView(section: model.settingsSection).appSurface()
+        }
         .sheet(isPresented: $model.showHistory) { HistoryView().appSurface() }
     }
 }
@@ -94,7 +96,7 @@ struct ControlsColumn: View {
     }
 }
 
-/// Sol sütun: başlat/durdur, PS5 ve TV, altyazının yeri, çeviri motoru, kısayol, uyarılar.
+/// Sol sütun: başlat/durdur, PS5 ve TV, altyazının yeri, çeviri motoru ve kısayol (bilgi karosu), uyarılar.
 struct MainControls: View {
     @EnvironmentObject private var model: AppModel
 
@@ -113,11 +115,12 @@ struct MainControls: View {
             .fixedSize(horizontal: false, vertical: true)
             if model.isRunning { GameSection(choice: model.gameChoice) }
             SubtitleOutputCard()
-            HStack(alignment: .top, spacing: Theme.space("gap")) {
-                StatusTile(symbol: "globe", title: "Translation", value: engineName)
-                StatusTile(symbol: "keyboard", title: "Shortcut", value: String(localized: "Translate the screen (⌥⌘T)"))
+            // Ayar bilgisi durum karosu gibi değil, satır olarak durur (TASARIM.md › InfoCard).
+            InfoCard {
+                InfoRow("Translation", value: engineName, action: { model.openSettings(.translation) })
+                InfoDivider()
+                InfoRow("Translate screen") { Keycap("⌥⌘T") }
             }
-            .fixedSize(horizontal: false, vertical: true)
             MainWarnings()
         }
     }
@@ -264,9 +267,11 @@ private struct PackInUseTile: View {
     }
 }
 
-/// Son altyazı büyük ve altyazı sarısında, öncekiler altında ikincil renkte; çeviri sürerken sağ üstte canlı nokta.
+/// Son altyazı büyük ve altyazı sarısında, öncekiler altında daha küçük (özgün metinleri ikincil renkte); çeviri sürerken
+/// sağ üstte canlı nokta.
 private struct LiveSubtitlesTile: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.space("gap")) {
@@ -278,7 +283,13 @@ private struct LiveSubtitlesTile: View {
             if model.lastTranslation.isEmpty {
                 HintText(text: "Subtitles will appear here while you play.")
             } else {
-                CurrentLine(translation: model.lastTranslation, source: model.lastSource)
+                // Yeni satır kısa bir geçişle belirir (azaltılmış harekette geçiş yok); eskisiyle üst üste biner, karo zıplamaz.
+                ZStack(alignment: .topLeading) {
+                    CurrentLine(translation: model.lastTranslation, source: model.lastSource)
+                        .id(model.lastTranslation)
+                        .transition(.opacity)
+                }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.lastTranslation)
                 if let metrics = model.lastMetrics { MetricsRow(metrics: metrics) }
                 SubtitleHistoryList()
             }
@@ -296,7 +307,8 @@ private struct CurrentLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.space("hair")) {
             Text(verbatim: translation)
-                .font(.system(size: 28, weight: .semibold))
+                // Altyazı içeriği: 28 pt yarı kalın (`display` ile aynı boy), altyazı sarısında.
+                .font(.csDisplay)
                 .foregroundStyle(Color.csAccentText)
                 .fixedSize(horizontal: false, vertical: true)
             Text(verbatim: source)
@@ -353,9 +365,10 @@ private struct HistoryRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.space("hair")) {
+            // Çeviri ana renkte, özgün metin ikincil renkte ve küçük: ikisi bir bakışta ayrılır.
             Text(verbatim: entry.translation)
                 .font(.csHeadline.weight(.regular))
-                .foregroundStyle(Color.csSecondary)
+                .foregroundStyle(Color.csText)
                 .fixedSize(horizontal: false, vertical: true)
             Text(verbatim: entry.source)
                 .font(.csCaption)

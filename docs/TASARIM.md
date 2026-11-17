@@ -90,7 +90,8 @@ Windows'ta aynı sayılar efektif piksel (epx) olarak kullanılır.
 | `code` | 22 | yarı kalın, eş genişlikli rakam | PS5 eşleme kodu |
 
 Altyazı içeriği arayüz değil içeriktir: canlı altyazı karosunda son satır 28 pt yarı kalın ve altyazı sarısında
-(`accentText`), öncekiler 17 pt normal ve `textSecondary` renginde (opaklıkla soldurulmaz). Paragraflarda satır arası yazı boyutunun yaklaşık 1,3 katıdır. 13 pt'nin altı
+(`accentText`), öncekiler 17 pt normal ve `textPrimary`, altlarındaki özgün metin `caption`/`textSecondary` (opaklıkla
+soldurulmaz; çeviri ile özgün metin bir bakışta ayrılır). Paragraflarda satır arası yazı boyutunun yaklaşık 1,3 katıdır. 13 pt'nin altı
 kullanılmaz.
 
 ## Boşluk ve biçim
@@ -177,8 +178,8 @@ karosu (bilgisayar ekranı seçiliyse "Tıklamalar geçsin" ve "Altyazı pencere
 `Ctrl+Shift+9`, Mac'te `⌥⌘T`); gerekiyorsa uyarı karoları (dil paketi, çevrimiçi motor, yazı tanıma).
 Sağ sütun: oyun paketleri açıksa (İngilizce→Türkçe, paket kurulu) paket karosu (mor paket simgesi) "Oyun paketleri
 açık · n oyunun çevirisi hazır"; altında kalan yüksekliği dolduran "Canlı altyazı" karosu: son çeviri 28 pt altyazı
-sarısında, altında özgün metin `caption`; önceki satırlar ayraçlarla, `textSecondary` renginde ve kaydırılabilir.
-Çeviri sürerken sağ üstte "Çevriliyor" (atan nokta + kelime). Karo parlamaz.
+sarısında, altında özgün metin `caption`; önceki satırlar ayraçlarla, 17 pt ve kaydırılabilir. Yeni satır 0,18 sn
+solarak gelir (azaltılmış harekette geçiş yok). Çeviri sürerken sağ üstte "Çevriliyor" (atan nokta + kelime). Karo parlamaz.
 
 **Telefon ana ekranı** (iPhone ve Android aynı): PS5 ve Altyazı durum karoları (dokununca ilgili ayar açılır,
 sağ üstte `›`), paket karosu (başlık ve not tek satır, sağda yalnız `›`; paketler kapalıysa nötr "Kapalı" etiketi),

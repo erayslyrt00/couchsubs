@@ -500,6 +500,14 @@ final class AppModel: ObservableObject {
     }
     @Published var showAbout = false
     @Published var showSettings = false
+    /// Ayarlar açılınca gösterilen bölüm (ana ekrandaki "Çeviri" satırı Çeviri'yi açar); sayfa kapanınca başa döner.
+    @Published var settingsSection: SettingsSection = .appearance
+
+    /// Ayarları verilen bölümle açar.
+    func openSettings(_ section: SettingsSection) {
+        settingsSection = section
+        showSettings = true
+    }
 
     private let services: AppServices
     private let store: AppStore
