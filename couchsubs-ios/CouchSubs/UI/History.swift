@@ -148,7 +148,7 @@ struct AreaTile: View {
                     model.settings.setCustomRegion(model.settings.region.withVertical(position: percent.position, height: $0))
                 }
             }
-            Text("Drag the frame to move it, or drag its corner to resize it.")
+            Text("Drag the frame to move it, or drag an edge or corner to resize it; the subtitle area stays centered.")
                 .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
         }
     }
@@ -253,6 +253,6 @@ private struct PhoneRegionPreview: View {
     @ObservedObject var preview: PhoneFramePreview
 
     var body: some View {
-        RegionPreview(region: settings.region, frame: preview.image) { settings.setCustomRegion($0) }
+        RegionPreview(region: settings.region, frame: preview.image, centered: true) { settings.setCustomRegion($0) }
     }
 }

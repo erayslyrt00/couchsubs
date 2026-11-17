@@ -4,20 +4,25 @@
 import CouchSubsCore
 import SwiftUI
 
-/// Altyazı bölgesinin canlı önizlemesi: son PS5 karesi (yoksa yer tutucu) ve üstünde bölgenin çerçevesi. Çerçeve
-/// sürüklenerek taşınır, sağ alt köşesinden sürüklenerek boyutlandırılır; her değişiklik `onChange` ile bildirilir.
+/// Alanın canlı önizlemesi: son PS5 karesi (yoksa yer tutucu), üstünde alanın çerçevesi; alanın dışı karartılır, okunacak
+/// yer belirgin olur. Çerçeve içinden sürüklenerek taşınır, sekiz tutamacından (köşeler ve kenar ortaları) sürüklenerek
+/// boyutlandırılır. `centered` (altyazı alanı): yatay boyut ortadan değişir, alan ortalı kalır. Kurallar `RegionEdit`'tedir
+/// (Windows ve Android ile aynı); her değişiklik `onChange` ile bildirilir.
 struct RegionPreview: View {
     let region: CropRegion
     let frame: CGImage?
+    /// Yatay boyut ortadan değişir (altyazı alanı); ek alanlarda kapalı.
+    var centered = false
     /// Kare yokken gösterilen yazı.
     var placeholder: LocalizedStringKey = "The game picture appears here once translating starts."
     let onChange: (CropRegion) -> Void
 
-    /// Sürükleme başladığında bölge (çeviriler hep bu bölgeye göre hesaplanır).
+    /// Sürükleme başladığında bölge (sürükleme hep bu bölgeye göre hesaplanır).
     @State private var dragStart: CropRegion? = nil
-    @State private var resizeStart: CropRegion? = nil
 
-    private static let handle: CGFloat = 14
+    /// Görünen tutamaç ve parmakla tutma alanı (dokunmatikte küçük kare tutulmaz).
+    private static let handle: CGFloat = 10
+    private static let grip: CGFloat = 28
 
     var body: some View {
         GeometryReader { geometry in
@@ -35,44 +40,45 @@ struct RegionPreview: View {
                         .padding(Theme.space("m"))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                Path { path in
+                    path.addRect(CGRect(origin: .zero, size: size))
+                    path.addRect(box)
+                }
+                .fill(Color.black.opacity(0.5), style: FillStyle(eoFill: true))
+                .allowsHitTesting(false)
                 Rectangle()
-                    .fill(Color.csAccent.opacity(0.14))
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
                     .overlay(Rectangle().strokeBorder(Color.csAccent, lineWidth: 2))
                     .frame(width: box.width, height: box.height)
                     .offset(x: box.minX, y: box.minY)
-                    .gesture(move(in: size))
+                    .gesture(drag(.move, in: size))
                     .accessibilityLabel(Text("Subtitle area"))
-                Rectangle()
-                    .fill(Color.csAccent)
-                    .frame(width: Self.handle, height: Self.handle)
-                    .offset(x: box.maxX - Self.handle, y: box.maxY - Self.handle)
-                    .gesture(resize(in: size))
-                    .accessibilityHidden(true)
+                ForEach(Array(RegionEdit.handles(region).enumerated()), id: \.offset) { _, spot in
+                    Rectangle()
+                        .fill(Color.csAccent)
+                        .frame(width: Self.handle, height: Self.handle)
+                        .frame(width: Self.grip, height: Self.grip)
+                        .contentShape(Rectangle())
+                        .offset(x: size.width * spot.x - Self.grip / 2, y: size.height * spot.y - Self.grip / 2)
+                        .gesture(drag(spot.handle, in: size))
+                        .accessibilityHidden(true)
+                }
             }
         }
         .aspectRatio(16 / 9, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: Theme.radius("inner")))
     }
 
-    private func move(in size: CGSize) -> some Gesture {
+    private func drag(_ handle: RegionEdit.Handle, in size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 1)
             .onChanged { value in
                 let start = dragStart ?? region
                 dragStart = start
-                onChange(start.moved(dx: value.translation.width / max(1, size.width), dy: value.translation.height / max(1, size.height)))
+                onChange(RegionEdit.dragged(start, handle: handle, dx: value.translation.width / max(1, size.width),
+                                            dy: value.translation.height / max(1, size.height), centered: centered))
             }
             .onEnded { _ in dragStart = nil }
-    }
-
-    private func resize(in size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 1)
-            .onChanged { value in
-                let start = resizeStart ?? region
-                resizeStart = start
-                onChange(start.resized(right: start.right + value.translation.width / max(1, size.width),
-                                       bottom: start.bottom + value.translation.height / max(1, size.height)))
-            }
-            .onEnded { _ in resizeStart = nil }
     }
 }
 

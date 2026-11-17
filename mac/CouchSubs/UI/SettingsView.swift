@@ -251,7 +251,7 @@ private struct LiveRegionPreview: View {
     @ObservedObject var preview: FramePreview
 
     var body: some View {
-        RegionPreview(region: settings.region, frame: preview.image) { settings.setCustomRegion($0) }
+        RegionPreview(region: settings.region, frame: preview.image, centered: true) { settings.setCustomRegion($0) }
     }
 }
 
@@ -270,7 +270,7 @@ private struct AreaCards: View {
             LiveRegionPreview(settings: $model.settings, preview: model.framePreview)
             if model.settings.areaPreset == .custom { CustomAreaSliders(settings: $model.settings) }
             HintText(text: "Adjust the frame so it covers where the game shows its subtitles.")
-            HintText(text: "Drag the frame to move it, or drag its corner to resize it.")
+            HintText(text: "Drag the frame to move it, or drag an edge or corner to resize it; the subtitle area stays centered.")
         }
         ExtraAreasCard()
         Card(title: "Translate the screen (⌥⌘T)") {

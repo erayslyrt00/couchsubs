@@ -274,12 +274,17 @@ public partial class SettingsWindow : Window
             controller.DeleteAreaProfile();
     }
 
-    /// <summary>Alan sekmesi açıkken önizleme oyunun görüntüsüyle saniyede bir yenilenir (çerçeve sürüklenirken beklenir).</summary>
+    /// <summary>
+    /// Alan sekmesi açıkken önizleme oyunun görüntüsüyle saniyede dört kez yenilenir (çerçeve sürüklenirken beklenir); çerçeve
+    /// akan görüntüde yerleştirilir. Yalnız bu sekme açıkken; okuma hattına iş eklemez.
+    /// </summary>
+    private const int PreviewIntervalMs = 250;
+
     private void ShowLiveFrame()
     {
         if (!AreaTab.IsSelected || Region.IsDragging || controller.LastFrame is not { } frame) return;
         var now = Environment.TickCount64;
-        if (now - lastPreview < 1000) return;
+        if (now - lastPreview < PreviewIntervalMs) return;
         lastPreview = now;
         Region.Frame = frame;
     }
@@ -862,8 +867,9 @@ public partial class SettingsWindow : Window
             ShowPreset();
             Region.IsEnabled = true;
             Region.DefaultRegion = new CropRegion();
+            Region.Centered = true;
             Region.ShowRegion(settings.Region);
-            AreaHint.Text = text["Drag on the picture to draw the area where the game shows its subtitles. Drag the edges to resize it, or the inside to move it."];
+            AreaHint.Text = text["Drag on the picture to draw the area where the game shows its subtitles. Drag an edge or corner to resize it; it stays centered. Drag the inside to move it."];
         }
         else
         {
@@ -877,6 +883,7 @@ public partial class SettingsWindow : Window
             (settings.ExtraTarget(slot) switch { ResultTarget.Pc => ExtraPc, ResultTarget.Both => ExtraBoth, _ => ExtraTv }).IsChecked = true;
             Region.IsEnabled = extra is not null;
             Region.DefaultRegion = ExtraDefaults[slot - 1];
+            Region.Centered = false;
             Region.ShowRegion(extra ?? ExtraDefaults[slot - 1]);
             ShowAreaHint();
         }

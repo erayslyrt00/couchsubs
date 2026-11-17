@@ -58,8 +58,7 @@ import com.couchsubs.mobile.core.CropRegion
 import com.couchsubs.mobile.core.ExtraArea
 import com.couchsubs.mobile.core.ExtraAreaPreset
 import com.couchsubs.mobile.core.MINIMUM_REGION_SIZE
-import com.couchsubs.mobile.core.moved
-import com.couchsubs.mobile.core.resized
+import com.couchsubs.mobile.core.RegionEdit
 import com.couchsubs.mobile.core.withVertical
 import com.couchsubs.mobile.service.FramePreview
 import com.couchsubs.mobile.service.LiveState
@@ -137,7 +136,7 @@ fun AreaTile() {
             settings.selectAreaPreset(preset)
             region = settings.region
         }
-        RegionPreview(region, onChange = ::custom)
+        RegionPreview(region, centered = true, onChange = ::custom)
         if (preset == AreaPreset.CUSTOM) {
             val position = region.top * 100
             val height = (region.bottom - region.top) * 100
@@ -224,11 +223,13 @@ private fun presetName(preset: ExtraAreaPreset) = stringResource(when (preset) {
 })
 
 /**
- * Son PS5 karesi (çeviri sürerken) üstünde bölge çerçevesi: içinden sürüklenince kayar, sağ alt köşesinden sürüklenince
- * büyür. Kare yoksa düz zemin ve açıklama.
+ * Alanın canlı önizlemesi: son karenin üstünde çerçeve; alanın dışı karartılır, okunacak yer belirgin olur. Çerçeve
+ * içinden sürüklenerek taşınır, sekiz tutamacından (köşeler ve kenar ortaları) sürüklenerek boyutlandırılır. [centered]
+ * (altyazı alanı): yatay boyut ortadan değişir, alan ortalı kalır. Kurallar [RegionEdit]'tedir (Windows, Mac ve iPhone ile
+ * aynı). Çerçevenin dışından başlayan sürükleme bir şey değiştirmez.
  */
 @Composable
-fun RegionPreview(region: CropRegion, onChange: (CropRegion) -> Unit) {
+fun RegionPreview(region: CropRegion, centered: Boolean = false, onChange: (CropRegion) -> Unit) {
     DisposableEffect(Unit) {
         FramePreview.watch(true)
         onDispose { FramePreview.watch(false) }
@@ -236,32 +237,48 @@ fun RegionPreview(region: CropRegion, onChange: (CropRegion) -> Unit) {
     val frame by FramePreview.frame.collectAsState()
     val current by rememberUpdatedState(region)
     val change by rememberUpdatedState(onChange)
+    val evenly by rememberUpdatedState(centered)
     Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(Tokens.Radius.control)).background(Color.Black)) {
         frame?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds) }
             ?: Text(stringResource(R.string.area_preview_empty), style = Tokens.Type.caption, color = Tokens.Color.secondary,
                 textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.Center).padding(Tokens.Space.gap))
         Canvas(Modifier.fillMaxSize().pointerInput(Unit) {
-            var resizing = false
-            detectDragGestures(onDragStart = { start ->
-                val r = current
-                val corner = Offset((r.right * size.width).toFloat(), (r.bottom * size.height).toFloat())
-                resizing = (start - corner).getDistance() < 32.dp.toPx()
-            }) { change2, drag ->
-                change2.consume()
-                val r = current
-                val next = if (resizing) {
-                    val x = change2.position.x / size.width
-                    val y = change2.position.y / size.height
-                    r.resized(right = x.toDouble(), bottom = y.toDouble())
-                } else r.moved(dx = drag.x.toDouble() / size.width, dy = drag.y.toDouble() / size.height)
-                change(next)
+            var start = current
+            var handle: Int? = null
+            var moved = Offset.Zero
+            detectDragGestures(
+                onDragStart = { at ->
+                    start = current
+                    moved = Offset.Zero
+                    // Parmakla tutulsun diye tutma payı görünen tutamaçtan geniştir.
+                    val grab = 20.dp.toPx()
+                    handle = RegionEdit.handleAt(start, at.x.toDouble() / size.width, at.y.toDouble() / size.height,
+                        grab.toDouble() / size.width, grab.toDouble() / size.height)
+                },
+                onDragEnd = { handle = null },
+                onDragCancel = { handle = null },
+            ) { pointer, drag ->
+                val grabbed = handle ?: return@detectDragGestures
+                pointer.consume()
+                moved += drag
+                change(RegionEdit.dragged(start, grabbed, moved.x.toDouble() / size.width, moved.y.toDouble() / size.height, evenly))
             }
         }) {
-            val topLeft = Offset((region.left * size.width).toFloat(), (region.top * size.height).toFloat())
-            val box = Size(((region.right - region.left) * size.width).toFloat(), ((region.bottom - region.top) * size.height).toFloat())
-            drawRect(Tokens.Color.accent.copy(alpha = 0.15f), topLeft, box)
-            drawRect(Tokens.Color.accent, topLeft, box, style = Stroke(2.dp.toPx()))
-            drawCircle(Tokens.Color.accent, 7.dp.toPx(), Offset(topLeft.x + box.width, topLeft.y + box.height))
+            val left = (region.left * size.width).toFloat()
+            val top = (region.top * size.height).toFloat()
+            val right = (region.right * size.width).toFloat()
+            val bottom = (region.bottom * size.height).toFloat()
+            val shade = Color.Black.copy(alpha = 0.5f)
+            drawRect(shade, Offset.Zero, Size(size.width, top))
+            drawRect(shade, Offset(0f, bottom), Size(size.width, size.height - bottom))
+            drawRect(shade, Offset(0f, top), Size(left, bottom - top))
+            drawRect(shade, Offset(right, top), Size(size.width - right, bottom - top))
+            drawRect(Tokens.Color.accent, Offset(left, top), Size(right - left, bottom - top), style = Stroke(2.dp.toPx()))
+            val handleSize = 9.dp.toPx()
+            RegionEdit.handles(region).forEach { grip ->
+                drawRect(Tokens.Color.accent, Offset((grip.x * size.width).toFloat() - handleSize / 2, (grip.y * size.height).toFloat() - handleSize / 2),
+                    Size(handleSize, handleSize))
+            }
         }
     }
 }

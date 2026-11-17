@@ -431,7 +431,7 @@
     <string name="area_custom">Custom</string>
     <string name="area_position">Vertical position</string>
     <string name="area_height">Height</string>
-    <string name="area_drag_note">Drag the frame to move it, or drag its corner to resize it.</string>
+    <string name="area_drag_note">Drag the frame to move it, or drag an edge or corner to resize it; the subtitle area stays centered.</string>
     <string name="area_preview_empty">The game picture appears here once translating starts.</string>
     <string name="extra_title">Extra areas</string>
     <string name="extra_note">Besides the subtitle, CouchSubs can keep reading up to three small areas, like a quest, a phone message or a notification. Each area is read about once a second and translated again only when its text changes. The translation shows on the TV and on this phone\'s subtitle screen, where the original text is.</string>

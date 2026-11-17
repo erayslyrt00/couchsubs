@@ -8,11 +8,12 @@ import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Son PS5 karesinin küçük gri kopyası: Ayarlar › Altyazı alanındaki canlı önizleme (iPhone'daki PhoneFramePreview).
- * Yalnız önizleme açıkken ([watch]) ve saniyede bir kopyalanır; çeviri hattını yavaşlatmaz.
+ * Yalnız önizleme açıkken ([watch]) ve saniyede dört kez kopyalanır (çerçeve akan görüntüde yerleştirilir); çeviri
+ * hattını yavaşlatmaz.
  */
 object FramePreview {
     private const val WIDTH = 320
-    private const val INTERVAL_MS = 1000L
+    private const val INTERVAL_MS = 250L
 
     private val state = MutableStateFlow<Bitmap?>(null)
     val frame: StateFlow<Bitmap?> = state
