@@ -84,16 +84,18 @@ extension Color {
 struct MobileButtonStyle: ButtonStyle {
     enum Kind { case primary, secondary, ghost, destructive }
     var kind: Kind = .primary
+    /// Bir satırdaki küçük düğmeler (çeviri sürerken ikincil eylemler): simge üstte, `caption` yazı altta, yatay boşluk 8.
+    var compact = false
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         let pressed = configuration.isPressed
         return configuration.label
-            .font(Mobile.TypeScale.headline)
-            .labelStyle(.titleAndIcon)
+            .font(compact ? Mobile.TypeScale.caption.weight(.semibold) : Mobile.TypeScale.headline)
+            .labelStyle(MobileButtonLabelStyle(stacked: compact))
             .foregroundStyle(foreground)
             .frame(maxWidth: kind == .ghost ? nil : .infinity, minHeight: kind == .ghost ? Mobile.Control.buttonSmall : Mobile.Control.button)
-            .padding(.horizontal, kind == .ghost ? Mobile.Space.gap : Mobile.Space.screen)
+            .padding(.horizontal, compact ? Mobile.Space.inline : kind == .ghost ? Mobile.Space.gap : Mobile.Space.screen)
             .background { background(pressed: pressed) }
             .overlay {
                 if kind == .secondary {
@@ -101,28 +103,49 @@ struct MobileButtonStyle: ButtonStyle {
                 }
             }
             .scaleEffect(pressed ? 0.97 : 1)
-            .opacity(isEnabled ? 1 : 0.4)
+            // Devre dışı birincil düğme soldurulmaz: yüzey-2 zemin ve ikincil yazı (TASARIM.md › Düğme).
+            .opacity(isEnabled || kind == .primary ? 1 : 0.4)
             .contentShape(RoundedRectangle(cornerRadius: Mobile.Radius.control))
             .animation(.easeOut(duration: 0.12), value: pressed)
     }
 
     private var foreground: Color {
         switch kind {
-        case .primary: Mobile.Palette.onAccent
+        case .primary: isEnabled ? Mobile.Palette.onAccent : Mobile.Palette.secondary
         case .secondary: Mobile.Palette.text
         case .ghost: Mobile.Palette.accent
         case .destructive: Mobile.Palette.danger
         }
     }
 
-    /// Düz dolgu, gölge yok; basılı birincil düğme biraz açık sarı.
+    /// Düz dolgu, gölge yok; basılı birincil düğme biraz açık sarı, devre dışı birincil yüzey-2.
     @ViewBuilder private func background(pressed: Bool) -> some View {
         let shape = RoundedRectangle(cornerRadius: Mobile.Radius.control)
         switch kind {
-        case .primary: shape.fill(pressed ? Mobile.Palette.accentHi : Mobile.Palette.accent)
+        case .primary: shape.fill(!isEnabled ? Mobile.Palette.surface2 : pressed ? Mobile.Palette.accentHi : Mobile.Palette.accent)
         case .secondary: shape.fill(Mobile.Palette.surface2)
         case .ghost: Color.clear
         case .destructive: shape.fill(Mobile.Palette.dangerSoft)
+        }
+    }
+}
+
+/// Düğme yazısı ve simgesi: yan yana ya da (küçük düğmede) simge üstte, en çok iki satır ortalı yazı altta.
+private struct MobileButtonLabelStyle: LabelStyle {
+    let stacked: Bool
+
+    @ViewBuilder func makeBody(configuration: Configuration) -> some View {
+        if stacked {
+            VStack(spacing: Mobile.Space.hair) {
+                configuration.icon
+                configuration.title
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.vertical, Mobile.Space.inline)
+        } else {
+            Label { configuration.title } icon: { configuration.icon }
+                .labelStyle(.titleAndIcon)
         }
     }
 }
@@ -200,13 +223,15 @@ struct Tile<Content: View>: View {
     }
 }
 
-/// Değer karosu: üstte etiket satırı (simge + etiket [+ durum noktası]), altında `title` değer. Kare zorlanmaz.
+/// Değer karosu: üstte etiket satırı (simge + etiket [+ durum noktası] [+ `›`]), altında `title` değer. Kare zorlanmaz.
+/// Dokununca bir ayar açan karoda `chevron` sağ üstte `›` gösterir. Uzun değer küçültülmez, iki satıra iner.
 struct StatTile: View {
     let symbol: String
     var tint: MobileTileIcon.Tint = .neutral
     let label: LocalizedStringKey
     let value: String
     var live = false
+    var chevron = false
 
     var body: some View {
         Tile {
@@ -215,9 +240,43 @@ struct StatTile: View {
                 Text(label).font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
                 Spacer(minLength: 0)
                 if live { MobileLiveDot(pulses: false) }
+                if chevron { RowChevron() }
             }
-            Text(verbatim: value).font(Mobile.TypeScale.title).lineLimit(1).minimumScaleFactor(0.6)
+            Text(verbatim: value).font(Mobile.TypeScale.title).lineLimit(2).fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+/// Gidilecek bir ekranı olan satırın ve karonun `›` işareti.
+struct RowChevron: View {
+    var body: some View {
+        Image(systemName: "chevron.right")
+            .font(Mobile.TypeScale.caption.weight(.semibold))
+            .foregroundStyle(Mobile.Palette.tertiary)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Bilgi karosunun satırı (TASARIM.md › InfoCard): solda ad (`body`, ikincil), sağda değer (`body` yarı kalın) ve `›`;
+/// simge yok. En az 52 yükseklik (dokunma hedefi). Satırlar `Tile(spacing: 0)` içinde `RowDivider` ile ayrılır.
+struct MobileInfoRow: View {
+    let title: LocalizedStringKey
+    let value: String
+
+    var body: some View {
+        HStack(spacing: Mobile.Space.inline) {
+            Text(title).font(Mobile.TypeScale.body).foregroundStyle(Mobile.Palette.secondary)
+            Spacer(minLength: Mobile.Space.gap)
+            Text(verbatim: value)
+                .font(Mobile.TypeScale.body.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(Mobile.Palette.text)
+                .lineLimit(1)
+            RowChevron()
+        }
+        .frame(minHeight: Mobile.Control.row)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -371,7 +430,7 @@ struct SegmentedTabs<Value: Hashable>: View {
                         .foregroundStyle(selected ? Mobile.Palette.text : Mobile.Palette.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
-                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .frame(maxWidth: .infinity, minHeight: Mobile.Control.buttonSmall)
                         .background {
                             if selected {
                                 RoundedRectangle(cornerRadius: Mobile.Radius.inner).fill(Mobile.Palette.borderStrong)
@@ -426,7 +485,7 @@ extension ListRow where Trailing == AnyView {
     /// Gidilecek bir ekranı olan satır (sağda ok).
     init(symbol: String, tint: MobileTileIcon.Tint = .neutral, title: LocalizedStringKey, detail: String? = nil) {
         self.init(symbol: symbol, tint: tint, title: title, detail: detail) {
-            AnyView(Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Mobile.Palette.tertiary))
+            AnyView(RowChevron())
         }
     }
 }

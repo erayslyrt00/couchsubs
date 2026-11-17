@@ -8948,6 +8948,38 @@
         }
       }
     },
+    "Xbox connected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Xbox connected"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Xbox bağlı"
+          }
+        }
+      }
+    },
+    "Xbox connected · ready translation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Xbox connected · ready translation"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Xbox bağlı · hazır çeviri"
+          }
+        }
+      }
+    },
     "Start translating here": {
       "localizations": {
         "en": {

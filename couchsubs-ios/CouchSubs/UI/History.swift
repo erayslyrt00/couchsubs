@@ -39,6 +39,7 @@ struct HistoryScreen: View {
                         Label(copiedAll ? "Copied" : "Copy all", systemImage: copiedAll ? "checkmark" : "doc.on.doc")
                     }
                     .buttonStyle(.mobileSecondary)
+                    .resetsAfterDelay($copiedAll)
                     Button(role: .destructive) { confirmClear = true } label: { Label("Clear", systemImage: "trash") }
                         .buttonStyle(.mobileDestructive)
                 }
@@ -164,7 +165,11 @@ private struct ExtraAreaEditor: View {
                                                            set: { on in settings.updateExtraArea(id: id) { $0.enabled = on } }))
                         .labelsHidden()
                         .tint(Mobile.Palette.accent)
-                    Button { settings.removeExtraArea(id: id) } label: { Image(systemName: "trash") }
+                    Button { settings.removeExtraArea(id: id) } label: {
+                        Image(systemName: "trash")
+                            .frame(width: Mobile.Control.icon, height: Mobile.Control.icon)
+                            .contentShape(Rectangle())
+                    }
                         .foregroundStyle(Mobile.Palette.secondary)
                         .accessibilityLabel(Text("Remove"))
                 }

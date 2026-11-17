@@ -163,7 +163,12 @@ struct SettingsScreen: View {
                             Label(String(localized: "saved"), systemImage: "checkmark")
                                 .font(Mobile.TypeScale.caption)
                                 .foregroundStyle(Mobile.Palette.success)
-                            Button { model.removeKey(engine) } label: { Image(systemName: "xmark.circle.fill") }
+                            // 44'lük dokunma hedefi (simge küçük kalır).
+                            Button { model.removeKey(engine) } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .frame(width: Mobile.Control.icon, height: Mobile.Control.icon)
+                                    .contentShape(Rectangle())
+                            }
                                 .foregroundStyle(Mobile.Palette.secondary)
                                 .accessibilityLabel(Text("Remove key"))
                         } else {
@@ -205,11 +210,14 @@ struct SettingsScreen: View {
                     Text("Text colour").font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
                     Spacer()
                     ForEach([SubtitleTextColor.white, .yellow], id: \.self) { color in
+                        // Renk dairesi 28 pt, dokunma hedefi 44 pt.
                         Button { model.settings.style.textColor = color } label: {
                             Circle()
                                 .fill(color == .yellow ? Mobile.Palette.accent : Mobile.Palette.text)
                                 .frame(width: 28, height: 28)
                                 .overlay(Circle().strokeBorder(Mobile.Palette.accent, lineWidth: model.settings.style.textColor == color ? 2 : 0).padding(-4))
+                                .frame(width: Mobile.Control.icon, height: Mobile.Control.icon)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(Text(color == .yellow ? "Yellow" : "White"))
@@ -355,7 +363,11 @@ private struct LoginPasscodeTile: View {
                 if model.hasLoginPasscode {
                     Text("Passcode saved.").font(Mobile.TypeScale.headline.weight(.regular))
                     Spacer()
-                    Button { model.removeLoginPasscode() } label: { Image(systemName: "xmark.circle.fill") }
+                    Button { model.removeLoginPasscode() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .frame(width: Mobile.Control.icon, height: Mobile.Control.icon)
+                            .contentShape(Rectangle())
+                    }
                         .foregroundStyle(Mobile.Palette.secondary)
                         .accessibilityLabel(Text("Remove passcode"))
                 } else {
