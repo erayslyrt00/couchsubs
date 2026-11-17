@@ -37,6 +37,7 @@ public partial class App : Application
     [MethodImpl(MethodImplOptions.NoInlining)]
     void Start(string? renderFolder)
     {
+        Controls.SmoothScroll.Register();
         if (renderFolder is not null)
         {
             ScreenRenderer.Run(this, renderFolder);
