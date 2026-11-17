@@ -8,7 +8,7 @@
              xmlns:local="clr-namespace:CouchSubs.App.Views">
     <DockPanel Margin="{DynamicResource pad.screen}">
         <!-- Başlık: logo, ad, ayarlar -->
-        <Grid DockPanel.Dock="Top" Margin="0,0,0,16">
+        <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
             <StackPanel Orientation="Horizontal">
                 <Grid Width="36" Height="36">
                     <Image Source="/Assets/logo.png" RenderOptions.BitmapScalingMode="HighQuality" />
@@ -18,15 +18,15 @@
                 <TextBlock Text="CouchSubs" Style="{StaticResource TitleText}" Margin="12,0,0,0" VerticalAlignment="Center" />
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Padding="16,0" Margin="0,0,8,0" ToolTip="{t:T 'History'}" Click="OnHistory">
+                <Button Padding="14,0" Margin="0,0,8,0" ToolTip="{t:T 'History'}" Click="OnHistory">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="{x:Static c:Glyphs.History}" Style="{StaticResource GlyphText}" FontSize="20" Margin="0,0,8,0" />
+                        <TextBlock Text="{x:Static c:Glyphs.History}" Style="{StaticResource GlyphText}" FontSize="16" Margin="0,0,8,0" />
                         <TextBlock Text="{t:T 'History'}" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
-                <Button Padding="16,0" ToolTip="{t:T 'Settings'}" Click="OnSettings">
+                <Button Padding="14,0" ToolTip="{t:T 'Settings'}" Click="OnSettings">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="{x:Static c:Glyphs.Settings}" Style="{StaticResource GlyphText}" FontSize="20" Margin="0,0,8,0" />
+                        <TextBlock Text="{x:Static c:Glyphs.Settings}" Style="{StaticResource GlyphText}" FontSize="16" Margin="0,0,8,0" />
                         <TextBlock Text="{t:T 'Settings'}" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
@@ -40,10 +40,10 @@
             </Grid.ColumnDefinitions>
 
             <!-- Sol: denetimler ve durum -->
-            <ScrollViewer Width="{DynamicResource size.mainColumn}" VerticalScrollBarVisibility="Auto" Focusable="False" Margin="0,0,16,0">
+            <ScrollViewer Width="{DynamicResource size.mainColumn}" VerticalScrollBarVisibility="Auto" Focusable="False" Margin="0,0,12,0">
                 <StackPanel Margin="0,0,0,8">
                     <!-- Yeni sürüm -->
-                    <c:Card x:Name="UpdateCard" Margin="0,0,0,16" Visibility="Collapsed">
+                    <c:Card x:Name="UpdateCard" Margin="0,0,0,12" Visibility="Collapsed">
                         <StackPanel>
                             <TextBlock x:Name="UpdateTitle" FontWeight="SemiBold" Foreground="{DynamicResource accentTextBrush}" TextWrapping="Wrap" />
                             <ProgressBar x:Name="UpdateBar" Minimum="0" Maximum="1" Margin="0,12,0,0" Visibility="Collapsed" />
@@ -56,7 +56,7 @@
                     <!-- Başlat / Durdur -->
                     <Button x:Name="Toggle" HorizontalAlignment="Stretch" MinHeight="{DynamicResource size.primaryActionHeight}" Click="OnToggle">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock x:Name="ToggleGlyph" Style="{StaticResource GlyphText}" FontSize="20" Margin="0,0,8,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                            <TextBlock x:Name="ToggleGlyph" Style="{StaticResource GlyphText}" FontSize="18" Margin="0,0,10,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
                             <TextBlock x:Name="ToggleText" FontSize="{DynamicResource headlineFontSize}" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
                         </StackPanel>
                     </Button>
@@ -76,17 +76,17 @@
                     </Button>
 
                     <!-- Durum karoları -->
-                    <Grid Margin="0,16,0,0">
+                    <Grid Margin="0,12,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="12" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="16" />
+                            <RowDefinition Height="12" />
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="16" />
+                            <RowDefinition Height="12" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
@@ -125,28 +125,37 @@
                         <!-- Altyazının yeri: TV, bilgisayar ekranı ya da ikisi -->
                         <local:SubtitleOutputCard x:Name="OutputCard" Grid.Row="2" Grid.ColumnSpan="3" />
 
-                        <c:Card Grid.Row="4">
+                        <!-- Bilgi karosu: çeviri motoru (Ayarlar › Çeviri'yi açar) ve ekranı çevirme kısayolu. Canlı durum değil, ayar
+                             bilgisi olduğu için durum karoları gibi simgeli ve büyük değil (docs/TASARIM.md › InfoCard). -->
+                        <c:Card Grid.Row="4" Grid.ColumnSpan="3" Padding="16,4">
                             <StackPanel>
-                                <Border Style="{StaticResource TileIcon}" Margin="0,0,0,8">
-                                    <TextBlock Text="{x:Static c:Glyphs.Globe}" Style="{StaticResource GlyphText}" FontSize="18" HorizontalAlignment="Center" />
-                                </Border>
-                                <TextBlock Text="{t:T 'Translation'}" Style="{StaticResource CaptionText}" />
-                                <TextBlock x:Name="EngineText" Style="{StaticResource HeadlineText}" Margin="0,4,0,0" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </c:Card>
-                        <c:Card Grid.Row="4" Grid.Column="2">
-                            <StackPanel>
-                                <Border Style="{StaticResource TileIcon}" Margin="0,0,0,8">
-                                    <TextBlock Text="{x:Static c:Glyphs.Keyboard}" Style="{StaticResource GlyphText}" FontSize="18" HorizontalAlignment="Center" />
-                                </Border>
-                                <TextBlock Text="{t:T 'Shortcut'}" Style="{StaticResource CaptionText}" />
-                                <TextBlock x:Name="ScreenShortcutText" Style="{StaticResource HeadlineText}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                <Button Style="{StaticResource InfoRowButton}" Click="OnTranslationSettings"
+                                        AutomationProperties.Name="{t:T 'Translation'}">
+                                    <DockPanel>
+                                        <TextBlock Text="{t:T 'Translation'}" Style="{StaticResource InfoRowLabel}" />
+                                        <TextBlock x:Name="EngineText" Style="{StaticResource InfoRowValue}" HorizontalAlignment="Right" Margin="12,0,0,0" />
+                                    </DockPanel>
+                                </Button>
+                                <Border Style="{StaticResource InfoDivider}" />
+                                <DockPanel Style="{StaticResource InfoRow}">
+                                    <TextBlock Text="{t:T 'Translate screen'}" Style="{StaticResource InfoRowLabel}" />
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
+                                                ToolTip="{t:T 'Translate the screen (Num 9 or Ctrl+Shift+9)'}">
+                                        <Border Style="{StaticResource Keycap}">
+                                            <TextBlock Text="Num 9" VerticalAlignment="Center" TextWrapping="NoWrap" />
+                                        </Border>
+                                        <TextBlock Text="{t:T 'or'}" Style="{StaticResource CaptionText}" VerticalAlignment="Center" Margin="8,0" TextWrapping="NoWrap" />
+                                        <Border Style="{StaticResource Keycap}">
+                                            <TextBlock Text="Ctrl+Shift+9" VerticalAlignment="Center" TextWrapping="NoWrap" Typography.NumeralAlignment="Tabular" />
+                                        </Border>
+                                    </StackPanel>
+                                </DockPanel>
                             </StackPanel>
                         </c:Card>
                     </Grid>
 
                     <!-- Oynanan oyun ("Oynanan oyun: X · Değiştir") ve iki dakika sonra çıkan "Hangi oyunu oynuyorsunuz?" kartı -->
-                    <c:Card x:Name="GameCard" Margin="0,16,0,0" Visibility="Collapsed">
+                    <c:Card x:Name="GameCard" Margin="0,12,0,0" Visibility="Collapsed">
                         <StackPanel>
                             <DockPanel x:Name="GameRow">
                                 <Button x:Name="GameChangeButton" DockPanel.Dock="Right" Padding="16,0" VerticalAlignment="Center" Click="OnChangeGame" />
@@ -181,10 +190,10 @@
                     </c:Card>
 
                     <!-- PS5 ya da TV uzun süredir bağlanamıyor ve güvenlik duvarında izin yok -->
-                    <local:FirewallCard Margin="0,16,0,0" />
+                    <local:FirewallCard Margin="0,12,0,0" />
 
                     <!-- Çeviri modeli eksik -->
-                    <c:Card x:Name="ModelCard" Margin="0,16,0,0" Visibility="Collapsed">
+                    <c:Card x:Name="ModelCard" Margin="0,12,0,0" Visibility="Collapsed">
                         <StackPanel>
                             <TextBlock Text="{t:T 'The translation model is not downloaded yet.'}" FontWeight="SemiBold" Foreground="{DynamicResource warningBrush}" />
                             <StackPanel Visibility="{Binding ModelDownloading, Converter={StaticResource VisibleIf}}" Margin="0,12,0,0">
@@ -196,12 +205,12 @@
                         </StackPanel>
                     </c:Card>
 
-                    <c:Card Margin="0,16,0,0" Visibility="{Binding GpuFallbackWarning, Converter={StaticResource VisibleIf}}">
+                    <c:Card Margin="0,12,0,0" Visibility="{Binding GpuFallbackWarning, Converter={StaticResource VisibleIf}}">
                         <TextBlock Foreground="{DynamicResource warningBrush}" TextWrapping="Wrap"
                                    Text="{t:T 'GPU could not be used; free translation is running on CPU.'}" />
                     </c:Card>
                     <!-- Ücretsiz çeviri motoru bu bilgisayarda açılamadı: çevrimiçi motor önerilir -->
-                    <c:Card x:Name="EngineCard" Margin="0,16,0,0" Visibility="Collapsed">
+                    <c:Card x:Name="EngineCard" Margin="0,12,0,0" Visibility="Collapsed">
                         <StackPanel>
                             <TextBlock Text="{t:T 'The free translation engine could not start on this computer.'}" FontWeight="SemiBold"
                                        Foreground="{DynamicResource warningBrush}" TextWrapping="Wrap" />
@@ -212,7 +221,7 @@
                     </c:Card>
 
                     <!-- Çevrimiçi motor çeviremiyor: satırlar bu arada ücretsiz çeviriyle geliyor -->
-                    <c:Card x:Name="OnlineCard" Margin="0,16,0,0" Visibility="Collapsed">
+                    <c:Card x:Name="OnlineCard" Margin="0,12,0,0" Visibility="Collapsed">
                         <StackPanel>
                             <TextBlock x:Name="OnlineTitle" FontWeight="SemiBold" Foreground="{DynamicResource warningBrush}" TextWrapping="Wrap" />
                             <TextBlock x:Name="OnlineReason" Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap" />
@@ -220,7 +229,7 @@
                     </c:Card>
 
                     <!-- Yazı tanıma dili eksik -->
-                    <c:Card Margin="0,16,0,0" Visibility="{Binding OcrMissing, Converter={StaticResource VisibleIf}}">
+                    <c:Card Margin="0,12,0,0" Visibility="{Binding OcrMissing, Converter={StaticResource VisibleIf}}">
                         <StackPanel>
                             <TextBlock Text="{t:T 'Text recognition for the game language is not installed on this computer.'}" FontWeight="SemiBold" Foreground="{DynamicResource warningBrush}" />
                             <TextBlock Style="{StaticResource HintText}" Margin="0,8,0,12" TextWrapping="Wrap"
@@ -236,7 +245,7 @@
 
             <!-- Sağ: oyun paketi ve canlı altyazı -->
             <DockPanel Grid.Column="1">
-                <c:Card x:Name="PackTile" DockPanel.Dock="Top" Margin="0,0,0,16" Visibility="Collapsed">
+                <c:Card x:Name="PackTile" DockPanel.Dock="Top" Margin="0,0,0,12" Visibility="Collapsed">
                     <DockPanel>
                         <Border Style="{StaticResource ProIcon}" Margin="0,0,12,0" VerticalAlignment="Center">
                             <TextBlock Text="{x:Static c:Glyphs.Package}" Style="{StaticResource GlyphText}" FontSize="18" HorizontalAlignment="Center" />
@@ -247,7 +256,8 @@
 
                 <!-- Canlı altyazı: son satır büyük ve altyazı sarısında (karo parlamaz) -->
                 <c:Card Title="{t:T 'Live subtitles'}" VerticalAlignment="Stretch">
-                    <StackPanel>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+                    <StackPanel Margin="0,0,8,0">
                         <TextBlock Text="{t:T 'Subtitles will appear here while you play.'}" Style="{StaticResource HintText}"
                                    Visibility="{Binding LastTranslation, Converter={StaticResource VisibleIf}, ConverterParameter=invert}" />
                         <!-- Çeviri PS5'ten (ikinci hesap) okunurken: kolu açınca ana hesap seçilmeli (GitHub #231). -->
@@ -262,7 +272,23 @@
                         <TextBlock Text="{Binding MetricsText}" Style="{StaticResource CaptionText}" Margin="0,12,0,0"
                                    Typography.NumeralAlignment="Tabular" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
                                    Visibility="{Binding MetricsText, Converter={StaticResource VisibleIf}}" />
+                        <!-- Bu oturumun önceki satırları: ayraçlarla, karo başlığı boyunda normal ve ikincil renkte; en yenisi üstte
+                             (Mac'teki canlı altyazı karosu ve docs/TASARIM.md › Ana ekran). -->
+                        <ItemsControl x:Name="PreviousLines" Margin="0,8,0,0" Focusable="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="{DynamicResource borderBrush}" BorderThickness="0,1,0,0" Padding="0,12,0,0" Margin="0,12,0,0">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Translation}" Style="{StaticResource HeadlineText}" FontWeight="Normal"
+                                                       Foreground="{DynamicResource textSecondaryBrush}" />
+                                            <TextBlock Text="{Binding Source}" Style="{StaticResource CaptionText}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </StackPanel>
+                    </ScrollViewer>
                 </c:Card>
             </DockPanel>
         </Grid>

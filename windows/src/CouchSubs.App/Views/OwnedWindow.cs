@@ -11,17 +11,19 @@ namespace CouchSubs.App.Views;
 /// </summary>
 internal static class OwnedWindow
 {
-    public static void Show<T>(Window? owner, Func<T> create) where T : Window
+    /// <summary>Açık olan ya da yeni açılan pencereyi döndürür.</summary>
+    public static T Show<T>(Window? owner, Func<T> create) where T : Window
     {
         var open = Application.Current?.Windows.OfType<T>().FirstOrDefault(window => window.IsVisible);
         if (open is not null)
         {
             if (open.WindowState == WindowState.Minimized) open.WindowState = WindowState.Normal;
             open.Activate();
-            return;
+            return open;
         }
         var window = create();
         window.Owner = owner;
         window.Show();
+        return window;
     }
 }

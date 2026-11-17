@@ -5285,6 +5285,22 @@
         }
       }
     },
+    "or": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "or"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ya da"
+          }
+        }
+      }
+    },
     "Translate screen": {
       "localizations": {
         "en": {

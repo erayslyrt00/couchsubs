@@ -2,6 +2,7 @@
 
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -17,6 +18,10 @@ public partial class MainView : UserControl
     private readonly AppController controller;
     // Çeviri sürerken PS5 ve TV bağlanamıyorsa güvenlik duvarı kartı önerilir.
     private readonly DispatcherTimer connectionWatch = new() { Interval = TimeSpan.FromSeconds(5) };
+    /// <summary>Canlı altyazı karosu yalnız bu oturumun satırlarını gösterir (önceki oturumlar Geçmiş'te).</summary>
+    private DateTime? sessionStartedAt;
+    /// <summary>Karoda son satırın altında en çok bu kadar önceki satır durur.</summary>
+    private const int PreviousLineCount = 8;
 
     public MainView(AppController controller)
     {
@@ -36,6 +41,7 @@ public partial class MainView : UserControl
         ShowTiles();
         ShowUpdate();
         ShowGame();
+        ShowPreviousLines();
         _ = controller.CheckForUpdateAsync();
     }
 
@@ -49,6 +55,10 @@ public partial class MainView : UserControl
         if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.PlayedGame) or nameof(AppController.AskingGame)
             or nameof(AppController.AreaProfileGame) or nameof(AppController.OfferedAreaProfileGame))
             ShowGame();
+        if (e.PropertyName is nameof(AppController.IsRunning) && controller.IsRunning)
+            sessionStartedAt = DateTime.UtcNow;
+        if (e.PropertyName is nameof(AppController.History) or nameof(AppController.LastTranslation) or nameof(AppController.IsRunning))
+            ShowPreviousLines();
         if (e.PropertyName is nameof(AppController.UpdateVersion) or nameof(AppController.Updating)
             or nameof(AppController.UpdateProgress) or nameof(AppController.UpdateError))
             ShowUpdate();
@@ -75,7 +85,6 @@ public partial class MainView : UserControl
     {
         var text = Localizer.Current;
         var settings = controller.Settings;
-        ScreenShortcutText.Text = HotkeyText.Title(settings, HotkeyAction.Screen, "Translate the screen (%@)");
         EngineText.Text = settings.Engine == TranslationEngine.Free ? text["Free"] : settings.Engine.DisplayName();
         var packs = controller.InstalledPacks.Count;
         var active = settings.GamePacks && settings.SourceLanguage == "en" && settings.TargetLanguage == "tr" && packs > 0;
@@ -125,6 +134,26 @@ public partial class MainView : UserControl
     }
 
     private void OnSettings(object sender, RoutedEventArgs e) => SettingsWindow.Open(Window.GetWindow(this), controller);
+
+    private void OnTranslationSettings(object sender, RoutedEventArgs e) =>
+        SettingsWindow.Open(Window.GetWindow(this), controller, SettingsSection.Translation);
+
+    /// <summary>
+    /// Son satır büyük ve sarı yazılır; bu oturumda ondan önce gösterilen satırlar altında, en yenisi üstte (geçmiş en
+    /// yeniden eskiye sıralıdır). Son satır geçmişin en yenisiyse listede tekrar edilmez. Henüz satır yokken liste boştur.
+    /// </summary>
+    private void ShowPreviousLines()
+    {
+        if (string.IsNullOrEmpty(controller.LastTranslation))
+        {
+            PreviousLines.ItemsSource = null;
+            return;
+        }
+        var since = sessionStartedAt ?? DateTime.MinValue;
+        var lines = controller.History.Where(entry => entry.Date >= since).ToList();
+        if (lines.Count > 0 && lines[0].Translation == controller.LastTranslation) lines.RemoveAt(0);
+        PreviousLines.ItemsSource = lines.Take(PreviousLineCount).ToList();
+    }
 
     private void OnHistory(object sender, RoutedEventArgs e) => HistoryWindow.Open(Window.GetWindow(this), controller);
 

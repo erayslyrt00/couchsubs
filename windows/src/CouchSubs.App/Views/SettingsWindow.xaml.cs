@@ -15,6 +15,9 @@ using Microsoft.Win32;
 
 namespace CouchSubs.App.Views;
 
+/// <summary>Ayarların doğrudan açılabilen bölümleri.</summary>
+public enum SettingsSection { Appearance, Translation }
+
 public partial class SettingsWindow : Window
 {
     private static readonly (string Code, string Name)[] Languages =
@@ -675,6 +678,17 @@ public partial class SettingsWindow : Window
 
     public static void Open(Window? owner, AppController controller) =>
         OwnedWindow.Show(owner, () => new SettingsWindow(controller));
+
+    /// <summary>Ayarları belli bir bölümde açar (ana ekrandaki bilgi karosunun "Çeviri" satırı).</summary>
+    public static void Open(Window? owner, AppController controller, SettingsSection section)
+    {
+        var window = OwnedWindow.Show(owner, () => new SettingsWindow(controller));
+        window.Sections.SelectedItem = section switch
+        {
+            SettingsSection.Translation => window.TranslationSection,
+            _ => window.Sections.SelectedItem,
+        };
+    }
 
     private void Update(Func<UserSettings, UserSettings> change)
     {
