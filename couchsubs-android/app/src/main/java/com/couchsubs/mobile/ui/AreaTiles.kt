@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Ayarlar › Altyazı alanı ve Ek alanlar (iPhone'daki AreaTile ve ExtraAreasTile ile aynı): hazır seçimler, son kareyle
-// canlı önizleme (çerçeve sürüklenir, köşesinden büyütülür), Özel'de kaydırıcılar; en çok üç ek alan.
+// canlı önizleme (çerçeve sürüklenir, kenar ve köşelerinden boyutlanır; altyazı alanında "Ortada tut"), Özel'de
+// kaydırıcılar; en çok üç ek alan.
 package com.couchsubs.mobile.ui
 
 import androidx.compose.foundation.Canvas
@@ -122,6 +123,7 @@ fun AreaTile() {
     val version = LiveState.status.collectAsState().value.areasVersion
     var region by remember(version) { mutableStateOf(settings.region) }
     var preset by remember(version) { mutableStateOf(settings.areaPreset) }
+    var centered by remember { mutableStateOf(settings.keepAreaCentered) }
     fun custom(value: CropRegion) {
         region = value
         preset = AreaPreset.CUSTOM
@@ -136,14 +138,17 @@ fun AreaTile() {
             settings.selectAreaPreset(preset)
             region = settings.region
         }
-        RegionPreview(region, centered = true, onChange = ::custom)
+        RegionPreview(region, centered = centered, onChange = ::custom)
         if (preset == AreaPreset.CUSTOM) {
             val position = region.top * 100
             val height = (region.bottom - region.top) * 100
             SliderRow(stringResource(R.string.area_position), position, 0f..maxOf(1.0, 100 - height).toFloat()) { custom(region.withVertical(it, height)) }
             SliderRow(stringResource(R.string.area_height), height, (MINIMUM_REGION_SIZE * 100).toFloat()..100f) { custom(region.withVertical(position, it)) }
         }
-        Text(stringResource(R.string.area_drag_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        RowItem(stringResource(R.string.area_keep_centered)) { Switch(centered, { centered = it; settings.keepAreaCentered = it }) }
+        // "Ortalı kalır" yalnız Ortada tut açıkken yazılır.
+        Text(stringResource(if (centered) R.string.area_drag_note else R.string.area_drag_note_free), style = Tokens.Type.caption,
+            color = Tokens.Color.secondary)
     }
 }
 
@@ -225,7 +230,7 @@ private fun presetName(preset: ExtraAreaPreset) = stringResource(when (preset) {
 /**
  * Alanın canlı önizlemesi: son karenin üstünde çerçeve; alanın dışı karartılır, okunacak yer belirgin olur. Çerçeve
  * içinden sürüklenerek taşınır, sekiz tutamacından (köşeler ve kenar ortaları) sürüklenerek boyutlandırılır. [centered]
- * (altyazı alanı): yatay boyut ortadan değişir, alan ortalı kalır. Kurallar [RegionEdit]'tedir (Windows, Mac ve iPhone ile
+ * (altyazı alanında "Ortada tut" açıkken): yatay boyut ortadan değişir, alan ortalı kalır. Kurallar [RegionEdit]'tedir (Windows, Mac ve iPhone ile
  * aynı). Çerçevenin dışından başlayan sürükleme bir şey değiştirmez.
  */
 @Composable

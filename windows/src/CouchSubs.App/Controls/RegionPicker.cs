@@ -15,7 +15,7 @@ namespace CouchSubs.App.Controls;
 /// <summary>
 /// Son karenin üstünde bir bölgeyi gösteren ve fareyle çizilen çerçeve: boş yerde sürükleyince yeni bölge çizilir,
 /// sekiz tutamaçtan (köşeler ve kenar ortaları) tutunca boyutu, içinden tutunca yeri değişir. Bölgenin dışı karartılır;
-/// okunacak yer belirgin olur. <see cref="Centered"/> açıksa (altyazı alanı) yatay boyut ortadan değişir. Kurallar
+/// okunacak yer belirgin olur. <see cref="Centered"/> açıksa (altyazı alanında "Ortada tut") yatay boyut ortadan değişir. Kurallar
 /// <see cref="RegionEdit"/>'tedir (Mac, iPhone ve Android ile aynı).
 /// </summary>
 public sealed class RegionPicker : UserControl
@@ -58,8 +58,8 @@ public sealed class RegionPicker : UserControl
     public CropRegion DefaultRegion { get; set; } = new();
 
     /// <summary>
-    /// Yatay boyut ortadan değişir: sağ kenar çekilince sol kenar da aynı kadar açılır (altyazı alanı; oyunlar altyazıyı
-    /// ortalar). Ek alanlarda kapalı.
+    /// Yatay boyut ortadan değişir: sağ kenar çekilince sol kenar da aynı kadar açılır (altyazı alanında "Ortada tut"
+    /// açıkken; oyunların çoğu altyazıyı ortalar). Kapalıyken ve ek alanlarda yalnız tutulan kenar oynar.
     /// </summary>
     public bool Centered { get; set; }
 

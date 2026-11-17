@@ -248,6 +248,15 @@ class AppSettings(context: Context) : AreaStore {
             ?: com.couchsubs.mobile.core.AreaPreset.matching(region)
         set(value) = prefs.edit().putString("areaPreset", value.name).apply()
 
+    /**
+     * "Ortada tut": altyazı alanının çerçevesi kenarından boyutlandırılırken karşı kenar da aynı kadar oynar, alan ortalı
+     * kalır (oyunların çoğu altyazıyı ortalar). Kapalıysa yalnız tutulan kenar oynar (sola yaslı ya da köşedeki altyazı).
+     * Eski kayıtlarda yoktur; açık başlar (iPhone: keepAreaCentered, Windows: KeepAreaCentered).
+     */
+    var keepAreaCentered: Boolean
+        get() = prefs.getBoolean("keepAreaCentered", true)
+        set(value) = prefs.edit().putBoolean("keepAreaCentered", value).apply()
+
     /** Hazır seçim: bölgesi de kaydedilir (Özel'de kayıtlı bölge kalır). */
     fun selectAreaPreset(preset: com.couchsubs.mobile.core.AreaPreset) {
         preset.region?.let { region = it }

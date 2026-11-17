@@ -6,12 +6,12 @@ import SwiftUI
 
 /// Alanın canlı önizlemesi: son PS5 karesi (yoksa yer tutucu), üstünde alanın çerçevesi; alanın dışı karartılır, okunacak
 /// yer belirgin olur. Çerçeve içinden sürüklenerek taşınır, sekiz tutamacından (köşeler ve kenar ortaları) sürüklenerek
-/// boyutlandırılır. `centered` (altyazı alanı): yatay boyut ortadan değişir, alan ortalı kalır. Kurallar `RegionEdit`'tedir
-/// (Windows ve Android ile aynı); her değişiklik `onChange` ile bildirilir.
+/// boyutlandırılır. `centered` (altyazı alanında "Ortada tut" açıkken): yatay boyut ortadan değişir, alan ortalı kalır.
+/// Kurallar `RegionEdit`'tedir (Windows ve Android ile aynı); her değişiklik `onChange` ile bildirilir.
 struct RegionPreview: View {
     let region: CropRegion
     let frame: CGImage?
-    /// Yatay boyut ortadan değişir (altyazı alanı); ek alanlarda kapalı.
+    /// Yatay boyut ortadan değişir (altyazı alanında `UserSettings.keepAreaCentered`); ek alanlarda kapalı.
     var centered = false
     /// Kare yokken gösterilen yazı.
     var placeholder: LocalizedStringKey = "The game picture appears here once translating starts."

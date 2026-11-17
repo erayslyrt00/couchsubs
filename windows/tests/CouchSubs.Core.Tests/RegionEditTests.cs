@@ -73,6 +73,17 @@ public class RegionEditTests
     }
 
     [Fact]
+    public void WithoutKeepCenteredALeftAlignedSubtitleAreaKeepsItsLeftEdge()
+    {
+        // Sola yaslı altyazı: "Ortada tut" kapalıyken sağ kenar çekilince sol kenar yerinde kalır.
+        var left = new CropRegion(0.80, 0.95, 0.05, 0.45);
+        Close(new CropRegion(0.80, 0.95, 0.05, 0.55), Dragged(left, Handle.Right, 0.10, 0, centered: false));
+        Close(new CropRegion(0.70, 0.95, 0.00, 0.45), Dragged(left, Handle.Left | Handle.Top, -0.05, -0.10, centered: false));
+        // Açıkken aynı sürükleme sol kenarı da oynatır ve karenin kenarına dayar.
+        Close(new CropRegion(0.80, 0.95, 0.00, 0.50), Dragged(left, Handle.Right, 0.10, 0, centered: true));
+    }
+
+    [Fact]
     public void AFrameNeverGetsSmallerThanTheMinimumOrFlips()
     {
         var narrow = Dragged(Area, Handle.Left, 0.90, 0, centered: false);

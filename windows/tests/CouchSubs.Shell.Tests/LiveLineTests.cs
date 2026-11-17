@@ -142,6 +142,25 @@ public class AreaPresetSettingsTests
     }
 
     [Fact]
+    public void KeepCenteredIsOnByDefaultAndInOldSettings()
+    {
+        Assert.True(new UserSettings().KeepAreaCentered);
+        Assert.True(JsonSerializer.Deserialize<UserSettings>("""{"SourceLanguage":"en"}""")!.KeepAreaCentered);
+        var off = JsonSerializer.Serialize(new UserSettings() with { KeepAreaCentered = false });
+        Assert.False(JsonSerializer.Deserialize<UserSettings>(off)!.KeepAreaCentered);
+    }
+
+    [Fact]
+    public void KeepCenteredIsKeptByTheController()
+    {
+        var store = new MemorySettings();
+        var controller = AppControllerTests.Make(settings: store);
+        controller.Settings = controller.Settings with { KeepAreaCentered = false };
+        Assert.False(store.Saved?.KeepAreaCentered);
+        Assert.False(AppControllerTests.Make(settings: store).Settings.KeepAreaCentered);
+    }
+
+    [Fact]
     public void ChoosingAPresetSetsTheRegion()
     {
         var top = new UserSettings().WithAreaPreset(AreaPreset.Top);

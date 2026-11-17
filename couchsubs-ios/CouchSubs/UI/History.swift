@@ -148,8 +148,19 @@ struct AreaTile: View {
                     model.settings.setCustomRegion(model.settings.region.withVertical(position: percent.position, height: $0))
                 }
             }
-            Text("Drag the frame to move it, or drag an edge or corner to resize it; the subtitle area stays centered.")
-                .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
+            Toggle(isOn: $model.settings.keepAreaCentered) {
+                Text("Keep centered").font(Mobile.TypeScale.headline)
+            }
+            .tint(Mobile.Palette.accent)
+            // "Ortalı kalır" yalnız Ortada tut açıkken yazılır.
+            Group {
+                if model.settings.keepAreaCentered {
+                    Text("Drag the frame to move it, or drag an edge or corner to resize it; the subtitle area stays centered.")
+                } else {
+                    Text("Drag the frame to move it, or drag an edge or corner to resize it.")
+                }
+            }
+            .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
         }
     }
 
@@ -253,6 +264,6 @@ private struct PhoneRegionPreview: View {
     @ObservedObject var preview: PhoneFramePreview
 
     var body: some View {
-        RegionPreview(region: settings.region, frame: preview.image, centered: true) { settings.setCustomRegion($0) }
+        RegionPreview(region: settings.region, frame: preview.image, centered: settings.keepAreaCentered) { settings.setCustomRegion($0) }
     }
 }

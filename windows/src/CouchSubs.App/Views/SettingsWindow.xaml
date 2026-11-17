@@ -401,6 +401,9 @@
                                     <TextBlock x:Name="AreaHeightValue" Grid.Row="2" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center"
                                                Typography.NumeralAlignment="Tabular" />
                                 </Grid>
+                                <!-- Ortada tut: kenar çekilince karşı kenar da oynar; sola yaslı ya da köşedeki altyazıda kapatılır -->
+                                <CheckBox x:Name="KeepCentered" Content="{t:T 'Keep centered'}" Foreground="{DynamicResource textPrimaryBrush}" Margin="0,12,0,0"
+                                          Checked="OnKeepCentered" Unchecked="OnKeepCentered" />
                             </StackPanel>
                             <CheckBox x:Name="UseArea" Content="{t:T 'Use this area'}" Foreground="{DynamicResource textPrimaryBrush}" Margin="0,0,0,12"
                                       Visibility="Collapsed" Checked="OnUseArea" Unchecked="OnUseArea" />

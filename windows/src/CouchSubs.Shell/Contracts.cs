@@ -196,6 +196,12 @@ public sealed record UserSettings
     /// <see cref="Region"/>'dan çıkarılır.
     /// </summary>
     public AreaPreset AreaPreset { get => areaPreset ?? AreaPresets.Matching(Region); init => areaPreset = value; }
+    /// <summary>
+    /// "Ortada tut": altyazı alanının çerçevesi kenarından boyutlandırılırken karşı kenar da aynı kadar oynar, alan ortalı
+    /// kalır (oyunların çoğu altyazıyı ortalar). Kapalıysa yalnız tutulan kenar oynar (sola yaslı ya da köşedeki altyazı).
+    /// Eski ayar dosyalarında yoktur; açık başlar. Mac/iPhone: keepAreaCentered, Android: keepAreaCentered.
+    /// </summary>
+    public bool KeepAreaCentered { get; init; } = true;
     /// <summary>Ek bölge 1 (ör. sağ üstteki görev paneli); null ise kapalı. Num 1 tuşuyla bir kez okunup çevrilir.</summary>
     public CropRegion? ExtraRegion1 { get; init; }
     /// <summary>Ek bölge 2 (ör. sağ alttaki bilgi kutusu); null ise kapalı. Num 2 tuşuyla bir kez okunup çevrilir.</summary>

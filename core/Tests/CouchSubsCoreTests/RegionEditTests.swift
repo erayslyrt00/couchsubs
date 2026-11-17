@@ -60,6 +60,18 @@ final class RegionEditTests: XCTestCase {
                     RegionEdit.dragged(area, handle: [.left, .top], dx: -0.10, dy: -0.10, centered: false))
     }
 
+    func testWithoutKeepCenteredALeftAlignedSubtitleAreaKeepsItsLeftEdge() {
+        // Sola yaslı altyazı: "Ortada tut" kapalıyken sağ kenar çekilince sol kenar yerinde kalır.
+        let left = CropRegion(top: 0.80, bottom: 0.95, left: 0.05, right: 0.45)
+        assertClose(CropRegion(top: 0.80, bottom: 0.95, left: 0.05, right: 0.55),
+                    RegionEdit.dragged(left, handle: .right, dx: 0.10, dy: 0, centered: false))
+        assertClose(CropRegion(top: 0.70, bottom: 0.95, left: 0.00, right: 0.45),
+                    RegionEdit.dragged(left, handle: [.left, .top], dx: -0.05, dy: -0.10, centered: false))
+        // Açıkken aynı sürükleme sol kenarı da oynatır ve karenin kenarına dayar.
+        assertClose(CropRegion(top: 0.80, bottom: 0.95, left: 0.00, right: 0.50),
+                    RegionEdit.dragged(left, handle: .right, dx: 0.10, dy: 0, centered: true))
+    }
+
     func testAFrameNeverGetsSmallerThanTheMinimumOrFlips() {
         let narrow = RegionEdit.dragged(area, handle: .left, dx: 0.90, dy: 0, centered: false)
         XCTAssertEqual(narrow.left, area.right - RegionEdit.minimumSize, accuracy: 1e-9)

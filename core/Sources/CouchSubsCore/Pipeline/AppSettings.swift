@@ -108,6 +108,10 @@ public struct UserSettings: Codable, Equatable {
     public var region = CropRegion()
     /// Bölgenin hazır seçimi (Alt bölge, Üst bölge, Tam ekran, Özel). Eski kayıtlarda yoktur; bölgeden çıkarılır.
     public var areaPreset = AreaPreset.bottom
+    /// "Ortada tut": altyazı alanının çerçevesi kenarından boyutlandırılırken karşı kenar da aynı kadar oynar, alan ortalı
+    /// kalır (oyunların çoğu altyazıyı ortalar). Kapalıysa yalnız tutulan kenar oynar (sola yaslı ya da köşedeki altyazı).
+    /// Eski kayıtlarda yoktur; açık başlar (Windows: KeepAreaCentered, Android: keepAreaCentered).
+    public var keepAreaCentered = true
     /// Altyazının yanında sürekli okunan ek alanlar (görev, bildirim, telefon). Varsayılan: hiç yok.
     public var extraAreas: [ExtraArea] = []
     public var style = SubtitleStyle()
@@ -168,6 +172,7 @@ public struct UserSettings: Codable, Equatable {
         let defaults = UserSettings()
         region = try values.decodeIfPresent(CropRegion.self, forKey: .region) ?? defaults.region
         areaPreset = (try? values.decodeIfPresent(AreaPreset.self, forKey: .areaPreset)) ?? AreaPreset.matching(region)
+        keepAreaCentered = try values.decodeIfPresent(Bool.self, forKey: .keepAreaCentered) ?? defaults.keepAreaCentered
         extraAreas = Array(((try? values.decodeIfPresent([ExtraArea].self, forKey: .extraAreas)) ?? defaults.extraAreas)
             .prefix(ExtraArea.maxCount))
         style = try values.decodeIfPresent(SubtitleStyle.self, forKey: .style) ?? defaults.style

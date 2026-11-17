@@ -7,10 +7,11 @@ import kotlin.math.min
 
 /**
  * Alan çerçevesinin parmakla düzenlenmesi (Ayarlar › Alan önizlemesi): hangi tutamacın tutulduğu, taşıma ve
- * boyutlandırma. Çerçevenin sekiz tutamacı vardır (köşeler ve kenar ortaları). Altyazı alanında yatay boyut ortadan
- * değişir: sağ kenar çekilince sol kenar da aynı kadar açılır, alan ortalı kalır (oyunlar altyazıyı ortalar). Ek alanlar
- * köşelerde durduğu için onlarda kenarlar serbesttir. Windows'taki CouchSubs.Core/RegionEdit.cs ve Mac/iPhone'daki
- * RegionEdit.swift ile aynı kurallar.
+ * boyutlandırma. Çerçevenin sekiz tutamacı vardır (köşeler ve kenar ortaları). Altyazı alanında "Ortada tut" açıksa
+ * (varsayılan, AppSettings.keepAreaCentered) yatay boyut ortadan değişir: sağ kenar çekilince sol kenar da aynı kadar
+ * açılır, alan ortalı kalır (oyunların çoğu altyazıyı ortalar). Kapalıysa (sola yaslı ya da köşedeki altyazı) ve ek
+ * alanlarda kenarlar serbesttir: yalnız tutulan kenar oynar. Windows'taki CouchSubs.Core/RegionEdit.cs ve
+ * Mac/iPhone'daki RegionEdit.swift ile aynı kurallar.
  */
 object RegionEdit {
     const val LEFT = 1

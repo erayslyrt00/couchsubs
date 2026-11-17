@@ -65,6 +65,16 @@ class RegionEditTest {
     }
 
     @Test
+    fun withoutKeepCenteredALeftAlignedSubtitleAreaKeepsItsLeftEdge() {
+        // Sola yaslı altyazı: "Ortada tut" kapalıyken sağ kenar çekilince sol kenar yerinde kalır.
+        val left = CropRegion(0.80, 0.95, 0.05, 0.45)
+        assertClose(CropRegion(0.80, 0.95, 0.05, 0.55), RegionEdit.dragged(left, RIGHT, 0.10, 0.0, centered = false))
+        assertClose(CropRegion(0.70, 0.95, 0.00, 0.45), RegionEdit.dragged(left, LEFT or TOP, -0.05, -0.10, centered = false))
+        // Açıkken aynı sürükleme sol kenarı da oynatır ve karenin kenarına dayar.
+        assertClose(CropRegion(0.80, 0.95, 0.00, 0.50), RegionEdit.dragged(left, RIGHT, 0.10, 0.0, centered = true))
+    }
+
+    @Test
     fun aFrameNeverGetsSmallerThanTheMinimumOrFlips() {
         assertEquals(area.right - RegionEdit.MINIMUM_SIZE, RegionEdit.dragged(area, LEFT, 0.90, 0.0, centered = false).left, 1e-9)
         assertEquals(area.bottom - RegionEdit.MINIMUM_SIZE, RegionEdit.dragged(area, TOP, 0.0, 0.90, centered = false).top, 1e-9)
