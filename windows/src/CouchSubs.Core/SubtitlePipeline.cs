@@ -52,6 +52,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     private (string Source, TextBox? Box, long Since, int Wait, int Score, ReadInfo? Read)? held;
     /// <summary>Son çevrilen (motora ya da pakete giden) okuma, puanı ve zamanı.</summary>
     private (string Source, int Score, long At)? lastSent;
+    private long lastClearAt = long.MinValue;
 
     private readonly object gate = new();
     private readonly Func<long> now = clock ?? DefaultClock;
@@ -143,6 +144,9 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     private PackMatch? FindPack(string source)
     {
         if (PackLookup is not { } lookup) return null;
+        // Ham kareden paket araması da bekleyen tam metnin parçasını üstün saymamalı.
+        if (held is { } pending && IsPackedFragment(source, pending.Source)
+            && AllLinesCovered(source, pending.Source) && ReadingScore(source) <= pending.Score) return null;
         if (lookup(source) is { } found) return found;
         if (SpeakerPrefix.Parse(source) is not { } prefix || lookup(prefix.Body) is not { } bare) return null;
         return bare with { Spoken = SpeakerPrefix.Voiced(bare.Spoken, prefix) };
@@ -349,12 +353,12 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             switch (action.Kind)
             {
                 case StabilizerKind.Clear:
+                    lastClearAt = now();
                     LineLeft();
                     sender.Clear();
                     Write("kalktı: bölge boş okundu, ekran temizlendi");
                     break;
                 case StabilizerKind.Translate:
-                    LineLeft();
                     after = TranslateOrHold(action.Text!, box);
                     break;
                 case StabilizerKind.Restore:
@@ -407,20 +411,37 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     {
         // Yeniden okuma denetimi gecikme eklemez; bekleme süreleri 0 olsa da çalışır.
         var enabled = PackLookup is not null || HoldWithoutPacks;
-        if (!enabled || FindPack(source) is not null) return Enqueue(source, box);
+        if (!enabled) { LineLeft(); return Enqueue(source, box); }
+        var packed = FindPack(source) is not null;
+        // Paket eşleşmesi kötü yeniden okumayı tam repliğin önüne geçirmesin.
+        // Bölge gerçekten temizlendiyse aynı kısa metin yeni bir replik olabilir.
         // Az önce çevrilen satırın daha iyi olmayan yeniden okuması yeni satır değildir (TV'de üst üste binmesin).
         // Tam cümle gibi görünen gürültülü okuma da ("Yeah? Dihnnr.") buna dahildir; bu yüzden beklemeden önce bakılır.
-        if (lastSent is { } last && now() - last.At < RereadWithinMs && AllLinesCovered(source, last.Source) && ReadingScore(source) <= last.Score)
+        if (lastSent is { } last && (!packed || (last.At > lastClearAt && IsPackedFragment(source, last.Source)))
+            && now() - last.At < RereadWithinMs && AllLinesCovered(source, last.Source) && ReadingScore(source) <= last.Score)
         {
             lastSent = last with { At = now() };
             Write($"yeniden-okuma: {SubtitleLog.Excerpt(source)} az önce çevrilenden iyi değil, yok sayıldı");
             return null;
         }
+        LineLeft();
+        if (packed) return Enqueue(source, box);
         var wait = WaitFor(source);
         if (wait <= 0) return Enqueue(source, box);
         held = (source, box, now(), wait, ReadingScore(source), currentRead);
         Write($"bekletiliyor (en çok {wait} ms): {SubtitleLog.Excerpt(source)}");
         return null;
+    }
+
+    private static bool IsPackedFragment(string source, string previous)
+    {
+        // Tam bir kısa cümleyi ya da yalnız benzer sözcükleri paket yolunda engelleme.
+        // Yalnız önceki metnin sözcük sınırlarıyla ayrılmış, eksik bir parçası adaydır.
+        if (LooksComplete(source)) return false;
+        var fragment = TextMatch.Normalize(source);
+        var full = TextMatch.Normalize(previous);
+        return fragment.Length > 0 && fragment.Length < full.Length
+            && (" " + full + " ").Contains(" " + fragment + " ", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -847,6 +868,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             waiting.Clear();
             held = null;
             lastSent = null;
+            lastClearAt = long.MinValue;
             inFlightCancel?.Cancel();
             pairs.Clear();
             lastReading = Reading.Empty;

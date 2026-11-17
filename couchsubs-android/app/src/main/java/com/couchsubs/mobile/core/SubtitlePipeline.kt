@@ -114,6 +114,7 @@ class SubtitlePipeline(
     private var frameOcrMs: Int? = null
     private var held: Held? = null
     private var lastSent: Sent? = null
+    private var lastClearAt = Long.MIN_VALUE
 
     /**
      * Yarım ya da bozuk okuma kısa süre bekletilip aynı satırın en iyi okuması mı çevrilsin (Windows'ta yazım denetimiyle
@@ -208,12 +209,12 @@ class SubtitlePipeline(
             }
             val result = when (action.kind) {
                 StabilizerKind.CLEAR -> {
+                    lastClearAt = now()
                     lineLeft()
                     sender.clear()
                     null
                 }
                 StabilizerKind.TRANSLATE -> {
-                    lineLeft()
                     translateOrHold(action.text!!, box)
                 }
                 StabilizerKind.RESTORE -> {
@@ -239,6 +240,10 @@ class SubtitlePipeline(
     }
 
     private fun findPack(source: String): PackMatch? {
+        held?.let { pending ->
+            if (isPackedFragment(source, pending.source) && Rereads.allLinesCovered(source, pending.source)
+                && Rereads.score(source) <= pending.score) return null
+        }
         val lookup = packLookup ?: return null
         return lookup(source) ?: SpeakerPrefix.split(source)?.let { lookup(it.body) }
     }
@@ -248,19 +253,31 @@ class SubtitlePipeline(
      * çevrilir. Temiz ve tam cümle ya da pakette bulunan satır beklemeden gider (Windows: TranslateOrHold).
      */
     private fun translateOrHold(source: String, box: TextBox?): (() -> Unit)? {
-        if (!holdReadings || findPack(source) != null) return enqueue(source, box)
+        if (!holdReadings) { lineLeft(); return enqueue(source, box) }
+        val packed = findPack(source) != null
         // Az önce çevrilen satırın daha iyi olmayan yeniden okuması yeni satır değildir (TV'de üst üste binmesin).
         val time = now()
         lastSent?.let { last ->
-            if (time - last.at < REREAD_WITHIN_MS && Rereads.allLinesCovered(source, last.source) && Rereads.score(source) <= last.score) {
+            if ((!packed || (last.at > lastClearAt && isPackedFragment(source, last.source)))
+                && time - last.at < REREAD_WITHIN_MS && Rereads.allLinesCovered(source, last.source) && Rereads.score(source) <= last.score) {
                 lastSent = last.copy(at = time)
                 return null
             }
         }
+        lineLeft()
+        if (packed) return enqueue(source, box)
         val wait = waitFor(source)
         if (wait <= 0) return enqueue(source, box)
         held = Held(source, box, time, wait, Rereads.score(source), frameAt, frameOcrMs)
         return null
+    }
+
+    // Paket eşleşmesi tek başına eksik parçayı yeni replik yapmaz. Tam kısa cümleler korunur.
+    private fun isPackedFragment(source: String, previous: String): Boolean {
+        if (Rereads.looksComplete(source)) return false
+        val fragment = TextMatch.normalize(source)
+        val full = TextMatch.normalize(previous)
+        return fragment.isNotEmpty() && fragment.length < full.length && (" $full ").contains(" $fragment ")
     }
 
     /** Bozuksa [packWait], temiz ama yarım olabilecekse [cleanWait], temiz ve tam cümleyse 0. */
@@ -455,6 +472,7 @@ class SubtitlePipeline(
         lineOnScreen = null
         held = null
         lastSent = null
+        lastClearAt = Long.MIN_VALUE
         waiting.clear()
         lastShownSource = null
         pairs.clear()

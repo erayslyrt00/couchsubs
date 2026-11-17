@@ -45,6 +45,7 @@ public final class SubtitlePipeline {
     private var held: Held?
     /// Son çevrilen (motora ya da pakete giden) okuma, puanı ve zamanı.
     private var lastSent: (source: String, score: Int, at: Int)?
+    private var lastClearAt = Int.min
     /// Yarım ya da bozuk okuma kısa süre bekletilip aynı satırın en iyi okuması mı çevrilsin (Windows'ta yazım denetimiyle
     /// açık). Mac ve iPhone'da açık (Windows ve Android ile aynı); kapalıyken her kararlı okuma hemen çevrilir.
     public var holdReadings = true
@@ -296,11 +297,11 @@ public final class SubtitlePipeline {
         case .none:
             break
         case .clear:
+            lastClearAt = now()
             lineLeft()
             server.clear()
             log("kalktı: bölge boş okundu, ekran temizlendi")
         case .translate(let source):
-            lineLeft()
             translateOrHold(source, box: box)
         case .restore(let source):
             lineLeft()
@@ -353,6 +354,8 @@ public final class SubtitlePipeline {
     }
 
     private func findPack(_ source: String) -> PackMatch? {
+        if let pending = held, isPackedFragment(source, of: pending.source),
+           Rereads.allLinesCovered(source, by: pending.source), Rereads.score(source) <= pending.score { return nil }
         guard let packLookup else { return nil }
         if let found = packLookup(source) { return found }
         guard let prefix = SpeakerPrefix.split(source) else { return nil }
@@ -362,19 +365,29 @@ public final class SubtitlePipeline {
     /// Bozuk ya da yarım olabilecek okuma hemen çevrilmez, kısa süre bekletilir; aynı satırın daha iyi okuması gelirse o
     /// çevrilir. Temiz ve tam cümle ya da pakette bulunan satır beklemeden gider (Windows: TranslateOrHold).
     private func translateOrHold(_ source: String, box: TextBox?) {
-        if !holdReadings || findPack(source) != nil { return enqueue(source, box: box) }
+        if !holdReadings { lineLeft(); return enqueue(source, box: box) }
+        let packed = findPack(source) != nil
         let time = now()
         // Az önce çevrilen satırın daha iyi olmayan yeniden okuması yeni satır değildir (TV'de üst üste binmesin).
-        if let last = lastSent, time - last.at < Self.rereadWithinMs,
-           Rereads.allLinesCovered(source, by: last.source), Rereads.score(source) <= last.score {
+        if let last = lastSent, (!packed || (last.at > lastClearAt && isPackedFragment(source, of: last.source))),
+           time - last.at < Self.rereadWithinMs, Rereads.allLinesCovered(source, by: last.source), Rereads.score(source) <= last.score {
             lastSent = (last.source, last.score, time)
             log("yeniden-okuma: \(SubtitleLog.excerpt(source)) az önce çevrilenden iyi değil, yok sayıldı")
             return
         }
+        lineLeft()
+        if packed { return enqueue(source, box: box) }
         let wait = waitFor(source)
         guard wait > 0 else { return enqueue(source, box: box) }
         held = Held(source: source, box: box, since: time, wait: wait, score: Rereads.score(source), read: currentRead)
         log("bekletiliyor (en çok \(wait) ms): \(SubtitleLog.excerpt(source))")
+    }
+
+    // Paket eşleşmesi tek başına eksik parçayı yeni replik yapmaz. Tam kısa cümleler korunur.
+    private func isPackedFragment(_ source: String, of previous: String) -> Bool {
+        if Rereads.looksComplete(source) { return false }
+        let fragment = TextMatch.normalize(source), full = TextMatch.normalize(previous)
+        return !fragment.isEmpty && fragment.count < full.count && (" " + full + " ").contains(" " + fragment + " ")
     }
 
     /// Bozuksa `packWait`, temiz ama yarım olabilecekse `cleanWait`, temiz ve tam cümleyse 0.
@@ -612,6 +625,7 @@ public final class SubtitlePipeline {
         lineOnScreen = nil
         held = nil
         lastSent = nil
+        lastClearAt = Int.min
         waiting.removeAll()
         // Apple'ın çevirisi görev iptaline uyar; süren çeviri beklenmeden bırakılır.
         work?.cancel()
