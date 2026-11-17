@@ -86,6 +86,77 @@
         <Setter Property="TextElement.Foreground" Value="{DynamicResource proBrush}" />
     </Style>
 
+    <!-- Bilgi karosu satırı (InfoCard): solda ikincil ad, sağda değer; en az rowHeight. Tıklanan satır (InfoRowButton)
+         ayara götürür: sonunda "›", üzerine gelince ikinci yüzey. -->
+    <Style x:Key="InfoRowLabel" TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+    <Style x:Key="InfoRowValue" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource textPrimaryBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <Style x:Key="InfoRow" TargetType="DockPanel">
+        <Setter Property="MinHeight" Value="{DynamicResource size.rowHeight}" />
+        <Setter Property="LastChildFill" Value="False" />
+    </Style>
+    <Style x:Key="InfoRowButton" TargetType="Button">
+        <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource bodyFontSize}" />
+        <Setter Property="Foreground" Value="{DynamicResource textPrimaryBrush}" />
+        <Setter Property="MinHeight" Value="{DynamicResource size.rowHeight}" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <!-- Satırın zemini karonun iç kenarına taşar, yazı hizası bozulmaz. -->
+        <Setter Property="Margin" Value="-8,0" />
+        <Setter Property="Padding" Value="8,0" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Row" Background="Transparent" CornerRadius="{DynamicResource radius.inner}" Padding="{TemplateBinding Padding}"
+                            BorderThickness="2" BorderBrush="Transparent">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Right" Text="&#xE76C;" Style="{StaticResource GlyphText}" FontSize="12" Margin="8,0,0,0"
+                                       Foreground="{DynamicResource textSecondaryBrush}" />
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </DockPanel>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Row" Property="Background" Value="{DynamicResource surface2Brush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Row" Property="BorderBrush" Value="{DynamicResource accentTextBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="InfoDivider" TargetType="Border">
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Background" Value="{DynamicResource borderBrush}" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+    <!-- Tuş (Keycap): 24 yükseklik, etiket köşesi, ikinci yüzey ve ince çerçeve; küçük yazı, ana yazı renginde. -->
+    <Style x:Key="Keycap" TargetType="Border">
+        <Setter Property="Height" Value="{DynamicResource size.keycap}" />
+        <Setter Property="Padding" Value="8,0" />
+        <Setter Property="CornerRadius" Value="{DynamicResource radius.tag}" />
+        <Setter Property="Background" Value="{DynamicResource surface2Brush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource borderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextElement.FontSize" Value="{DynamicResource captionFontSize}" />
+        <Setter Property="TextElement.FontWeight" Value="{DynamicResource captionFontWeight}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource textPrimaryBrush}" />
+    </Style>
+
     <!-- Oyun monogramı (paketler): 52 × 52, yüzey-2, iç köşe 8, ana yazı rengi. -->
     <Style x:Key="GameMonogram" TargetType="Border">
         <Setter Property="Width" Value="52" />
@@ -115,7 +186,7 @@
     <!-- Düğmeler: birincil (düz sarı), ikincil (yüzey-2, ince çerçeve), tehlikeli (kırmızı tonlu, çerçevesiz), hayalet, simge.
          Gölge ve parıltı yok. -->
     <ControlTemplate x:Key="ButtonTemplate" TargetType="Button">
-        <Grid>
+        <Grid x:Name="Root" RenderTransformOrigin="0.5,0.5">
             <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
                     BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource radius.control}"
                     Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
@@ -125,11 +196,13 @@
                     BorderThickness="2" Visibility="Collapsed" />
         </Grid>
         <ControlTemplate.Triggers>
-            <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Frame" Property="Opacity" Value="0.92" />
-            </Trigger>
+            <!-- Üzerine gelince zemin her düğme türünün kendi stilinde değişir; basılıyken %97 ölçek (docs/TASARIM.md). -->
             <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="Frame" Property="Opacity" Value="0.8" />
+                <Setter TargetName="Root" Property="RenderTransform">
+                    <Setter.Value>
+                        <ScaleTransform ScaleX="0.97" ScaleY="0.97" />
+                    </Setter.Value>
+                </Setter>
             </Trigger>
             <Trigger Property="IsKeyboardFocused" Value="True">
                 <Setter TargetName="Focus" Property="Visibility" Value="Visible" />
@@ -155,8 +228,15 @@
         <Setter Property="Foreground" Value="{DynamicResource onAccentBrush}" />
         <Setter Property="BorderThickness" Value="0" />
         <Style.Triggers>
-            <Trigger Property="IsPressed" Value="True">
+            <Trigger Property="IsMouseOver" Value="True">
                 <Setter Property="Background" Value="{DynamicResource accentHiBrush}" />
+            </Trigger>
+            <!-- Devre dışı birincil düğme soldurulmuş sarı değil: ikinci yüzey ve ikincil yazı. -->
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Background" Value="{DynamicResource surface2Brush}" />
+                <Setter Property="Foreground" Value="{DynamicResource textSecondaryBrush}" />
+                <Setter Property="Opacity" Value="1" />
+                <Setter Property="Cursor" Value="Arrow" />
             </Trigger>
         </Style.Triggers>
     </Style>
@@ -165,17 +245,33 @@
         <Setter Property="Foreground" Value="{DynamicResource textPrimaryBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource borderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource borderBrush}" />
+            </Trigger>
+        </Style.Triggers>
     </Style>
     <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource ButtonBase}">
         <Setter Property="Background" Value="{DynamicResource dangerSoftBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource dangerBrush}" />
-        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="BorderBrush" Value="{DynamicResource dangerBorderBrush}" />
+            </Trigger>
+        </Style.Triggers>
     </Style>
     <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource ButtonBase}">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource accentTextBrush}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Padding" Value="12,0" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource surface2Brush}" />
+            </Trigger>
+        </Style.Triggers>
     </Style>
     <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}" />
     <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
@@ -289,10 +385,47 @@
         <Setter Property="HorizontalAlignment" Value="Left" />
     </Style>
 
+    <!-- Seçenek düğmesi: 20'lik daire; seçiliyken sarı çerçeve ve içinde 10'luk sarı nokta (docs/TASARIM.md). -->
     <Style TargetType="RadioButton">
+        <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
         <Setter Property="FontSize" Value="{DynamicResource bodyFontSize}" />
         <Setter Property="Foreground" Value="{DynamicResource textPrimaryBrush}" />
         <Setter Property="Margin" Value="0,4" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Grid Background="Transparent" MinHeight="32">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid Width="20" Height="20" VerticalAlignment="Center">
+                            <Ellipse x:Name="Ring" Stroke="{DynamicResource borderBrush}" StrokeThickness="1.5" Fill="{DynamicResource surface2Brush}" />
+                            <Ellipse x:Name="Dot" Width="10" Height="10" Fill="{DynamicResource accentBrush}" Visibility="Collapsed" />
+                        </Grid>
+                        <ContentPresenter Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource textSecondaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource accentBrush}" />
+                            <Setter TargetName="Dot" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource accentTextBrush}" />
+                            <Setter TargetName="Ring" Property="StrokeThickness" Value="2" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- Anahtar: 52 × 32 hap, açıkken düz sarı (parıltı yok). Yazı anahtarın sağında. -->
@@ -573,7 +706,7 @@
                     <StackPanel>
                         <TextBlock Text="{TemplateBinding Title}" Style="{StaticResource DisplayText}" />
                         <TextBlock Text="{TemplateBinding Message}" Style="{StaticResource SecondaryText}" Margin="0,12,0,0" MaxWidth="620" HorizontalAlignment="Left" />
-                        <ContentPresenter Margin="0,20,0,0" />
+                        <ContentPresenter Margin="0,16,0,0" />
                     </StackPanel>
                 </ControlTemplate>
             </Setter.Value>
@@ -615,16 +748,20 @@
                             </Border>
                             <TextBlock Text="{TemplateBinding Title}" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
                         </DockPanel>
-                        <TextBlock x:Name="Value" Text="{TemplateBinding Value}" Style="{StaticResource HeadlineText}"
+                        <!-- Boştayken değer çoğu zaman bir açıklamadır ("… Çeviriyi başlatınca bağlanır."): gövde boyunda,
+                             ikincil renkte. Bağlıyken ve uyarıda kısa durum, karo başlığı boyunda. -->
+                        <TextBlock x:Name="Value" Text="{TemplateBinding Value}" Style="{StaticResource BodyText}"
                                    TextWrapping="Wrap" Foreground="{DynamicResource textSecondaryBrush}" />
                     </StackPanel>
                     <ControlTemplate.Triggers>
                         <Trigger Property="Tone" Value="Good">
                             <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource successBrush}" />
                             <Setter TargetName="Value" Property="Foreground" Value="{DynamicResource textPrimaryBrush}" />
+                            <Setter TargetName="Value" Property="Style" Value="{StaticResource HeadlineText}" />
                         </Trigger>
                         <Trigger Property="Tone" Value="Warning">
                             <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource warningBrush}" />
+                            <Setter TargetName="Value" Property="Style" Value="{StaticResource HeadlineText}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -676,13 +813,15 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <c:Card Width="{DynamicResource size.sidebarWidth}" Padding="12,20" VerticalAlignment="Stretch">
+                        <c:Card Width="{DynamicResource size.sidebarWidth}" Padding="12,16" VerticalAlignment="Stretch">
                             <StackPanel>
-                                <TextBlock Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Style="{StaticResource TitleText}" Margin="12,0,12,12" />
+                                <!-- TabControl'ün varsayılan yazı rengi siyahtır; başlığın rengi açıkça verilir. -->
+                                <TextBlock Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Style="{StaticResource TitleText}" Margin="12,0,12,12"
+                                           Foreground="{DynamicResource textPrimaryBrush}" />
                                 <StackPanel IsItemsHost="True" KeyboardNavigation.TabNavigation="Once" KeyboardNavigation.DirectionalNavigation="Cycle" />
                             </StackPanel>
                         </c:Card>
-                        <ScrollViewer Grid.Column="1" Margin="16,0,0,0" VerticalScrollBarVisibility="Auto" Focusable="False">
+                        <ScrollViewer Grid.Column="1" Margin="12,0,0,0" VerticalScrollBarVisibility="Auto" Focusable="False">
                             <ContentPresenter ContentSource="SelectedContent" Margin="0,0,12,0" />
                         </ScrollViewer>
                     </Grid>

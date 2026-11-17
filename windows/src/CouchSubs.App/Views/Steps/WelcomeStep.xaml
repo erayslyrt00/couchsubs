@@ -13,7 +13,7 @@
                     <RadioButton x:Name="Xbox" Content="{t:T 'Xbox Series / Xbox One (Beta)'}" GroupName="consoleKind" Checked="OnSelected" />
                 </StackPanel>
             </c:Card>
-            <TextBlock x:Name="Requirements" Margin="0,20,0,0" TextWrapping="Wrap" Style="{StaticResource HintText}" />
+            <TextBlock x:Name="Requirements" Margin="0,16,0,0" TextWrapping="Wrap" Style="{StaticResource HintText}" />
         </StackPanel>
     </c:StepLayout>
 </UserControl>

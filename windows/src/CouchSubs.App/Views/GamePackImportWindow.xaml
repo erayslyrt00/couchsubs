@@ -10,7 +10,7 @@
         <TextBlock Text="{t:T 'Game title'}" Style="{StaticResource HeadlineText}" Margin="0,0,0,8" />
         <TextBox x:Name="GameTitle" AutomationProperties.Name="{t:T 'Game title'}" TextChanged="OnTitleChanged" />
 
-        <Grid Margin="0,16,0,0">
+        <Grid Margin="0,12,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -34,7 +34,7 @@
         <TextBlock x:Name="InstallError" Style="{StaticResource ErrorText}" TextWrapping="Wrap" Margin="0,12,0,0" Visibility="Collapsed"
                    AutomationProperties.LiveSetting="Polite" />
 
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button Content="{t:T 'Cancel'}" IsCancel="True" Margin="0,0,8,0" />
             <Button x:Name="InstallPack" Content="{t:T 'Install pack'}" Style="{StaticResource PrimaryButton}"
                     IsDefault="True" Click="OnInstall" IsEnabled="False" />

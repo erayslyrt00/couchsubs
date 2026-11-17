@@ -21,7 +21,7 @@
                            Text="{t:T 'Subtitles appear in a window on this computer, over the game or PS Remote Play.'}" />
                 <WrapPanel>
                     <CheckBox x:Name="ClickThrough" Content="{t:T 'Clicks pass through'}" Foreground="{DynamicResource textPrimaryBrush}"
-                              VerticalAlignment="Center" Margin="0,0,16,8" Checked="OnClickThrough" Unchecked="OnClickThrough" />
+                              VerticalAlignment="Center" Margin="0,0,12,8" Checked="OnClickThrough" Unchecked="OnClickThrough" />
                     <Button x:Name="Adjust" Content="{t:T 'Adjust the subtitle window'}" Padding="16,0" Margin="0,0,0,8" Click="OnAdjust" />
                 </WrapPanel>
                 <TextBlock x:Name="ClickThroughHint" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,0,0,0" />

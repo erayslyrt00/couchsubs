@@ -11,7 +11,7 @@
                       Checked="OnEnabled" Unchecked="OnEnabled" />
             <TextBlock x:Name="SetupHint" Style="{StaticResource HintText}" Margin="0,8,0,0" />
             <StackPanel x:Name="Options" Margin="0,12,0,0">
-                <StackPanel x:Name="EnginePanel" Margin="0,0,0,16">
+                <StackPanel x:Name="EnginePanel" Margin="0,0,0,12">
                     <TextBlock Text="{t:T 'Voice'}" Margin="0,0,0,8" />
                     <Border Style="{StaticResource SegmentGroup}" HorizontalAlignment="Left">
                         <StackPanel Orientation="Horizontal">
@@ -29,7 +29,7 @@
                 </StackPanel>
                 <StackPanel x:Name="ReadyPanel">
                     <TextBlock Text="{t:T 'Play the voice on'}" Margin="0,0,0,8" />
-                    <Border Style="{StaticResource SegmentGroup}" Margin="0,0,0,16" HorizontalAlignment="Left">
+                    <Border Style="{StaticResource SegmentGroup}" Margin="0,0,0,12" HorizontalAlignment="Left">
                         <StackPanel Orientation="Horizontal">
                             <RadioButton x:Name="OnTv" Content="{t:T 'TV'}" GroupName="output" Style="{StaticResource SegmentButton}" Checked="OnOutput" Tag="Tv" />
                             <RadioButton x:Name="OnComputer" Content="{t:T 'This computer'}" GroupName="output" Style="{StaticResource SegmentButton}" Checked="OnOutput" Tag="Computer" />

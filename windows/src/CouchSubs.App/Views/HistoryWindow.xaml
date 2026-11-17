@@ -14,7 +14,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Margin="0,0,0,16">
+        <StackPanel Margin="0,0,0,12">
             <TextBlock Text="{t:T 'History'}" Style="{StaticResource DisplayText}" />
             <TextBlock x:Name="KeptHint" Style="{StaticResource HintText}" Margin="0,4,0,0" />
         </StackPanel>
@@ -48,7 +48,7 @@
             </Grid>
         </c:Card>
 
-        <DockPanel Grid.Row="2" Margin="0,16,0,0" LastChildFill="False">
+        <DockPanel Grid.Row="2" Margin="0,12,0,0" LastChildFill="False">
             <Button x:Name="CopyAll" Content="{t:T 'Copy all'}" Click="OnCopyAll" Margin="0,0,8,0" />
             <Button x:Name="ClearAll" Content="{t:T 'Clear'}" Click="OnClear" />
             <Button DockPanel.Dock="Right" Content="{t:T 'Close'}" Style="{StaticResource PrimaryButton}" IsCancel="True" Click="OnClose" />

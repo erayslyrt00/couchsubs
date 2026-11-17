@@ -10,7 +10,7 @@
             <TextBlock Text="{t:T 'Signed in'}" Style="{StaticResource DoneText}" Margin="0,0,0,12"
                        Visibility="{Binding HasXboxAccount, Converter={StaticResource VisibleIf}}" />
             <Button x:Name="SignIn" Content="{t:T 'Sign in with Microsoft'}" Style="{StaticResource PrimaryButton}" Click="OnSignIn" />
-            <StackPanel x:Name="CodePanel" Visibility="Collapsed" Margin="0,16,0,8">
+            <StackPanel x:Name="CodePanel" Visibility="Collapsed" Margin="0,12,0,8">
                 <TextBlock Text="{t:T 'Your code (click to copy):'}" Style="{StaticResource HintText}" Margin="0,0,0,4" />
                 <!-- Kod tıklanınca kopyalanır; seçilip kopyalanabilsin diye salt okunur kutu. -->
                 <TextBox x:Name="Code" IsReadOnly="True" FontSize="30" FontWeight="Bold" BorderThickness="0" Background="Transparent"
