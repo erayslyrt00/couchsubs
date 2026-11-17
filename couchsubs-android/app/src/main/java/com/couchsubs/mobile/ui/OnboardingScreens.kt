@@ -20,9 +20,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Switch
@@ -106,8 +104,8 @@ fun WelcomeScreen(onDone: () -> Unit) {
                     }
                     else -> {
                         TwoColumns(
-                            { StatusTile(Icons.Filled.Home, stringResource(R.string.welcome3_tv_label), stringResource(R.string.welcome3_tv), it) },
-                            { StatusTile(Icons.Filled.Phone, stringResource(R.string.welcome3_phone_label), stringResource(R.string.welcome3_phone), it) },
+                            { StatusTile(CouchIcons.Tv, stringResource(R.string.welcome3_tv_label), stringResource(R.string.welcome3_tv), it) },
+                            { StatusTile(CouchIcons.Smartphone, stringResource(R.string.welcome3_phone_label), stringResource(R.string.welcome3_phone), it) },
                         )
                         Tile(Modifier.fillMaxWidth()) {
                             Text(stringResource(R.string.welcome3_wifi), style = Tokens.Type.headline, color = Tokens.Color.text)
@@ -252,7 +250,7 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: (() -> Unit)? = null
         Heading(stringResource(R.string.target_title), stringResource(R.string.target_body), if (onBack == null) stringResource(R.string.setup_step, 3) else null)
         Tile(Modifier.fillMaxWidth(), style = if (target == SubtitleTarget.TV) TileStyle.ACTIVE else TileStyle.NORMAL, onClick = { target = SubtitleTarget.TV }) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
-                TileIcon(Icons.Filled.Home)
+                TileIcon(CouchIcons.Tv)
                 Text(stringResource(R.string.target_tv), style = Tokens.Type.headline, color = Tokens.Color.text, modifier = Modifier.weight(1f))
                 if (target == SubtitleTarget.TV) SelectedCheck()
             }
@@ -274,7 +272,7 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: (() -> Unit)? = null
             if (onTvInstall != null) GhostButton(stringResource(R.string.tvinstall_entry), onClick = onTvInstall)
         }
         TwoColumns(
-            { StatusTile(Icons.Filled.Phone, stringResource(R.string.target_phone_note), stringResource(R.string.target_phone), it,
+            { StatusTile(CouchIcons.Smartphone, stringResource(R.string.target_phone_note), stringResource(R.string.target_phone), it,
                 style = if (target == SubtitleTarget.PHONE) TileStyle.ACTIVE else TileStyle.NORMAL,
                 corner = { if (target == SubtitleTarget.PHONE) SelectedCheck() }, onClick = { target = SubtitleTarget.PHONE }) },
             { StatusTile(Icons.Filled.Info, stringResource(R.string.target_unlisted_note), stringResource(R.string.target_unlisted), it,

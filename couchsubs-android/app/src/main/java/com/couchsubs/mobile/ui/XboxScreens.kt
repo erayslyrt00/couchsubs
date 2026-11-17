@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,7 +72,7 @@ fun PlatformScreen(onBack: (() -> Unit)? = null, onDone: () -> Unit) {
 private fun PlatformTile(title: String, body: String, beta: Boolean, selected: Boolean, onClick: () -> Unit) {
     Tile(Modifier.fillMaxWidth(), style = if (selected) TileStyle.ACTIVE else TileStyle.NORMAL, onClick = onClick) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
-            TileIcon(Icons.Filled.PlayArrow, if (selected) Tokens.Color.accentText else Tokens.Color.secondary)
+            TileIcon(CouchIcons.Gamepad, if (selected) Tokens.Color.accentText else Tokens.Color.secondary)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                     Text(title, style = Tokens.Type.headline, color = Tokens.Color.text)

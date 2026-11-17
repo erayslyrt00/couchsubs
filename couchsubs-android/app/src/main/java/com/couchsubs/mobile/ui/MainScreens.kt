@@ -21,13 +21,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,6 +48,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.couchsubs.mobile.R
 import com.couchsubs.mobile.Services
@@ -117,7 +111,7 @@ fun MainScreen(
     val topBar: @Composable () -> Unit = {
         TopBar {
             // iPhone'daki gibi: geçmiş, ayarlar, profil.
-            IconAction(Icons.Filled.DateRange, stringResource(R.string.history), onHistory)
+            IconAction(CouchIcons.History, stringResource(R.string.history), onHistory)
             SettingsAction(onSettings)
             Box(mark(TourStep.PROFILE)) { ProfileAction(onProfile) }
         }
@@ -137,33 +131,38 @@ fun MainScreen(
             }
             status.error?.let { NoteTile(it) }
             TvAppUpdateCard(onTvUpdate)
+            // Telefon ana ekranı (TASARIM.md): PS5 ve Altyazı durum karoları ilgili ayarı açar (`›`).
             TwoColumns(
-                { if (xbox) StatusTile(Icons.Filled.PlayArrow, "Xbox", settings.xboxConsole?.name ?: stringResource(R.string.profile_not_paired), it,
-                    corner = { Pill(stringResource(R.string.beta)) }, onClick = onPairing)
-                  else StatusTile(Icons.Filled.PlayArrow, "PS5", settings.console?.name ?: stringResource(R.string.profile_not_paired), it,
-                    corner = { if (settings.console != null) StatusLabel(stringResource(R.string.main_paired)) }, onClick = onPairing) },
-                { StatusTile(if (settings.target == SubtitleTarget.TV) Icons.Filled.Home else Icons.Filled.Phone, stringResource(R.string.main_target),
+                { if (xbox) StatusTile(CouchIcons.Gamepad, "Xbox", settings.xboxConsole?.name ?: stringResource(R.string.profile_not_paired), it,
+                    corner = { Pill(stringResource(R.string.beta)) }, chevron = true, onClick = onPairing)
+                  else StatusTile(CouchIcons.Gamepad, "PS5", settings.console?.name ?: stringResource(R.string.profile_not_paired), it,
+                    corner = { if (settings.console != null) StatusLabel(stringResource(R.string.main_paired)) }, chevron = true, onClick = onPairing) },
+                { StatusTile(if (settings.target == SubtitleTarget.TV) CouchIcons.Tv else CouchIcons.Smartphone, stringResource(R.string.main_target),
                     if (settings.target == SubtitleTarget.TV) settings.tvName ?: stringResource(R.string.main_target_tv) else stringResource(R.string.main_target_phone),
-                    it.then(mark(TourStep.TARGET)), onClick = onTarget) },
+                    it.then(mark(TourStep.TARGET)), chevron = true, onClick = onTarget) },
             )
+            // Paket karosu: başlık ve not tek satır, sağda yalnız `›`; paketler kapalıysa nötr "Kapalı" etiketi.
             Box(mark(TourStep.PACKS)) {
                 Tile(Modifier.fillMaxWidth(), onClick = onPacks) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
-                        TileIcon(Icons.AutoMirrored.Filled.List, Tokens.Color.pro)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
+                        TileIcon(CouchIcons.Package, Tokens.Color.pro)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
-                            Text(stringResource(R.string.main_packs_title), style = Tokens.Type.headline, color = Tokens.Color.text)
-                            Text(stringResource(R.string.main_packs_games), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+                            Text(stringResource(R.string.main_packs_title), style = Tokens.Type.headline, color = Tokens.Color.text,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(stringResource(R.string.main_packs_games), style = Tokens.Type.caption, color = Tokens.Color.secondary,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        Pill(stringResource(if (settings.packsEnabled) R.string.packs_free else R.string.main_packs_off))
-                        TileIcon(Icons.AutoMirrored.Filled.KeyboardArrowRight)
+                        if (!settings.packsEnabled) Pill(stringResource(R.string.main_packs_off))
+                        Chevron()
                     }
                 }
             }
-            TwoColumns(
-                { StatusTile(Icons.Filled.Create, stringResource(R.string.main_engine), status.engineLabel.ifEmpty { engineName(context) }, it, onClick = onSettings) },
-                { StatusTile(Icons.Filled.DateRange, stringResource(R.string.main_last_session),
-                    if (settings.lastSessionMs > 0) durationText(context, settings.lastSessionMs) else "—", it) },
-            )
+            // Çeviri motoru ve son oturum durum değil ayar bilgisidir: tek bilgi karosunda iki satır.
+            InfoCard(listOf(
+                { InfoRow(stringResource(R.string.main_engine), status.engineLabel.ifEmpty { engineName(context) }, onClick = onSettings) },
+                { InfoRow(stringResource(R.string.main_last_session),
+                    if (settings.lastSessionMs > 0) durationText(context, settings.lastSessionMs) else "—", onClick = onHistory) },
+            ))
         }
         tour?.let { step ->
             TourOverlay(step, bounds[step], onSkip = {

@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -165,7 +164,7 @@ internal fun LgInstallScreen(onBack: () -> Unit, onDone: () -> Unit, brandPicker
                     Tile(Modifier.fillMaxWidth(), style = if (host == tv.host) TileStyle.ACTIVE else TileStyle.NORMAL,
                         onClick = { if (!working) host = tv.host }) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
-                            TileIcon(Icons.Filled.Home)
+                            TileIcon(CouchIcons.Tv)
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
                                 Text(tv.name, style = Tokens.Type.headline, color = Tokens.Color.text)
                                 Text(tv.host, style = Tokens.Type.caption, color = Tokens.Color.secondary)

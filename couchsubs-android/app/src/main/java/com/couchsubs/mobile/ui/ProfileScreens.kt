@@ -17,7 +17,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -82,11 +81,11 @@ fun ProfileScreen(onBack: () -> Unit, onSettings: () -> Unit, onPairing: () -> U
     LaunchedEffect(Unit) { tvs = withContext(Dispatchers.IO) { runCatching { TvDiscovery.search() }.getOrDefault(emptyList()) } }
     ScreenScaffold(top = { TopBar(stringResource(R.string.profile), onBack = onBack) { SettingsAction(onSettings) } }) {
         TwoColumns(
-            { StatusTile(Icons.Filled.Home, "PS5", settings.console?.name ?: stringResource(R.string.profile_not_paired), it,
-                corner = { if (settings.console != null) StatusLabel(stringResource(R.string.main_paired)) }, onClick = onPairing) },
+            { StatusTile(CouchIcons.Gamepad, "PS5", settings.console?.name ?: stringResource(R.string.profile_not_paired), it,
+                corner = { if (settings.console != null) StatusLabel(stringResource(R.string.main_paired)) }, chevron = true, onClick = onPairing) },
             { StatusTile(Icons.Filled.Person, stringResource(R.string.profile_psn),
                 stringResource(if (settings.accountId != null) R.string.profile_psn_linked_short else R.string.profile_psn_missing), it,
-                onClick = onPsn) },
+                chevron = true, onClick = onPsn) },
         )
         Tile(Modifier.fillMaxWidth(), onClick = onTarget) {
             TileLabel(stringResource(R.string.profile_tvs))
