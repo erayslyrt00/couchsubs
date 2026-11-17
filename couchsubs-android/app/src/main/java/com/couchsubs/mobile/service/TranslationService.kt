@@ -360,7 +360,7 @@ class TranslationService : Service() {
                 PlayedGame.consoleReported(null)
                 regionWatcher?.reset()
             }
-            LiveState.update { it.copy(phase = describe(state)) }
+            LiveState.update { it.copy(phase = describe(state), streaming = state == SessionState.Streaming) }
         }
         // Oynanan oyun (PS5'in bildirdiği, kullanıcının seçtiği ya da paketten tanınan; bkz. PlayedGame): havuza giden
         // satırlar bu oyunla gider. Klipte oyun aranmaz, sorulmaz.
@@ -664,7 +664,7 @@ class TranslationService : Service() {
         if (current === this) current = null
         wakeLock?.takeIf { it.isHeld }?.release()
         wifiLock?.takeIf { it.isHeld }?.release()
-        LiveState.update { it.copy(running = false, phase = "", current = "", previous = "", regions = emptyList(), screen = emptyList(), screenState = LiveStatus.ScreenState.IDLE) }
+        LiveState.update { it.copy(running = false, phase = "", streaming = false, current = "", previous = "", regions = emptyList(), screen = emptyList(), screenState = LiveStatus.ScreenState.IDLE) }
         super.onDestroy()
     }
 }

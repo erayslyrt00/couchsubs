@@ -5,6 +5,7 @@ package com.couchsubs.mobile.ui
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.text.format.DateUtils
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -208,18 +209,25 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
         }
     }
     ScreenScaffold(top = topBar, bottom = {
-        SecondaryButton(stringResource(R.string.main_phone_view), onClick = onPhoneView)
-        if (status.phase == stringResource(R.string.phase_streaming)) ScreenTranslateButton(status)
+        // İki ikincil düğme yan yana (Geçmiş ekranındaki gibi); "Ekranı çevir" yalnız görüntü gelirken.
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
+            SecondaryButton(stringResource(R.string.main_phone_view), Modifier.weight(1f), onClick = onPhoneView)
+            if (status.streaming) ScreenTranslateButton(status, Modifier.weight(1f))
+        }
         DestructiveButton(stringResource(R.string.stop), onClick = onStop)
     }) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap), verticalAlignment = Alignment.CenterVertically) {
             val elapsed = ((now - status.startedAt).coerceAtLeast(0) / 1000)
-            StatusLabel(stringResource(R.string.running_pill, "%d:%02d".format(elapsed / 60, elapsed % 60)), live = true)
+            // Bir saati geçince "1:12:10" (DateUtils: s:dd:ss), öncesinde "12:10"; rakamlar tablo rakamı, süre akarken kaymaz.
+            StatusLabel(stringResource(R.string.running_pill, DateUtils.formatElapsedTime(elapsed)), live = true,
+                style = Tokens.Type.captionNumeric)
             Spacer(Modifier.weight(1f))
             status.packInUse?.let { Pill(stringResource(R.string.running_pack, it), pro = true) }
         }
-        Text(status.phase, style = Tokens.Type.caption, color = Tokens.Color.secondary)
-        status.error?.let { NoteTile(it) }
+        // Görüntü gelirken durum metni ("Altyazılar okunuyor") üstteki "Çeviri sürüyor" satırını tekrarlar; yalnız
+        // bağlanırken ve bağlantı sorunlarında gösterilir.
+        if (!status.streaming && status.phase.isNotEmpty()) Text(status.phase, style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        AnimatedNote(status.error)
         val current = status.recent.firstOrNull()
         // İlk altyazı gelene kadar: kolu açınca PS5'te ana hesap seçilmeli (GitHub #231).
         if (current == null && !Services.settings.xbox) NoteTile(stringResource(R.string.psn_main_account), Tokens.Color.secondary)
@@ -241,7 +249,8 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
         val previous = status.recent.drop(1).take(4)
         if (previous.isNotEmpty()) RowList(previous.map { pair ->
             {
-                Row(Modifier.padding(vertical = Tokens.Space.inline), verticalAlignment = Alignment.CenterVertically,
+                // Satır iki ya da daha çok satıra uzayınca kaynak etiketi ilk satırın hizasında kalır.
+                Row(Modifier.padding(vertical = Tokens.Space.inline), verticalAlignment = Alignment.Top,
                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
                         Text(pair.translation, style = Tokens.Type.line, color = Tokens.Color.secondary)
@@ -255,12 +264,12 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
         TwoColumns(
             { Tile(it) {
                 TileLabel(stringResource(R.string.running_from_pack))
-                Text("${status.packLines} / ${status.shownLines}", style = Tokens.Type.title, color = Tokens.Color.text)
+                Text("${status.packLines} / ${status.shownLines}", style = Tokens.Type.titleNumeric, color = Tokens.Color.text)
             } },
             { Tile(it) {
                 TileLabel(stringResource(R.string.main_tvs_label))
                 Text(if (Services.settings.target == SubtitleTarget.TV) status.connectedTvs.toString() else stringResource(R.string.main_target_phone),
-                    style = Tokens.Type.title, color = Tokens.Color.text)
+                    style = Tokens.Type.titleNumeric, color = Tokens.Color.text)
             } },
         )
     }

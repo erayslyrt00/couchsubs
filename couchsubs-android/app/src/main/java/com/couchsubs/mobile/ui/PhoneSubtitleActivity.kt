@@ -59,7 +59,6 @@ class PhoneSubtitleActivity : ComponentActivity() {
         val scale = settings.subtitleScale / 100f
         // "Hızlı konuşmada önceki satırları üstte tut" kapalıysa soluk önceki satır gösterilmez (TV ve Windows ile aynı).
         val stackPrevious = settings.stackPrevious
-        val streaming = getString(R.string.phase_streaming)
         setContent {
             CouchSubsTheme {
                 val status by LiveState.status.collectAsState()
@@ -70,7 +69,7 @@ class PhoneSubtitleActivity : ComponentActivity() {
                 Box(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding().padding(Tokens.Space.screen)) {
                     Row(Modifier.fillMaxWidth().align(Alignment.TopCenter), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
-                        val connected = status.running && status.phase == streaming
+                        val connected = status.running && status.streaming
                         StatusLabel(stringResource(if (connected) R.string.subtitle_connected else R.string.subtitle_waiting), ok = connected, live = connected)
                         status.packInUse?.let { Pill(stringResource(R.string.running_pack, it), pro = true) }
                         Spacer(Modifier.weight(1f))

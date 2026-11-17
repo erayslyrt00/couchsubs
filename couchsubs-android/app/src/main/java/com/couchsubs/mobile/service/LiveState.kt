@@ -11,6 +11,8 @@ data class LiveStatus(
     val running: Boolean = false,
     /** Kısa durum metni: "PS5'e bağlanılıyor…", "Altyazılar okunuyor" gibi. */
     val phase: String = "",
+    /** Konsol görüntüsü geliyor (oturum Streaming); arayüz [phase] metnini karşılaştırmak yerine buna bakar. */
+    val streaming: Boolean = false,
     val connectedTvs: Int = 0,
     /** Son gösterilen çeviriler, yeniden eskiye. */
     val recent: List<ShownPair> = emptyList(),

@@ -345,12 +345,15 @@ fun LiveDot(color: Color = Tokens.Color.success, live: Boolean = false) {
     }
 }
 
-/** Durum: nokta + kelime, zeminsiz ("Bağlı", "Çeviri sürüyor · 4:10"). Canlı durum etiket değildir. */
+/**
+ * Durum: nokta + kelime, zeminsiz ("Bağlı", "Çeviri sürüyor · 4:10"). Canlı durum etiket değildir. Süre taşıyan durum
+ * [Tokens.Type.captionNumeric] ile yazılır (tablo rakamları).
+ */
 @Composable
-fun StatusLabel(text: String, ok: Boolean = true, live: Boolean = false) {
+fun StatusLabel(text: String, ok: Boolean = true, live: Boolean = false, style: TextStyle = Tokens.Type.caption) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
         LiveDot(if (ok) Tokens.Color.success else Tokens.Color.secondary, live = live)
-        Text(text, style = Tokens.Type.caption, color = Tokens.Color.text, maxLines = 1)
+        Text(text, style = style, color = Tokens.Color.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
