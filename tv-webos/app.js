@@ -486,6 +486,22 @@
   var SCREEN_PAD = 0.004;
   var SCREEN_MIN_FONT = 14;
 
+  // Yalnız aşağıdaki bağımsız kutular büyümeyi sınırlar; kaynakta zaten üst üste olan
+  // kutuların yerini değiştirmeyiz. Aynı hesap bütün sonuçlar için yapılır, sıra önemli değildir.
+  function screenBottom(items, box, left, width, screenWidth, screenHeight) {
+    var bottom = screenHeight;
+    for (var j = 0; j < items.length; j++) {
+      var other = items[j];
+      var next = validBox(other && other.box);
+      if (!next || !other.text || next.top < box.bottom) continue;
+      var nextLeft = Math.max(0, next.left - SCREEN_PAD) * screenWidth;
+      var nextWidth = Math.max(80, (Math.min(1, next.right + SCREEN_PAD) * screenWidth - nextLeft));
+      if (left < nextLeft + nextWidth && left + width > nextLeft)
+        bottom = Math.min(bottom, Math.max(0, next.top - SCREEN_PAD) * screenHeight);
+    }
+    return bottom;
+  }
+
   function showScreen(items, duration) {
     var host = $('screen');
     // "Ekran çevriliyor…" yazısı sonuçların üstünde kalmasın.
@@ -506,18 +522,23 @@
       var boxHeight = (box.bottom - box.top + 2 * SCREEN_PAD) * height;
       el.style.left = (left * 100) + '%';
       el.style.top = (top * 100) + '%';
-      el.style.width = Math.max(80, (Math.min(1, box.right + SCREEN_PAD) - left) * width) + 'px';
-      el.style.minHeight = Math.round(boxHeight) + 'px';
+      var itemWidth = Math.max(80, (Math.min(1, box.right + SCREEN_PAD) - left) * width);
+      el.style.width = itemWidth + 'px';
+      // Bir piksel pay, tarayıcının kesirli koordinat/scrollHeight yuvarlamasını karşılar.
+      var available = Math.max(0, Math.floor(screenBottom(items, box, left * width, itemWidth, width, height) - top * height) - 1);
+      el.style.minHeight = Math.min(Math.round(boxHeight), available) + 'px';
       var line = typeof item.line === 'number' && item.line > 0 ? item.line * height : box.bottom * height - box.top * height;
       var size = Math.max(SCREEN_MIN_FONT, Math.min(96, Math.round(line * 0.95)));
       el.style.fontSize = size + 'px';
       host.appendChild(el);
       // Türkçe çoğu zaman İngilizceden uzundur: kutu biraz uzayabilir, daha fazlası için yazı küçülür.
-      var limit = Math.max(boxHeight * 1.5, line * 2.6);
+      var limit = Math.min(available, Math.max(boxHeight * 1.5, line * 2.6));
       while (el.scrollHeight > limit && size > SCREEN_MIN_FONT) {
-        size -= 2;
+        size = Math.max(SCREEN_MIN_FONT, size - 2);
         el.style.fontSize = size + 'px';
       }
+      // En küçük okunabilir boyutta da sığmayan metni kesmeyiz/gizlemeyiz.
+      // Bu uç durumda eski doğal büyüme davranışı korunur.
     }
     clearTimeout(screenTimer);
     screenTimer = setTimeout(hideScreen, duration || 20000);
