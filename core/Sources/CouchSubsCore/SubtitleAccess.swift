@@ -73,7 +73,8 @@ public enum SubtitleAccess {
     }
 
     private static func packagedOrigin(_ origin: String) -> Bool {
-        if origin == "null" { return true }
+        // Paketli TV uygulamaları: webOS/Android TV "null", Samsung Tizen ise (en az 5.0'da, POST isteklerinde) "file://" gönderir.
+        if origin == "null" || origin == "file://" { return true }
         guard let url = URLComponents(string: origin) else { return false }
         return url.scheme == "app" && !(url.host ?? "").isEmpty && url.user == nil && url.password == nil
             && ["", "/"].contains(url.path) && url.query == nil && url.fragment == nil

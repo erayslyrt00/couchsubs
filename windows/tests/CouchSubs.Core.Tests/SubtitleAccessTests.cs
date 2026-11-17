@@ -20,7 +20,7 @@ public class SubtitleAccessTests
                 (origin is null ? "" : $"Origin: {origin}\r\n"))!;
             Assert.Equal(row.GetProperty("status").GetInt32(), SubtitleAccess.Authorize(request, key, row.GetProperty("legacy").GetBoolean(), out var legacy));
             Assert.Equal(row.GetProperty("usedLegacy").GetBoolean(), legacy);
-            Assert.Equal(origin is "null" or "app://couchsubs" ? $"Access-Control-Allow-Origin: {origin}\r\nVary: Origin\r\n" : "", SubtitleAccess.Cors(request));
+            Assert.Equal(origin is "null" or "file://" or "app://couchsubs" ? $"Access-Control-Allow-Origin: {origin}\r\nVary: Origin\r\n" : "", SubtitleAccess.Cors(request));
         }
         foreach (var peer in fixture.RootElement.GetProperty("peers").EnumerateObject())
             Assert.Equal(peer.Value.GetBoolean(), SubtitleAccess.IsLocalPeer(IPAddress.Parse(peer.Name)));
@@ -41,6 +41,20 @@ public class SubtitleAccessTests
         Assert.NotEqual(first, SubtitleAccess.CreateKey());
         var request = SubtitleAccess.Parse($"GET /events?k={first}&k={first} HTTP/1.1\r\nHost: localhost")!;
         Assert.Equal(401, SubtitleAccess.Authorize(request, first, true, out _));
+    }
+
+    [Fact]
+    public async Task KeylessObsPageIsNotReportedAsOldTvApp()
+    {
+        using var server = new SubtitleServer(0, key: "AAAAAAAAAAAAAAAAAAAAAA", allowLegacy: true);
+        var port = await server.StartAsync();
+        using var http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}"), Timeout = TimeSpan.FromSeconds(5) };
+        using var obs = await http.GetAsync("/events?viewer=obs", HttpCompletionOption.ResponseHeadersRead);
+        Assert.Equal(HttpStatusCode.OK, obs.StatusCode);
+        Assert.False(server.HasLegacyClient);
+        using var tv = await http.GetAsync("/events", HttpCompletionOption.ResponseHeadersRead);
+        Assert.Equal(HttpStatusCode.OK, tv.StatusCode);
+        Assert.True(server.HasLegacyClient);
     }
 
     [Fact]

@@ -458,11 +458,13 @@ public final class SubtitleServer: @unchecked Sendable {
             // tarayıcılı TV'ler (Tizen 9.0 ve sonrası) başlık olmadan bilgisayara bağlanmayabilir. Eski TV'ler yok sayar.
             respondAndClose(connection, status: "204 No Content", data: Data(), type: nil, cors: cors + Self.preflightHeaders)
         } else if method == "GET" && path == "/events" {
-            if access.legacy && !legacySeen {
+            let obs = request.parameter("viewer") == "obs"
+            // Anahtarsız OBS sayfası eski bir OBS adresidir; TV uygulamasının eski olduğu anlamına gelmez.
+            if access.legacy && !obs && !legacySeen {
                 legacySeen = true
                 if let handler = onLegacyClient { DispatchQueue.main.async { handler() } }
             }
-            openStream(connection, viewer: request.parameter("viewer") == "obs", cors: cors)
+            openStream(connection, viewer: obs, cors: cors)
         } else if method == "GET" && path == "/obs" {
             respondAndClose(connection, status: "200 OK", data: Self.obsOverlay, type: "text/html; charset=utf-8", cors: cors)
         } else if method == "GET" && path == "/hello" {

@@ -479,8 +479,10 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
             if (method == "OPTIONS") await RespondAndClose(tcp, "204 No Content", cors: cors + PreflightHeaders);
             else if (method == "GET" && path == "/events")
             {
-                if (legacy && Interlocked.Exchange(ref legacySeen, 1) == 0) LegacyClientConnected?.Invoke();
-                await OpenStream(tcp, request.Parameter("viewer") == "obs", cors, checkedKey);
+                var obs = request.Parameter("viewer") == "obs";
+                // Anahtarsız OBS sayfası eski bir OBS adresidir; TV uygulamasının eski olduğu anlamına gelmez.
+                if (legacy && !obs && Interlocked.Exchange(ref legacySeen, 1) == 0) LegacyClientConnected?.Invoke();
+                await OpenStream(tcp, obs, cors, checkedKey);
             }
             else if (method == "GET" && path == "/obs") await RespondAndClose(tcp, ObsOverlay, "text/html; charset=utf-8", cors);
             // TV uygulaması ağdaki bilgisayarı bu yanıtla tanır.

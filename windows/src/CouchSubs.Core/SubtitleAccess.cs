@@ -69,7 +69,8 @@ public static class SubtitleAccess
         return new(first[0], first[1], origin, host ?? "");
     }
 
-    private static bool PackagedOrigin(string origin) => origin == "null" ||
+    // Paketli TV uygulamaları: webOS/Android TV "null", Samsung Tizen ise (en az 5.0'da, POST isteklerinde) "file://" gönderir.
+    private static bool PackagedOrigin(string origin) => origin is "null" or "file://" ||
         Uri.TryCreate(origin, UriKind.Absolute, out var url) && url.Scheme == "app" && url.Host.Length > 0
         && url.UserInfo.Length == 0 && url.Query.Length == 0 && url.Fragment.Length == 0 && url.AbsolutePath is "" or "/";
 

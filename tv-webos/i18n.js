@@ -6,7 +6,7 @@
   var TEXTS = {
     tr: {
       pairCode: 'TV kodu:',
-      pairRetry: 'Eşleştirme tamamlanmadı. TV uygulamasını yeniden açıp deneyin.',
+      pairRetry: 'Eşleştirme tamamlanmadı. Yeniden denemek için Tamam tuşuna basın.',
       pairServer: 'Bu kodu telefon/bilgisayarda karşılaştırıp onaylayın.',
       // Telefondan kuranların çoğunun bilgisayarı yoktur: önce telefon söylenir (#113).
       waiting: 'Telefonda (ya da bilgisayarda) CouchSubs\'ı açıp Çeviriyi başlat\'a basın.',
@@ -55,7 +55,7 @@
     },
     en: {
       pairCode: 'TV code:',
-      pairRetry: 'Pairing did not finish. Reopen the TV app to retry.',
+      pairRetry: 'Pairing did not finish. Press OK to try again.',
       pairServer: 'Compare this code and approve on your phone/computer.',
       waiting: 'Open CouchSubs on your phone (or computer) and start translating.',
       waitingHint: 'No computer needed. Set the subtitle target to TV and keep the phone and TV on the same Wi-Fi: CouchSubs finds this TV and sends subtitles here.',

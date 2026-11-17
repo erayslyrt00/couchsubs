@@ -325,9 +325,11 @@ class SubtitleServer(
             when {
                 method == "OPTIONS" -> respondAndClose(socket, "204 No Content", cors = cors)
                 method == "GET" && path == "/events" -> {
-                    val notify = synchronized(lock) { (access.legacy && !hasLegacyClient).also { if (it) hasLegacyClient = true } }
+                    val obs = request.parameter("viewer") == "obs"
+                    // Anahtarsız OBS sayfası eski bir OBS adresidir; TV uygulamasının eski olduğu anlamına gelmez.
+                    val notify = synchronized(lock) { (access.legacy && !obs && !hasLegacyClient).also { if (it) hasLegacyClient = true } }
                     if (notify) onLegacyClient?.invoke()
-                    openStream(socket, request.parameter("viewer") == "obs", cors, checkedKey)
+                    openStream(socket, obs, cors, checkedKey)
                 }
                 // TV uygulaması ağdaki CouchSubs'ı bu yanıtla tanır.
                 method == "GET" && path == "/obs" && obsOverlay.isNotEmpty() -> respondAndClose(socket, "200 OK", obsOverlay, cors, "text/html; charset=utf-8")

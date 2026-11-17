@@ -20,7 +20,7 @@ class SubtitleAccessTest {
                 val result = SubtitleAccess.authorize(request, vectors.getString("key"), row.getBoolean("legacy"))
                 assertEquals(head, row.getInt("status"), result.status)
                 assertEquals(head, row.getBoolean("usedLegacy"), result.legacy)
-                val cors = if (origin == "null" || origin == "app://couchsubs") "Access-Control-Allow-Origin: $origin\r\nVary: Origin\r\n" else ""
+                val cors = if (origin == "null" || origin == "file://" || origin == "app://couchsubs") "Access-Control-Allow-Origin: $origin\r\nVary: Origin\r\n" else ""
                 assertEquals(cors, SubtitleAccess.cors(request))
             }
         }
@@ -35,6 +35,24 @@ class SubtitleAccessTest {
             assertNull(SubtitleAccess.parse("GET /events HTTP/1.1\r\n$head"))
         val request = SubtitleAccess.parse("GET /events?k=$key&k=$key HTTP/1.1\r\nHost: localhost")!!
         assertEquals(401, SubtitleAccess.authorize(request, key, true).status)
+    }
+    @Test fun keylessObsPageIsNotReportedAsOldTvApp() {
+        val server = SubtitleServer(port = 0, allowLegacy = true)
+        val port = server.start()
+        try {
+            Socket("127.0.0.1", port).use { socket ->
+                socket.soTimeout = 3000
+                socket.getOutputStream().write("GET /events?viewer=obs HTTP/1.1\r\nHost: localhost\r\n\r\n".toByteArray())
+                assertTrue(socket.getInputStream().bufferedReader().readLine().contains("200"))
+                assertFalse(server.hasLegacyClient)
+            }
+            Socket("127.0.0.1", port).use { socket ->
+                socket.soTimeout = 3000
+                socket.getOutputStream().write("GET /events HTTP/1.1\r\nHost: localhost\r\n\r\n".toByteArray())
+                assertTrue(socket.getInputStream().bufferedReader().readLine().contains("200"))
+                assertTrue(server.hasLegacyClient)
+            }
+        } finally { server.stop() }
     }
     @Test fun rotationRejectsPreviousKey() {
         val server = SubtitleServer(port = 0, allowLegacy = false)

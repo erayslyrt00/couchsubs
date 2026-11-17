@@ -1096,6 +1096,9 @@
   var pairingTimer = null;
   // Eşleştirme kodu ekranda beklerken tarama aynı adresi bulursa bağlantı baştan kurulmaz (kod kaybolmasın).
   var pairingActive = false;
+  // Eşleştirme kendiliğinden yeniden başlamaz (bilgisayarda yeni onay penceresi açılırdı); Tamam ile yeniden denenir.
+  var pairingFailed = false;
+  function stopPairing() { pairingActive = false; pairingFailed = true; $('pairing').textContent = t('pairRetry'); }
   function pairRequest(method, address, path, done) {
     var xhr = new XMLHttpRequest(), finished = false;
     function finish(data) { if (finished) return; finished = true; done(data); }
@@ -1113,6 +1116,7 @@
     var generation = ++connectionGeneration;
     clearTimeout(pairingTimer);
     pairingActive = false;
+    pairingFailed = false;
     // Arka plandayken bağlanılmaz; adres akılda tutulur, uygulama öne gelince bağlanır (bkz. dropWhileHidden).
     if (pausedByHidden) {
       server = address;
@@ -1155,7 +1159,7 @@
         pairRequest('POST', address, '/pair', function (ticket) {
           if (generation !== connectionGeneration) return;
           if (!ticket || !/^[A-Za-z0-9_-]{22}$/.test(ticket.id || '') || !/^[0-9]{6}$/.test(ticket.code || '')) {
-            $('pairing').textContent = t('pairRetry');
+            stopPairing();
             pairingTimer = setTimeout(function () { if (generation === connectionGeneration) connect(address); }, 15000);
             return;
           }
@@ -1164,13 +1168,13 @@
           setStatus('st-conn', t('pairCode') + ' ' + ticket.code, 'muted');
           function poll() {
             if (generation !== connectionGeneration) return;
-            if (Date.now() >= deadline) { pairingActive = false; $('pairing').textContent = t('pairRetry'); return; }
+            if (Date.now() >= deadline) { stopPairing(); return; }
             pairRequest('GET', address, '/pair?id=' + encodeURIComponent(ticket.id), function (result) {
               if (generation !== connectionGeneration) return;
               if (result && result.state === 'approved' && /^[A-Za-z0-9_-]{22}$/.test(result.key || '')) {
                 remember(result.key); $('pairing').textContent = ''; connectStream(address); return;
               }
-              if (result && result.state === 'expired') { pairingActive = false; $('pairing').textContent = t('pairRetry'); return; }
+              if (result && result.state === 'expired') { stopPairing(); return; }
               pairingTimer = setTimeout(poll, 1500);
             });
           }
@@ -1685,8 +1689,9 @@
         // Bulunan adres kaydedilir: TV bir sonraki açılışta eski adrese takılmasın.
         save('server', choice.address);
         // Aynı bilgisayarsa EventSource kendisi yeniden bağlanır; kapanıp vazgeçtiyse (CLOSED) yeniden kurulur.
-        // Eşleştirme beklemiyor ve bağlantı da yoksa (bilgisayar kapalıyken /hello yanıtsız kalmıştı) yeniden kurulur.
-        if (choice.address !== server || (eventSource ? eventSource.readyState === 2 : !pairingActive)) connect(choice.address);
+        // Eşleştirme beklemiyor (ya da Tamam'ı beklemiyor) ve bağlantı da yoksa (bilgisayar kapalıyken /hello yanıtsız
+        // kalmıştı) yeniden kurulur.
+        if (choice.address !== server || (eventSource ? eventSource.readyState === 2 : !pairingActive && !pairingFailed)) connect(choice.address);
         else if (fallback) scheduleScan(FALLBACK_SCAN_MS);
       }
       pump();
@@ -1920,6 +1925,7 @@
     hidePanelTip();
     if (sourceTipShown()) hideSourceTip();
     else if (noPictureShown()) return;
+    else if (pairingFailed && server) connect(server);
     else if ($('waiting').className !== 'hidden') startDemo();
     else if (!demoRunning()) togglePanel();
   });
@@ -1959,6 +1965,8 @@
       togglePanel();
     } else if (code === KEY.BLUE) {
       if (demoRunning()) stopDemo(); else startDemo();
+    } else if (code === KEY.OK && pairingFailed && server) {
+      connect(server);
     } else if (code === KEY.OK && $('waiting').className !== 'hidden') {
       startDemo();
     } else if (code === KEY.OK && !demoRunning()) {

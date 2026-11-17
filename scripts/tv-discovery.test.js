@@ -703,3 +703,20 @@ test('discovery does not restart pairing while waiting for human approval', () =
   tv.clock.advance(2000);
   assert.strictEqual(tv.lastOpened(), secureAddress + '/events?k=' + secureKey);
 });
+
+test('süresi dolan eşleştirme kendiliğinden yeniden başlamaz, Tamam ile yeniden istenir', () => {
+  const auth = { key: secureKey, id: secureId, expired: true };
+  const tv = startTv({ saved: secureAddress, alive: new Set([secureAddress]), auth });
+  tv.clock.advance(5000);
+  assert.match(tv.element('pairing').textContent, /Tamam/);
+  tv.clock.advance(60000);
+  assert.strictEqual(tv.requests.filter(r => r.method === 'POST').length, 1);
+  auth.expired = false; auth.approved = true;
+  // Gerçek sayfada kaynak ipucu ve görüntü yok ekranı başta gizlidir.
+  tv.element('source-tip').className = 'hidden';
+  tv.element('no-picture').className = 'hidden';
+  tv.key(13);
+  tv.clock.advance(2000);
+  assert.strictEqual(tv.requests.filter(r => r.method === 'POST').length, 2);
+  assert.strictEqual(tv.lastOpened(), secureAddress + '/events?k=' + secureKey);
+});

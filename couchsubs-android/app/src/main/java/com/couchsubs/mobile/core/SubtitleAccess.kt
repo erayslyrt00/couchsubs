@@ -60,7 +60,8 @@ object SubtitleAccess {
     }
     private fun uri(value: String): URI? = try { URI(value) } catch (_: Exception) { null }
     private fun packagedOrigin(origin: String): Boolean {
-        if (origin == "null") return true
+        // Paketli TV uygulamaları: webOS/Android TV "null", Samsung Tizen ise (en az 5.0'da, POST isteklerinde) "file://" gönderir.
+        if (origin == "null" || origin == "file://") return true
         val url = uri(origin) ?: return false
         return url.scheme == "app" && !url.host.isNullOrEmpty() && url.rawUserInfo == null && url.rawPath in listOf("", "/") && url.rawQuery == null && url.rawFragment == null
     }

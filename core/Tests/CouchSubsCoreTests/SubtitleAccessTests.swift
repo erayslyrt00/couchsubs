@@ -19,7 +19,7 @@ final class SubtitleAccessTests: XCTestCase {
                 let result = SubtitleAccess.authorize(request, key: vectors.key, allowLegacy: row.legacy)
                 XCTAssertEqual(result.status, row.status, head)
                 XCTAssertEqual(result.legacy, row.usedLegacy, head)
-                let cors = row.origin == "null" || row.origin == "app://couchsubs" ? "Access-Control-Allow-Origin: \(row.origin!)\r\nVary: Origin\r\n" : ""
+                let cors = row.origin == "null" || row.origin == "file://" || row.origin == "app://couchsubs" ? "Access-Control-Allow-Origin: \(row.origin!)\r\nVary: Origin\r\n" : ""
                 XCTAssertEqual(SubtitleAccess.cors(request), cors)
             }
         }
@@ -34,6 +34,17 @@ final class SubtitleAccessTests: XCTestCase {
         }
         let request = try XCTUnwrap(SubtitleAccess.parse("GET /events?k=\(key)&k=\(key) HTTP/1.1\r\nHost: localhost"))
         XCTAssertEqual(SubtitleAccess.authorize(request, key: key, allowLegacy: true).status, 401)
+    }
+    func testKeylessObsPageIsNotReportedAsOldTVApp() async throws {
+        let server = SubtitleServer(port: 0, allowLegacy: true)
+        let port = try await server.start()
+        defer { server.stop() }
+        let (_, obs) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events?viewer=obs")!)
+        XCTAssertEqual((obs as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertFalse(server.hasLegacyClient)
+        let (_, tv) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events")!)
+        XCTAssertEqual((tv as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertTrue(server.hasLegacyClient)
     }
     func testRotationRejectsPreviousKey() async throws {
         let server = SubtitleServer(port: 0, allowLegacy: false)
