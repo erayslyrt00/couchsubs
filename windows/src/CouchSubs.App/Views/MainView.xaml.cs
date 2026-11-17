@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using CouchSubs.App.Controls;
 using CouchSubs.Core;
@@ -57,6 +58,8 @@ public partial class MainView : UserControl
             ShowGame();
         if (e.PropertyName is nameof(AppController.IsRunning) && controller.IsRunning)
             sessionStartedAt = DateTime.UtcNow;
+        if (e.PropertyName is nameof(AppController.LastTranslation))
+            FadeInLiveLine();
         if (e.PropertyName is nameof(AppController.History) or nameof(AppController.LastTranslation) or nameof(AppController.IsRunning))
             ShowPreviousLines();
         if (e.PropertyName is nameof(AppController.UpdateVersion) or nameof(AppController.Updating)
@@ -137,6 +140,20 @@ public partial class MainView : UserControl
 
     private void OnTranslationSettings(object sender, RoutedEventArgs e) =>
         SettingsWindow.Open(Window.GetWindow(this), controller, SettingsSection.Translation);
+
+    /// <summary>Yeni canlı satır 0,18 sn'de belirir; Windows'ta animasyonlar kapalıysa geçiş yok (docs/TASARIM.md).</summary>
+    private void FadeInLiveLine()
+    {
+        if (!SystemParameters.ClientAreaAnimation)
+        {
+            LiveLine.BeginAnimation(OpacityProperty, null);
+            return;
+        }
+        LiveLine.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180))
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+        });
+    }
 
     /// <summary>
     /// Son satır büyük ve sarı yazılır; bu oturumda ondan önce gösterilen satırlar altında, en yenisi üstte (geçmiş en
