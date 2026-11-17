@@ -209,6 +209,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (server.Pairing.Poll(ticket.Id) == "pending") TvPairingRequested?.Invoke(ticket);
     });
     public bool ResolveTvPairing(string id, bool accept) => server.Pairing.Resolve(id, accept);
+    /// <summary>Onay penceresini olay anında açamayan arayüzler (Linux paneli) isteğin hâlâ beklediğini buradan sorar.</summary>
+    public bool IsTvPairingPending(string id) => server.Pairing.Poll(id) == "pending";
     public async Task OpenTvPairingAsync() { await StartServerAsync(); server.Pairing.Open(); }
     public bool LegacyTvWarning => server.HasLegacyClient;
     public string ObsAddress => $"http://localhost:{ServerPort}/obs?k={server.AccessKey}";

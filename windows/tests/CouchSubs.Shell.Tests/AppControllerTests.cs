@@ -1363,6 +1363,25 @@ public class AppControllerRunTests
     }
 
     [Fact]
+    public async Task PendingTvPairingIsVisibleUntilAnswered()
+    {
+        // Linux paneli onay penceresi açamaz; bekleyen isteği bu soruyla gösterir.
+        var controller = AppControllerTests.Make();
+        SubtitlePairing.Ticket? asked = null;
+        controller.TvPairingRequested += ticket => asked = ticket;
+        await controller.OpenTvPairingAsync();
+        using var http = new HttpClient();
+        using var created = await http.PostAsync($"http://127.0.0.1:{controller.ServerPort}/pair", null);
+        Assert.Equal(200, (int)created.StatusCode);
+        Assert.NotNull(asked);
+        Assert.True(controller.IsTvPairingPending(asked!.Id));
+        Assert.False(controller.IsTvPairingPending("not-the-request-secret"));
+        Assert.True(controller.ResolveTvPairing(asked.Id, true));
+        Assert.False(controller.IsTvPairingPending(asked.Id));
+        controller.Dispose();
+    }
+
+    [Fact]
     public void SettingsArePersistedOutsideTheSecureStore()
     {
         var store = new MemoryStore();
