@@ -33,36 +33,39 @@ enum Mobile {
     }
 
     /// Basamaklar: deep → bg → surface → surface2 → raised; katmanlar %8 ince çizgiyle ayrılır.
+    /// Ortak tasarım değerleriyle (design/tokens.json, koyu görünüm) aynı olan renkler oradan gelir; uygulama hep koyudur.
+    /// Yalnız telefona özgü olanlar (deep, %8 çizgi, üçüncül yazı) burada tanımlıdır.
     enum Palette {
         static let deep = Color(hex: 0x0E0F11)
-        static let bg = Color(hex: 0x141518)
-        static let surface = Color(hex: 0x1C1E23)
-        static let surface2 = Color(hex: 0x25282F)
+        static let bg = Color.csBackground
+        static let surface = Color.csSurface
+        static let surface2 = Color.csSurface2
         /// İnce çizgi (%8): karo ve alan çerçevesi, ayraç.
         static let border = Color(.sRGB, red: 0xF3 / 255, green: 0xEE / 255, blue: 0xE4 / 255, opacity: 0.08)
         /// `raised`: seçili segment, kapalı anahtar, boş adım, sayfa noktası.
-        static let borderStrong = Color(hex: 0x30333A)
-        static let text = Color(hex: 0xF3EEE4)
-        static let secondary = Color(hex: 0xA9A59C)
+        static let borderStrong = Color.csBorder
+        static let text = Color.csText
+        static let secondary = Color.csSecondary
         static let tertiary = Color(hex: 0x94908A)
-        static let accent = Color(hex: 0xF5B83D)
-        static let accentHi = Color(hex: 0xFFCF6B)
-        static let onAccent = Color(hex: 0x17181B)
-        static let pro = Color(hex: 0xA78BFA)
-        static let proSoft = Color(hex: 0x322F45)
-        static let success = Color(hex: 0x62C990)
-        static let warning = Color(hex: 0xF2A55A)
-        static let danger = Color(hex: 0xF28B82)
-        static let dangerSoft = Color(hex: 0x2F2325)
+        static let accent = Color.csAccent
+        static let accentHi = Color.csAccentHi
+        static let onAccent = Color.csOnAccent
+        static let pro = Color.csPro
+        static let proSoft = Color.csProSoft
+        static let success = Color.csSuccess
+        static let warning = Color.csWarning
+        static let danger = Color.csDanger
+        static let dangerSoft = Color.csDangerSoft
     }
 
-    /// Yalnız bu beş arayüz boyu (altyazı içeriği hariç).
+    /// Yalnız bu beş arayüz boyu (altyazı içeriği hariç). Varsayılan yazı boyunda 28/22/17/15/13; sistemin metin
+    /// stilleriyle kurulduğu için Dinamik Yazı'yla büyür (ekranın kökünde `accessibility2` ile sınırlı).
     enum TypeScale {
-        static let display = Font.system(size: 28, weight: .semibold)
-        static let title = Font.system(size: 22, weight: .semibold).monospacedDigit()
-        static let headline = Font.system(size: 17, weight: .semibold)
-        static let body = Font.system(size: 15, weight: .regular)
-        static let caption = Font.system(size: 13, weight: .medium)
+        static let display = Font.system(.title, weight: .semibold)
+        static let title = Font.system(.title2, weight: .semibold).monospacedDigit()
+        static let headline = Font.system(.headline, weight: .semibold)
+        static let body = Font.system(.subheadline, weight: .regular)
+        static let caption = Font.system(.footnote, weight: .medium)
         /// Altyazı içeriği: dikeyde canlı satır 28, yatay altyazı ekranında 36; kullanıcı %80–%160 ölçekler.
         static func subtitle(landscape: Bool, scale: Double) -> Font {
             .system(size: (landscape ? 36 : 28) * min(1.6, max(0.8, scale)), weight: .semibold)

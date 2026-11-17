@@ -143,6 +143,8 @@ struct RootView: View {
         }
         .preferredColorScheme(.dark)
         .tint(Mobile.Palette.accent)
+        // Yazılar Dinamik Yazı'yla büyür; en büyük erişilebilirlik boylarında karolar taşmasın diye üst sınır.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
     private func finishWelcome() {
