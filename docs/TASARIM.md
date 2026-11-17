@@ -163,8 +163,8 @@ Her iki platformda aynı adla bulunur.
 ## Ekranlar
 
 **Kurulum sihirbazı**: solda kenar çubuğu (logo + "Kurulum"; adımlar: biten adım yeşil dairede onay, sıradaki adım sarı
-dairede numara ve `surface2` zeminli satır, gelecek adım gri numaralı; altta "Adım n / toplam" ve ilerleme çubuğu); sağda adımın karosu
-(kaydırılabilir StepLayout), altında solda "Geri" (ikincil), sağda "Devam" (birincil). Son adım isteğe bağlı "Daha iyi çeviri (ücretsiz)": tek cümle
+dairede numara ve `surface2` zeminli satır, gelecek adım gri numaralı; altta "Adım n / toplam" ve ilerleme çubuğu); sağda adım
+(kaydırılabilir StepLayout; Ayarlar sayfası gibi başlık zeminde, bloklar kendi karolarında, dış karo yok), altında solda "Geri" (ikincil), sağda "Devam" (birincil). Son adım isteğe bağlı "Daha iyi çeviri (ücretsiz)": tek cümle
 açıklama, numaralı üç satır ve "Ücretsiz anahtar al" (birincil, Google AI Studio'nun anahtar sayfası),
 gizli anahtar alanı ve "Kaydet ve dene" (ikincil), altta veri kullanımı ve dakikalık sınır HintText'i.
 Anahtar yokken alttaki düğme "Şimdilik geç" (ikincil) olur; kaydedilince "Gemini hazır" (DoneLabel) ve "Devam".

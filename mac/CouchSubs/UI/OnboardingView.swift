@@ -2,7 +2,8 @@
 
 import SwiftUI
 
-/// Kurulum sihirbazı: solda adım listesi, sağda adımın karosu, altında Geri / Devam.
+/// Kurulum sihirbazı: solda adım listesi, sağda adım (başlık zeminde, bloklar karoda; Ayarlar sayfası gibi), altında
+/// Geri / Devam.
 struct OnboardingView: View {
     @EnvironmentObject private var model: AppModel
 
@@ -23,15 +24,18 @@ struct OnboardingView: View {
                             case .betterTranslation, .done: BetterTranslationStep()
                             }
                         }
-                        .padding(Theme.space("xl"))
+                        // Odak çerçeveleri kaydırma alanının kenarında kesilmesin diye içerik biraz içeride, alan aynı ölçüde
+                        // dışarıda (Ayarlar sayfasıyla aynı yöntem).
+                        .padding(Theme.space("m"))
                     }
                     // Adımlar kendi iletilerini görünür kılabilsin (ör. PS5 eşleşti iletisi kaydırılmış alanda kalmasın).
                     .environment(\.scrollOnboardingTo, { id in
                         withAnimation { proxy.scrollTo(id, anchor: .bottom) }
                     })
                 }
+                // Adımın kendi karoları var; dış karo yok (karo içinde karo olmasın).
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .tile(padding: 0)
+                .padding(-Theme.space("m"))
                 StepButtons()
             }
         }
