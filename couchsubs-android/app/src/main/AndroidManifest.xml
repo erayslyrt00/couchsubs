@@ -22,6 +22,7 @@
     <application
         android:name=".CouchSubsApp"
         android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/icon"
         android:label="CouchSubs"
         android:largeHeap="true"

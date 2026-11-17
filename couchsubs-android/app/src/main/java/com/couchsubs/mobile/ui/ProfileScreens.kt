@@ -2,6 +2,9 @@
 // Profil (cihazlar ve tercihler; hesap yok) ve ayarlar (tuval: Telefon-Profil, -Ayarlar).
 package com.couchsubs.mobile.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -179,7 +182,7 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TileLabel(stringResource(R.string.settings_key_for, engineName(context)))
                     Spacer(Modifier.weight(1f))
-                    if (saved) StatusLabel(stringResource(R.string.settings_key_saved))
+                    AnimatedVisibility(saved, enter = fadeIn(), exit = fadeOut()) { StatusLabel(stringResource(R.string.settings_key_saved)) }
                 }
                 if (saved) {
                     GhostButton(stringResource(R.string.settings_key_remove)) {
@@ -213,7 +216,7 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
                             } else if (engine == choice) keyRejected = true
                         }
                     }
-                    if (keyRejected) NoteTile(stringResource(R.string.settings_key_rejected))
+                    AnimatedNote(if (keyRejected) stringResource(R.string.settings_key_rejected) else null)
                 }
             }
             // Ek talimat (#306) yalnız yapay zekâ motorlarında; DeepL'de yoktur (iPhone ile aynı).
@@ -337,7 +340,7 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
             testNote = if (TranslationService.sendTestSubtitle(context.getString(R.string.test_subtitle_text))) null
                 else context.getString(R.string.settings_test_needs_start)
         }
-        testNote?.let { NoteTile(it, Tokens.Color.secondary) }
+        AnimatedNote(testNote, Tokens.Color.secondary)
         Text(stringResource(R.string.settings_copyright), style = Tokens.Type.caption, color = Tokens.Color.secondary,
             modifier = Modifier.padding(top = Tokens.Space.inline))
     }

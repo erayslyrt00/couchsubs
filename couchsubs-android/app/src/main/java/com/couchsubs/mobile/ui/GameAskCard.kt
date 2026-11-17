@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 package com.couchsubs.mobile.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -32,9 +36,12 @@ import com.couchsubs.mobile.service.PlayedGame
  */
 @Composable
 fun GameSection(status: LiveStatus) {
-    if (status.askingGame) GameAskCard() else {
-        PlayedGameRow(status.game)
-        GameAreasRow(status)
+    // Kart açılıp kapanırken satırla solarak yer değiştirir; yükseklik farkı yumuşakça kapanır.
+    AnimatedContent(status.askingGame, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "gameAsk") { asking ->
+        if (asking) GameAskCard() else Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
+            PlayedGameRow(status.game)
+            GameAreasRow(status)
+        }
     }
 }
 

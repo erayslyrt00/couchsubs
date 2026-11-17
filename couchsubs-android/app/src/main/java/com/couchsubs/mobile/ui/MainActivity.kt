@@ -12,6 +12,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -63,6 +67,10 @@ object Routes {
     }
 }
 
+/** Ekran geçişinin süresi (ms) ve kayma payı (genişliğin 1/n'i). */
+private const val NAV_MS = 280
+private const val NAV_SHIFT = 8
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // Uygulama hep koyu; sistem açık temadayken de durum çubuğu simgeleri açık renk kalsın.
@@ -88,7 +96,15 @@ class MainActivity : ComponentActivity() {
                     navigation.addOnDestinationChangedListener(listener)
                     onDispose { navigation.removeOnDestinationChangedListener(listener) }
                 }
-                NavHost(navigation, startDestination = Routes.next()) {
+                // Ekranlar arası geçiş: yeni ekran sağdan biraz kayarak ve solarak gelir, geri dönüşte tersi (~280 ms).
+                // Sistemde animasyonlar kapalıysa Compose süreleri kendisi sıfırlar.
+                NavHost(
+                    navigation, startDestination = Routes.next(),
+                    enterTransition = { slideIntoContainer(SlideDirection.Start, tween(NAV_MS), initialOffset = { it / NAV_SHIFT }) + fadeIn(tween(NAV_MS)) },
+                    exitTransition = { slideOutOfContainer(SlideDirection.Start, tween(NAV_MS), targetOffset = { it / NAV_SHIFT }) + fadeOut(tween(NAV_MS)) },
+                    popEnterTransition = { slideIntoContainer(SlideDirection.End, tween(NAV_MS), initialOffset = { it / NAV_SHIFT }) + fadeIn(tween(NAV_MS)) },
+                    popExitTransition = { slideOutOfContainer(SlideDirection.End, tween(NAV_MS), targetOffset = { it / NAV_SHIFT }) + fadeOut(tween(NAV_MS)) },
+                ) {
                     composable(Routes.WELCOME) {
                         WelcomeScreen {
                             settings.welcomeSeen = true
