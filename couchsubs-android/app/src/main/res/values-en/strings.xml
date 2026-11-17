@@ -276,6 +276,11 @@
     <string name="settings_engine_note">In games with a ready pack, this engine only translates missing lines.</string>
     <string name="settings_preview">Dinliyor musun beni?</string>
     <string name="settings_color">Text color</string>
+    <string name="settings_color_white">White</string>
+    <string name="settings_color_yellow">Yellow</string>
+    <string name="settings_size">Text size</string>
+    <string name="settings_section_background">Subtitle background</string>
+    <string name="settings_section_tv">On the TV</string>
     <string name="settings_background">Background</string>
     <string name="settings_background_area">Background area</string>
     <string name="settings_background_fit">Fit the text</string>
@@ -418,6 +423,7 @@
     <string name="history_empty">No subtitles yet. Lines translated in this and earlier sessions appear here.</string>
     <string name="history_copy_all">Copy all</string>
     <string name="history_copied">Copied</string>
+    <string name="history_copy">Copy</string>
     <string name="history_clear">Clear</string>
     <string name="history_clear_title">Clear the history?</string>
     <string name="history_clear_body">All saved lines are removed from this phone.</string>

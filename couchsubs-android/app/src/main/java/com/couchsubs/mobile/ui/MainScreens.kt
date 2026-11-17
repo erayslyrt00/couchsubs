@@ -342,6 +342,8 @@ fun PacksScreen(onBack: () -> Unit, packInUse: String?) {
                     PackTile(code, short, linesText(context, entry.entries), Modifier.weight(1f).fillMaxHeight(),
                         style = if (playing) TileStyle.ACTIVE else TileStyle.NORMAL, dim = !unlocked || !on,
                         corner = { if (playing) StatusLabel(stringResource(R.string.packs_now)) else if (unlocked && !on) Pill(stringResource(R.string.packs_off)) },
+                        // Karo paketin anahtarıdır: ekran okuyucu "açık/kapalı" diye okur.
+                        toggled = on,
                         onClick = {
                             disabled = if (on) disabled + entry.id else disabled - entry.id
                             settings.disabledPacks = disabled

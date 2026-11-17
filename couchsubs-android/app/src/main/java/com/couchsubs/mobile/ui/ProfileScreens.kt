@@ -4,8 +4,6 @@ package com.couchsubs.mobile.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,13 +11,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,9 +31,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.couchsubs.mobile.BuildConfig
@@ -218,40 +220,38 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
             if (engine.aiProvider != null) AiInstructionField(settings)
             Text(stringResource(R.string.settings_engine_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
         }
+        // Altyazı görünümü üç karoya bölünür (yazı, arka plan, TV'de); her karonun headline başlığı var.
         Tile(Modifier.fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TileLabel(stringResource(R.string.settings_text_size))
-                Spacer(Modifier.weight(1f))
-                Text("%${Math.round(scale)}", style = Tokens.Type.headline, color = Tokens.Color.text)
-            }
+            SectionTitle(stringResource(R.string.settings_text_size))
+            SliderHeader(stringResource(R.string.settings_size), "%${Math.round(scale)}")
             // %10 adımlarla %40–160 (iPhone ile aynı): 13 değer, aradaki 11 durak.
             Slider(scale, { scale = it; settings.subtitleScale = Math.round(it) },
                 valueRange = AppSettings.MIN_SUBTITLE_SCALE.toFloat()..AppSettings.MAX_SUBTITLE_SCALE.toFloat(),
-                steps = (AppSettings.MAX_SUBTITLE_SCALE - AppSettings.MIN_SUBTITLE_SCALE) / 10 - 1,
-                colors = SliderDefaults.colors(thumbColor = Tokens.Color.text, activeTrackColor = Tokens.Color.accent,
-                    inactiveTrackColor = Tokens.Color.borderStrong, activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
+                steps = (AppSettings.MAX_SUBTITLE_SCALE - AppSettings.MIN_SUBTITLE_SCALE) / 10 - 1, colors = couchSliderColors())
             // Önizleme altyazı içeriğidir: boyu ölçeğe göre değişir.
             Text(stringResource(R.string.settings_preview), style = Tokens.Type.subtitleCurrent.copy(fontSize = Tokens.Type.subtitleCurrent.fontSize * (scale / 100f)),
                 color = if (color == SubtitleTextColor.YELLOW) Tokens.Color.accentText else Tokens.Color.text)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 TileLabel(stringResource(R.string.settings_color))
                 Spacer(Modifier.weight(1f))
-                SubtitleTextColor.entries.forEach { option ->
-                    val swatch = if (option == SubtitleTextColor.YELLOW) Tokens.Color.accent else Tokens.Color.text
-                    Box(Modifier.size(32.dp).background(swatch, CircleShape)
-                        .border(2.dp, if (color == option) Tokens.Color.accent else Tokens.Color.borderStrong, CircleShape)
-                        .clickable { color = option; settings.textColor = option })
+                Row(Modifier.selectableGroup()) {
+                    SubtitleTextColor.entries.forEach { option ->
+                        ColorSwatch(option, selected = color == option) {
+                            color = option
+                            settings.textColor = option
+                        }
+                    }
                 }
             }
-            // TV'deki kutu: %100 tamamen opak olur ve oyundaki İngilizce yazıyı kapatır; bant ekranın iki kenarına uzanır.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TileLabel(stringResource(R.string.settings_background))
-                Spacer(Modifier.weight(1f))
-                Text("%${background.toInt()}", style = Tokens.Type.headline, color = Tokens.Color.text)
-            }
+            RowItem(stringResource(R.string.settings_stack_previous)) { Switch(stackPrevious, { stackPrevious = it; settings.stackPrevious = it }) }
+            Text(stringResource(R.string.settings_stack_previous_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        }
+        // TV'deki kutu: %100 tamamen opak olur ve oyundaki İngilizce yazıyı kapatır; bant ekranın iki kenarına uzanır.
+        Tile(Modifier.fillMaxWidth()) {
+            SectionTitle(stringResource(R.string.settings_section_background))
+            SliderHeader(stringResource(R.string.settings_background), "%${background.toInt()}")
             Slider(background, { background = it; settings.tvBackground = it.toInt() }, valueRange = 0f..100f, steps = 19,
-                colors = SliderDefaults.colors(thumbColor = Tokens.Color.text, activeTrackColor = Tokens.Color.accent,
-                    inactiveTrackColor = Tokens.Color.borderStrong, activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
+                colors = couchSliderColors())
             TileLabel(stringResource(R.string.settings_background_area))
             Segmented(listOf(stringResource(R.string.settings_background_fit), stringResource(R.string.settings_background_band)),
                 if (shape == SubtitleBackgroundShape.BAND) 1 else 0) {
@@ -259,47 +259,39 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
                 settings.tvBackgroundShape = shape
             }
             Text(stringResource(R.string.settings_background_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        }
+        if (settings.target == SubtitleTarget.TV) Tile(Modifier.fillMaxWidth()) {
+            SectionTitle(stringResource(R.string.settings_section_tv))
             // TV'de çevirinin yeri (Mac ve Windows'taki Yeri seçimi, iPhone ile aynı): üstünde/altında seçilince oyundaki
             // İngilizce altyazı da görünür; sabit yerde yükseklik kaydırıcıyla ayarlanır, bırakınca TV'de örnek altyazı çıkar.
-            if (settings.target == SubtitleTarget.TV) {
-                val placements = listOf(SubtitlePlacement.COVER, SubtitlePlacement.ABOVE, SubtitlePlacement.BELOW, SubtitlePlacement.FIXED)
-                TileLabel(stringResource(R.string.settings_placement))
-                Segmented(listOf(stringResource(R.string.settings_placement_cover), stringResource(R.string.settings_placement_above),
-                    stringResource(R.string.settings_placement_below), stringResource(R.string.settings_placement_fixed)),
-                    placements.indexOf(placement).coerceAtLeast(0)) {
-                    placement = placements[it]
-                    settings.tvPlacement = placement
-                }
-                if (placement == SubtitlePlacement.FIXED) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TileLabel(stringResource(R.string.settings_position_height))
-                        Spacer(Modifier.weight(1f))
-                        Text("%${bottomPercent.toInt()}", style = Tokens.Type.headline, color = Tokens.Color.text)
-                    }
-                    Slider(bottomPercent, { bottomPercent = it; settings.tvBottomPercent = it.toInt() }, valueRange = 0f..85f,
-                        onValueChangeFinished = { TranslationService.sendTestSubtitle(context.getString(R.string.test_subtitle_text)) },
-                        colors = SliderDefaults.colors(thumbColor = Tokens.Color.text, activeTrackColor = Tokens.Color.accent,
-                            inactiveTrackColor = Tokens.Color.borderStrong, activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
-                    Text(stringResource(R.string.settings_placement_fixed_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                } else {
-                    Text(stringResource(R.string.settings_placement_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                }
+            val placements = listOf(SubtitlePlacement.COVER, SubtitlePlacement.ABOVE, SubtitlePlacement.BELOW, SubtitlePlacement.FIXED)
+            TileLabel(stringResource(R.string.settings_placement))
+            Segmented(listOf(stringResource(R.string.settings_placement_cover), stringResource(R.string.settings_placement_above),
+                stringResource(R.string.settings_placement_below), stringResource(R.string.settings_placement_fixed)),
+                placements.indexOf(placement).coerceAtLeast(0)) {
+                placement = placements[it]
+                settings.tvPlacement = placement
             }
-            RowItem(stringResource(R.string.settings_stack_previous)) { Switch(stackPrevious, { stackPrevious = it; settings.stackPrevious = it }) }
-            Text(stringResource(R.string.settings_stack_previous_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+            if (placement == SubtitlePlacement.FIXED) {
+                SliderHeader(stringResource(R.string.settings_position_height), "%${bottomPercent.toInt()}")
+                Slider(bottomPercent, { bottomPercent = it; settings.tvBottomPercent = it.toInt() }, valueRange = 0f..85f,
+                    onValueChangeFinished = { TranslationService.sendTestSubtitle(context.getString(R.string.test_subtitle_text)) },
+                    colors = couchSliderColors())
+                Text(stringResource(R.string.settings_placement_fixed_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+            } else {
+                Text(stringResource(R.string.settings_placement_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+            }
             // Yalnız Android TV uygulaması kullanır: bazı TV'lerde (ör. TCL) uygulama içindeki PS5 görüntüsü siyah kalıyor.
             // Katman'da TV, PS5'i kendi HDMI girişinde gösterir (Mac ve Windows'taki Görüntü modu seçimi, iPhone ile aynı).
-            if (settings.target == SubtitleTarget.TV) {
-                TileLabel(stringResource(R.string.settings_display_mode))
-                Segmented(listOf(stringResource(R.string.settings_display_mode_in_app), stringResource(R.string.settings_display_mode_overlay)),
-                    if (displayMode == TvDisplayMode.OVERLAY) 1 else 0) {
-                    displayMode = if (it == 1) TvDisplayMode.OVERLAY else TvDisplayMode.IN_APP
-                    settings.tvDisplayMode = displayMode
-                }
-                Text(stringResource(R.string.settings_display_mode_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+            TileLabel(stringResource(R.string.settings_display_mode))
+            Segmented(listOf(stringResource(R.string.settings_display_mode_in_app), stringResource(R.string.settings_display_mode_overlay)),
+                if (displayMode == TvDisplayMode.OVERLAY) 1 else 0) {
+                displayMode = if (it == 1) TvDisplayMode.OVERLAY else TvDisplayMode.IN_APP
+                settings.tvDisplayMode = displayMode
             }
-            RowItem(stringResource(R.string.settings_screen_on)) { Switch(screenOn, { screenOn = it; settings.keepScreenOn = it }) }
+            Text(stringResource(R.string.settings_display_mode_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
         }
+        RowList(listOf({ RowItem(stringResource(R.string.settings_screen_on)) { Switch(screenOn, { screenOn = it; settings.keepScreenOn = it }) } }))
         // Altyazı alanı ve ek alanlar (iPhone ile aynı sırada: görünümden sonra).
         AreaProfileTile()
         AreaTile()
@@ -403,5 +395,25 @@ private fun XboxSignOutRow() {
             Services.xboxAuth.signOut()
             signedIn = false
         })
+    }
+}
+
+/**
+ * Yazı rengi seçeneği: 32 dp renk dairesi, 48 dp dokunma alanı. Seçiliyken daireden 4 dp boşlukla ayrılan 2 dp sarı halka;
+ * boşluk sayesinde sarı dairenin çevresinde de görünür. Ekran okuyucu rengin adını seçenek düğmesi olarak okur.
+ */
+@Composable
+private fun ColorSwatch(option: SubtitleTextColor, selected: Boolean, onSelect: () -> Unit) {
+    val yellow = option == SubtitleTextColor.YELLOW
+    val name = stringResource(if (yellow) R.string.settings_color_yellow else R.string.settings_color_white)
+    Box(
+        Modifier.size(Tokens.Control.touch).clip(CircleShape)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
+            .semantics { contentDescription = name },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (selected) Box(Modifier.size(44.dp).border(2.dp, Tokens.Color.accent, CircleShape))
+        Box(Modifier.size(32.dp).background(if (yellow) Tokens.Color.accent else Tokens.Color.text, CircleShape)
+            .border(1.dp, Tokens.Color.borderStrong, CircleShape))
     }
 }

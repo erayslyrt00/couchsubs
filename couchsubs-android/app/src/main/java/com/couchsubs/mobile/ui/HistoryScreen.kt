@@ -5,8 +5,9 @@ package com.couchsubs.mobile.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
+import android.os.Build
+import android.widget.Toast
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,8 +23,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import com.couchsubs.mobile.R
 import com.couchsubs.mobile.Services
@@ -66,14 +72,26 @@ fun HistoryScreen(onBack: () -> Unit) {
     )
 }
 
-/** Bir satır: saat ve kaynak, Türkçe, altında İngilizcesi. Basılı tutunca kopyalanır. */
-@OptIn(ExperimentalFoundationApi::class)
+/**
+ * Bir satır: saat ve kaynak, Türkçe, altında İngilizcesi. Basılı tutunca kopyalanır: titreşim ve Android 13 öncesinde
+ * "Kopyalandı" bildirimi (13 ve sonrasında sistem panoya kopyalandığını kendisi gösterir). Tek dokunuşun işi yoktur;
+ * basış dalgası çıkmaz, ekran okuyucu satırda yalnız "Kopyala" eylemini sunar.
+ */
 @Composable
 private fun HistoryRow(entry: SubtitleHistory.Entry) {
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
     val pack = entry.origin == SubtitleHistory.PACK
     val time = remember(entry.date) { DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(entry.date)) }
-    Column(Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = { copy(context, "${entry.translation}\n${entry.source}") })
+    val copyLabel = stringResource(R.string.history_copy)
+    fun copyLine() {
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        copy(context, "${entry.translation}\n${entry.source}")
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) Toast.makeText(context, R.string.history_copied, Toast.LENGTH_SHORT).show()
+    }
+    Column(Modifier.fillMaxWidth()
+        .pointerInput(entry) { detectTapGestures(onLongPress = { copyLine() }) }
+        .semantics(mergeDescendants = true) { onLongClick(copyLabel) { copyLine(); true } }
         .padding(vertical = Tokens.Space.inline), verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
         Text("$time · " + stringResource(if (pack) R.string.history_pack else R.string.history_engine),
             style = Tokens.Type.caption.copy(fontFamily = FontFamily.Monospace), color = if (pack) Tokens.Color.pro else Tokens.Color.secondary)

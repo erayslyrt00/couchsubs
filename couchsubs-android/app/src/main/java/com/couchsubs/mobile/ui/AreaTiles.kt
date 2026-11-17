@@ -6,12 +6,12 @@ package com.couchsubs.mobile.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,7 +23,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -151,13 +150,8 @@ fun AreaTile() {
 @Composable
 private fun SliderRow(title: String, value: Double, range: ClosedFloatingPointRange<Float>, onChange: (Double) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
-        Row {
-            TileLabel(title)
-            Spacer(Modifier.weight(1f))
-            TileLabel("%${value.toInt()}")
-        }
-        Slider(value.toFloat(), { onChange(it.toDouble()) }, valueRange = range,
-            colors = SliderDefaults.colors(thumbColor = Tokens.Color.text, activeTrackColor = Tokens.Color.accent, inactiveTrackColor = Tokens.Color.borderStrong))
+        SliderHeader(title, "%${value.toInt()}")
+        Slider(value.toFloat(), { onChange(it.toDouble()) }, valueRange = range, colors = couchSliderColors())
     }
 }
 
@@ -177,7 +171,9 @@ fun ExtraAreasTile() {
         TileLabel(stringResource(R.string.extra_title))
         Text(stringResource(R.string.extra_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
         areas.forEach { area ->
-            Column(Modifier.fillMaxWidth().background(Tokens.Color.surface2, RoundedCornerShape(Tokens.Radius.tile)).padding(Tokens.Space.gap),
+            // Karo içindeki kutu: inner köşe ve çerçeve, zemin karonunki; böylece içindeki ad alanı (surface2) kutudan ayrılır.
+            val shape = RoundedCornerShape(Tokens.Radius.inner)
+            Column(Modifier.fillMaxWidth().border(1.dp, Tokens.Color.borderStrong, shape).padding(Tokens.Space.gap),
                 verticalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                     Box(Modifier.weight(1f)) {

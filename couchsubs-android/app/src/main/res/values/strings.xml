@@ -282,6 +282,11 @@
     <string name="settings_engine_note">Hazır paketi olan oyunlarda bu motor yalnız eksik satırlar için çalışır.</string>
     <string name="settings_preview">Dinliyor musun beni?</string>
     <string name="settings_color">Yazı rengi</string>
+    <string name="settings_color_white">Beyaz</string>
+    <string name="settings_color_yellow">Sarı</string>
+    <string name="settings_size">Yazı boyutu</string>
+    <string name="settings_section_background">Arka plan</string>
+    <string name="settings_section_tv">TV\'de</string>
     <string name="settings_background">Arka plan koyuluğu</string>
     <string name="settings_background_area">Arka plan alanı</string>
     <string name="settings_background_fit">Yazı kadar</string>
@@ -426,6 +431,7 @@
     <string name="history_empty">Henüz altyazı yok. Bu ve önceki oturumlarda çevrilen satırlar burada görünür.</string>
     <string name="history_copy_all">Tümünü kopyala</string>
     <string name="history_copied">Kopyalandı</string>
+    <string name="history_copy">Kopyala</string>
     <string name="history_clear">Temizle</string>
     <string name="history_clear_title">Geçmiş temizlensin mi?</string>
     <string name="history_clear_body">Kaydedilen bütün satırlar bu telefondan silinir.</string>
