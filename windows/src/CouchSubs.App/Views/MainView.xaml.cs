@@ -88,11 +88,45 @@ public partial class MainView : UserControl
     {
         var text = Localizer.Current;
         var settings = controller.Settings;
+        ShowScreenKeys(settings);
         EngineText.Text = settings.Engine == TranslationEngine.Free ? text["Free"] : settings.Engine.DisplayName();
         var packs = controller.InstalledPacks.Count;
         var active = settings.GamePacks && settings.SourceLanguage == "en" && settings.TargetLanguage == "tr" && packs > 0;
         PackTile.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         PackText.Text = text.Format("Game packs are on · %lld games translated in advance", packs);
+    }
+
+    /// <summary>
+    /// Bilgi karosunun "Ekranı çevir" satırı: Ayarlar › Kısayollar'da seçili her tuş bir Keycap, aralarında "ya da".
+    /// Hiç kısayol yoksa "kısayol yok" yazar. Kısayol değişince Settings bildirimiyle yeniden kurulur.
+    /// </summary>
+    private void ShowScreenKeys(UserSettings settings)
+    {
+        var text = Localizer.Current;
+        var keys = HotkeyTable.KeysFor(settings.Hotkeys, HotkeyAction.Screen);
+        ScreenKeys.Children.Clear();
+        ScreenKeys.ToolTip = HotkeyText.Title(settings, HotkeyAction.Screen, "Translate the screen (%@)");
+        if (keys.Count == 0)
+        {
+            ScreenKeys.Children.Add(new TextBlock
+            {
+                Text = text["no shortcut"], Style = (Style)FindResource("CaptionText"),
+                VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap,
+            });
+            return;
+        }
+        for (var index = 0; index < keys.Count; index++)
+        {
+            if (index > 0)
+                ScreenKeys.Children.Add(new TextBlock
+                {
+                    Text = text["or"], Style = (Style)FindResource("CaptionText"), Margin = new Thickness(8, 0, 8, 0),
+                    VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap,
+                });
+            var label = new TextBlock { Text = keys[index].Label, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap };
+            System.Windows.Documents.Typography.SetNumeralAlignment(label, FontNumeralAlignment.Tabular);
+            ScreenKeys.Children.Add(new Border { Style = (Style)FindResource("Keycap"), Child = label });
+        }
     }
 
     private async void OnUpdate(object sender, RoutedEventArgs e) => await controller.InstallUpdateAsync();

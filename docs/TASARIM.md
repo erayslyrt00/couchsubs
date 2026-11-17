@@ -175,8 +175,9 @@ Sol sütun: "Çeviriyi başlat" (birincil) ya da "Çeviriyi durdur" (tehlikeli),
 karolar: PS5 ve TV durum karoları (altyazı yalnız bilgisayar ekranındaysa TV karosu yoktur; TV seçili ama bağlı
 değilse "Kurulmadı" ve "TV bağla"), iki sütun genişliğinde "Altyazıyı göster: TV / Bilgisayar ekranı / İkisi de"
 karosu (bilgisayar ekranı seçiliyse "Tıklamalar geçsin" ve "Altyazı penceresini ayarla"), iki satırlı bilgi karosu:
-"Çeviri" (seçili motor ve `›`; Ayarlar › Çeviri'yi açar) ve "Ekranı çevir" (tuşlar: Windows'ta `Num 9` ya da
-`Ctrl+Shift+9`, Mac'te `⌥⌘T`); gerekiyorsa uyarı karoları (dil paketi, çevrimiçi motor, yazı tanıma).
+"Çeviri" (seçili motor ve `›`; Ayarlar › Çeviri'yi açar) ve "Ekranı çevir" (seçili kısayollar, her biri bir tuş:
+Windows'ta varsayılan `Num 9` ya da `Ctrl+Shift+9`, Ayarlar › Kısayollar'dan değişir, hiç yoksa "kısayol yok"; Mac'te
+`⌥⌘T`); gerekiyorsa uyarı karoları (dil paketi, çevrimiçi motor, yazı tanıma).
 Sağ sütun: oyun paketleri açıksa (İngilizce→Türkçe, paket kurulu) paket karosu (mor paket simgesi) "Oyun paketleri
 açık · n oyunun çevirisi hazır"; altında kalan yüksekliği dolduran "Canlı altyazı" karosu: son çeviri 28 pt altyazı
 sarısında, altında özgün metin `caption`; önceki satırlar ayraçlarla, `textSecondary` renginde ve kaydırılabilir.

@@ -139,16 +139,8 @@
                                 <Border Style="{StaticResource InfoDivider}" />
                                 <DockPanel Style="{StaticResource InfoRow}">
                                     <TextBlock Text="{t:T 'Translate screen'}" Style="{StaticResource InfoRowLabel}" />
-                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
-                                                ToolTip="{t:T 'Translate the screen (Num 9 or Ctrl+Shift+9)'}">
-                                        <Border Style="{StaticResource Keycap}">
-                                            <TextBlock Text="Num 9" VerticalAlignment="Center" TextWrapping="NoWrap" />
-                                        </Border>
-                                        <TextBlock Text="{t:T 'or'}" Style="{StaticResource CaptionText}" VerticalAlignment="Center" Margin="8,0" TextWrapping="NoWrap" />
-                                        <Border Style="{StaticResource Keycap}">
-                                            <TextBlock Text="Ctrl+Shift+9" VerticalAlignment="Center" TextWrapping="NoWrap" Typography.NumeralAlignment="Tabular" />
-                                        </Border>
-                                    </StackPanel>
+                                    <!-- Ayarlar › Kısayollar'da seçili tuşlar, her biri bir tuş; kısayol yoksa "kısayol yok" (ShowScreenKeys). -->
+                                    <StackPanel x:Name="ScreenKeys" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" />
                                 </DockPanel>
                             </StackPanel>
                         </c:Card>
