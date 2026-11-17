@@ -253,6 +253,7 @@ class SubtitlePipeline(
      * çevrilir. Temiz ve tam cümle ya da pakette bulunan satır beklemeden gider (Windows: TranslateOrHold).
      */
     private fun translateOrHold(source: String, box: TextBox?): (() -> Unit)? {
+        if (restoreQueued(source)) return null
         if (!holdReadings) { lineLeft(); return enqueue(source, box) }
         val packed = findPack(source) != null
         // Az önce çevrilen satırın daha iyi olmayan yeniden okuması yeni satır değildir (TV'de üst üste binmesin).
@@ -328,13 +329,29 @@ class SubtitlePipeline(
             executor.execute { pump(request) }
         } else {
             // Aynı cümlenin eski okuması sırada bekliyorsa çıkar; sıra dolduysa en eski bekleyen atlanır.
-            waiting.removeAll { TextMatch.isRevision(source, it.source) }
+            waiting.removeAll { TextMatch.isRevision(source, it.source) && !TextMatch.isGrowth(it.source, source) }
             waiting.add(request)
             while (waiting.size > MAX_WAITING) waiting.removeAt(0)
             // Süren çeviri bu cümlenin yarım okumasınınsa (daktilo efekti) sonucu gösterilmez; tamamı sıradan çevrilir.
             if (!current.superseded && !current.abandoned && current.session == session && TextMatch.isGrowth(source, current.source)) current.superseded = true
         }
         return missed?.let { callback -> { callback(source) } }
+    }
+
+    // Tam okuma geri gelirse aradaki kısalmış kayıtları birleştir; sıra ve okuma zamanı korunur.
+    // Doğrulanmış boş bölgeyi aşma: kısa metin ayrı bir replik olabilir.
+    private fun restoreQueued(source: String): Boolean {
+        val full = waiting.lastOrNull { it.source == source } ?: return false
+        val left = full.leftAt ?: return false
+        if (left <= lastClearAt) return false
+        val fragment: (Request) -> Boolean = { it.number > full.number && TextMatch.isGrowth(source, it.source) }
+        if (!waiting.any(fragment)) return false
+        waiting.removeAll(fragment)
+        lineLeft()
+        full.leftAt = null
+        lineOnScreen = full.number
+        lastSent = Sent(source, Rereads.score(source), now())
+        return true
     }
 
     /** Süren ve sırada bekleyen istekler. */
@@ -370,6 +387,7 @@ class SubtitlePipeline(
     }
 
     private fun restore(source: String, box: TextBox?): (() -> Unit)? {
+        if (restoreQueued(source)) return null
         val index = pairs.indexOfLast { it.source == source }
         if (index >= 0) {
             val pair = pairs[index]

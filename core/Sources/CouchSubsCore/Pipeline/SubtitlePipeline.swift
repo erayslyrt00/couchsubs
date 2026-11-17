@@ -365,6 +365,7 @@ public final class SubtitlePipeline {
     /// Bozuk ya da yarım olabilecek okuma hemen çevrilmez, kısa süre bekletilir; aynı satırın daha iyi okuması gelirse o
     /// çevrilir. Temiz ve tam cümle ya da pakette bulunan satır beklemeden gider (Windows: TranslateOrHold).
     private func translateOrHold(_ source: String, box: TextBox?) {
+        if restoreQueued(source) { return }
         if !holdReadings { lineLeft(); return enqueue(source, box: box) }
         let packed = findPack(source) != nil
         let time = now()
@@ -415,10 +416,10 @@ public final class SubtitlePipeline {
         }
         log(request, "\(SubtitleLog.excerpt(source)) → sırada (çeviri sürüyor: #\(current.number))")
         // Aynı cümlenin eski okuması sırada bekliyorsa çıkar; sıra dolduysa en eski bekleyen atlanır.
-        for old in waiting where TextMatch.isRevision(source, of: old.source) {
+        for old in waiting where replacesQueued(source, old.source) {
             log(old, "atıldı: yerine düzelmiş okuması geldi (#\(request.number))")
         }
-        waiting.removeAll { TextMatch.isRevision(source, of: $0.source) }
+        waiting.removeAll { replacesQueued(source, $0.source) }
         waiting.append(request)
         if waiting.count > Self.maxWaiting {
             for old in waiting.prefix(waiting.count - Self.maxWaiting) { log(old, "atıldı: sıra doldu") }
@@ -430,6 +431,27 @@ public final class SubtitlePipeline {
             current.superseded = true
             work?.cancel()
         }
+    }
+
+    // Tam okuma geri gelirse aradaki kısalmış kayıtları birleştir; sıra ve okuma zamanı korunur.
+    // Doğrulanmış boş bölgeyi aşma: kısa metin ayrı bir replik olabilir.
+    private func restoreQueued(_ source: String) -> Bool {
+        guard let full = waiting.last(where: { $0.source == source }),
+              let left = full.leftAt, left > lastClearAt else { return false }
+        let fragment: (Request) -> Bool = { $0.number > full.number && TextMatch.isGrowth(source, of: $0.source) }
+        guard waiting.contains(where: fragment) else { return false }
+        for old in waiting where fragment(old) { log(old, "atıldı: tam okuması geri geldi (#\(full.number))") }
+        waiting.removeAll(where: fragment)
+        lineLeft()
+        full.leftAt = nil
+        lineOnScreen = full.number
+        lastSent = (source, Rereads.score(source), now())
+        return true
+    }
+
+    // Yerleşim benzerliği simetriktir; kısalan okuma daha tam kuyruk kaydını silemez.
+    private func replacesQueued(_ source: String, _ previous: String) -> Bool {
+        TextMatch.isRevision(source, of: previous) && !TextMatch.isGrowth(previous, of: source)
     }
 
     /// Satır az önce gösterilenin uzamış ya da düzelmiş okuması mı (TV yerine koyar, üstüne yığmaz).
@@ -480,6 +502,7 @@ public final class SubtitlePipeline {
 
     /// Az önce kalkıp geri gelen satır: çevirmene gitmeden eski çevirisi yeniden gösterilir.
     private func restore(_ source: String, box: TextBox?) {
+        if restoreQueued(source) { return }
         if let pair = pairs.last(where: { $0.source == source }) {
             lineOnScreen = pair.number
             log("#\(pair.number) geri geldi: \(SubtitleLog.excerpt(source))")

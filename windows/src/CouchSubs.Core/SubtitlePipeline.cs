@@ -409,6 +409,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     /// </summary>
     private Action? TranslateOrHold(string source, TextBox? box)
     {
+        if (RestoreQueued(source)) return null;
         // Yeniden okuma denetimi gecikme eklemez; bekleme süreleri 0 olsa da çalışır.
         var enabled = PackLookup is not null || HoldWithoutPacks;
         if (!enabled) { LineLeft(); return Enqueue(source, box); }
@@ -598,9 +599,9 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         {
             Write(request, $"{SubtitleLog.Excerpt(source)} → sırada (çeviri sürüyor: #{current.Number})");
             // Aynı cümlenin eski okuması sırada bekliyorsa çıkar; sıra dolduysa en eski bekleyen atlanır.
-            foreach (var old in waiting.Where(w => TextMatch.IsRevision(source, w.Source)))
+            foreach (var old in waiting.Where(w => ReplacesQueued(source, w.Source)))
                 Write(old, $"atıldı: yerine düzelmiş okuması geldi (#{request.Number})");
-            waiting.RemoveAll(w => TextMatch.IsRevision(source, w.Source));
+            waiting.RemoveAll(w => ReplacesQueued(source, w.Source));
             waiting.Add(request);
             if (waiting.Count > MaxWaiting)
             {
@@ -618,6 +619,27 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         }
         return missed is null ? null : () => missed(source);
     }
+
+    // Tam okuma sıradayken geri geldiyse aradaki kısalmış okumaları birleştir; sıra ve okuma zamanı korunur.
+    // Gerçek bir boş bölgeyi aşma: sonra gelen kısa metin ayrı bir replik olabilir.
+    private bool RestoreQueued(string source)
+    {
+        var full = waiting.LastOrDefault(w => w.Source == source);
+        if (full?.LeftAt is not { } left || left <= lastClearAt) return false;
+        bool Fragment(Request w) => w.Number > full.Number && TextMatch.IsGrowth(source, w.Source);
+        if (!waiting.Any(Fragment)) return false;
+        foreach (var old in waiting.Where(Fragment)) Write(old, $"atıldı: tam okuması geri geldi (#{full.Number})");
+        waiting.RemoveAll(Fragment);
+        LineLeft();
+        full.LeftAt = null;
+        lineOnScreen = full.Number;
+        lastSent = (source, ReadingScore(source), now());
+        return true;
+    }
+
+    // Yerleşim için benzerlik simetriktir; kuyruktan silme değildir. Kısalan okuma daha tam olanı silemez.
+    private static bool ReplacesQueued(string source, string previous) =>
+        TextMatch.IsRevision(source, previous) && !TextMatch.IsGrowth(previous, source);
 
     /// <summary>Satır az önce gösterilenin uzamış ya da düzelmiş okuması mı (TV yerine koyar, üstüne yığmaz).</summary>
     private bool RevisesShown(string source) => LastPair is { } shown && TextMatch.IsRevision(source, shown.Source);
@@ -661,6 +683,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     /// <summary>Az önce kalkıp geri gelen satır: çevirmene gitmeden eski çevirisi yeniden gösterilir.</summary>
     private Action? Restore(string source, TextBox? box)
     {
+        if (RestoreQueued(source)) return null;
         // Geri gelen satır hâlâ ekrandaki satırdır; yarım yeniden okumaları yeni satır sayılmasın.
         if (lastSent is { } last && (Related(source, last.Source) || AllLinesCovered(source, last.Source)))
         {
