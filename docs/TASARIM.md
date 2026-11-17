@@ -140,8 +140,8 @@ Her iki platformda aynı adla bulunur.
 - **NumberedRow** – 28 pt `surface2` dairede numara (`textPrimary`), yanında `body` metin.
 - **StatusRow** – 10 pt durum noktası, kalın ad, sağda değer. Nokta: bağlı `success`, çeviri sürerken
   bağlantı yok `warning`, çeviri başlamamışken `textSecondary` (boşta olmak uyarı değildir).
-- **Metin alanı** – `surface2` zemin, 1 pt `border` çerçeve, `control` köşe, en az 40 yükseklik; PS5 kodu
-  alanı 52 yükseklik ve `code` yazı. Etiketi alanın üstünde `callout`/`textSecondary`.
+- **Metin alanı** – `surface2` zemin, 1 pt `border` çerçeve (odaktayken `accent`), `control` köşe, en az 40 yükseklik;
+  PS5 kodu alanı 52 yükseklik ve `code` yazı. Etiketi alanın üstünde `callout`/`textSecondary`.
 - **Bölmeli seçim** – 2–4 seçenek: `surface2` ray (`control` köşe, 4 iç boşluk), seçili parça yükseltilmiş zemin
   (`inner` köşe) ve yarı kalın yazı; halka ve parıltı yok (Mac'te sistemin büyük boy segmented denetimi).
 - **Seçenek karoları** – her seçeneğin kısa notu olan seçim (çeviri motoru): yan yana küçük karolar (ad

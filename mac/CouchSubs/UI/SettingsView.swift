@@ -598,7 +598,7 @@ private struct GamePacksPage: View {
             Text("Game packs").font(.csDisplay)
             Spacer()
             if !model.installedPacks.isEmpty {
-                Pill(text: String(format: String(localized: "Free · %lld games"), model.installedPacks.count), tone: .success)
+                Pill(text: String(format: String(localized: "Free · %lld games"), model.installedPacks.count))
             }
         }
         Text("Ready-made Turkish translations for some games. A line found in a pack appears at once, without the translation engine.")

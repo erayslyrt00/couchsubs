@@ -273,7 +273,7 @@ private struct LiveSubtitlesTile: View {
             HStack {
                 Text("Live subtitles").font(.csHeadline)
                 Spacer()
-                if model.isRunning { Pill(text: String(localized: "Translating…"), tone: .success, live: true) }
+                if model.isRunning { Pill(text: String(localized: "Translating…"), live: true) }
             }
             if model.lastTranslation.isEmpty {
                 HintText(text: "Subtitles will appear here while you play.")
