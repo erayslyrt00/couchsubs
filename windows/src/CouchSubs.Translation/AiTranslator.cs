@@ -460,7 +460,6 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         var context = Context();
         Shown(text);
         if (_cache.TryGet(CacheKey(text, game), out var cached)) return Remember(cached, text);
-        if (DateTimeOffset.UtcNow < _pausedUntil) return Remember(await FallbackAsync(text, cancellationToken).ConfigureAwait(false), text);
 
         var pieces = SubtitleSegmenter.Split(text);
         foreach (var name in pieces.Select(SubtitleSegmenter.LabelName).OfType<string>())
@@ -471,6 +470,9 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         var translations = pieces.Select(p => p.Translate && _cache.TryGet(CacheKey(p.Text, game), out var known) ? known : null).ToList();
         var missing = Enumerable.Range(0, pieces.Count).Where(i => pieces[i].Translate && translations[i] is null).ToList();
         var sources = missing.Select(i => SubtitleSegmenter.NormalizeCase(pieces[i].Text, names)).ToList();
+        // Hizmetin beklemesi yalnız eksik çeviriler içindir; önbellekteki parçalar yerel motor istemez.
+        if (sources.Count > 0 && DateTimeOffset.UtcNow < _pausedUntil)
+            return Remember(await FallbackAsync(text, cancellationToken).ConfigureAwait(false), text);
         // Dakikalık hak bittiyse istek gönderilmez; satır sessizce yerel çeviriyle çevrilir (hata değildir).
         LastLineWasRateLimited = sources.Count > 0 && _budget is { } budget && !budget.TryTake();
         if (LastLineWasRateLimited) return Remember(await FallbackAsync(text, cancellationToken).ConfigureAwait(false), text);
@@ -479,7 +481,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         try
         {
             translated = sources.Count == 0 ? [] : await RequestAsync(sources, context, game, cancellationToken).ConfigureAwait(false);
-            Report(null);
+            if (sources.Count > 0) Report(null);
         }
         catch (AiRateLimitedException limited) when (!cancellationToken.IsCancellationRequested)
         {

@@ -129,6 +129,43 @@ class RateLimitTest {
     }
 
     @Test
+    fun cachedSentencesSurviveServicePauseWithoutLocalWork() {
+        for (failure in listOf("server", "timeout", "invalid-reply", "daily-quota", "minute-quota")) {
+            val clock = Clock()
+            var requests = 0
+            val http = object : Http {
+                override fun send(method: String, url: String, headers: Map<String, String>, body: String?, timeoutMs: Int): Pair<Int, String> {
+                    requests++
+                    return when (failure) {
+                        "timeout" -> throw java.net.SocketTimeoutException("timeout")
+                        "invalid-reply" -> 200 to "{}"
+                        "daily-quota" -> perDay
+                        "minute-quota" -> perMinute
+                        else -> 503 to "{}"
+                    }
+                }
+            }
+            val cache = TranslationCache()
+            cache.store("Run!", "Koş!")
+            cache.store("Hide!", "Saklan!")
+            val calls = mutableListOf<String>()
+            val translator = AiTranslator(AiProvider.GEMINI, "key", model,
+                { calls.add(it); "yerel: $it" }, http, cache, clock = clock::read, budget = RequestBudget(15, clock::read))
+            assertEquals("yerel: Wait!", translator.translate("Wait!"))
+            val error = translator.lastError
+            assertEquals(failure, "KRATOS: Koş! Saklan!", translator.translate("KRATOS: Run! Hide!"))
+            assertEquals(failure, 1, requests)
+            assertEquals(failure, listOf("Wait!"), calls)
+            assertEquals(failure, error, translator.lastError)
+            // Eksik parçada hata sonrası yerel yol ve HTTP beklemesi korunur.
+            assertEquals("yerel: Run! Jump!", translator.translate("Run! Jump!"))
+            assertEquals(listOf("Wait!", "Run! Jump!"), calls)
+            assertEquals(1, requests)
+            assertNull(cache.get("Run! Jump!"))
+        }
+    }
+
+    @Test
     fun dailyLimitIsShownAndPausesAMinute() {
         val clock = Clock()
         val http = ScriptedHttp(perDay, ok)

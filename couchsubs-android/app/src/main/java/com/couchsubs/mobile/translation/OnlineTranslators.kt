@@ -204,7 +204,6 @@ abstract class SentenceTranslator<C>(
         val game = game()
         val context = context(text)
         cache.get(cacheKey(text, game))?.let { return it.also { remember(text, it) } }
-        if (clock() < pausedUntil) return fallback(text)
         val pieces = SubtitleSegmenter.split(text)
         for (name in pieces.mapNotNull(SubtitleSegmenter::labelName))
             name.split(' ').filter { it.length >= 2 }.forEach { names.add(it.lowercase(Locale.ROOT)) }
@@ -212,6 +211,8 @@ abstract class SentenceTranslator<C>(
         val translations = pieces.map { if (it.translate) cache.get(cacheKey(it.text, game)) else null }.toMutableList()
         val missing = pieces.indices.filter { pieces[it].translate && translations[it] == null }
         val sources = missing.map { SubtitleSegmenter.normalizeCase(pieces[it].text, known) }
+        // Hizmetin beklemesi yalnız eksik çeviriler içindir; önbellekteki parçalar yerel motor istemez.
+        if (sources.isNotEmpty() && clock() < pausedUntil) return fallback(text)
         // Dakikalık hak bittiyse istek gönderilmez; satır sessizce yerel çeviriyle çevrilir (hata değildir).
         if (sources.isNotEmpty() && budget?.take() == false) return fallback(text)
         val translated = try {

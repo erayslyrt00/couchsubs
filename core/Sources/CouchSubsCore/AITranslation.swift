@@ -581,13 +581,16 @@ public final class AITranslationCore: @unchecked Sendable {
         let context = lock.withLock { recent }
         shown(text)
         if let cached = cache.value(for: Self.cacheKey(text, game: game)) { return remember(cached, for: text) }
-        guard Date() >= lock.withLock({ pausedUntil }) else { return remember(try await fallback(text), for: text) }
         let pieces = SubtitleSegmenter.split(text)
         names.learn(from: pieces)
         // Önbellekte duran cümleler yeniden gönderilmez.
         var translations: [String?] = pieces.map { $0.translate ? cache.value(for: Self.cacheKey($0.text, game: game)) : nil }
         let missing = pieces.indices.filter { pieces[$0].translate && translations[$0] == nil }
         let sources = missing.map { SubtitleSegmenter.normalizeCase(pieces[$0].text, names: names.all) }
+        // Hizmetin beklemesi yalnız eksik çeviriler içindir; önbellekteki parçalar yerel motor istemez.
+        if !sources.isEmpty, Date() < lock.withLock({ pausedUntil }) {
+            return remember(try await fallback(text), for: text)
+        }
         // Dakikalık hak bittiyse istek gönderilmez; satır sessizce yerel çeviriyle çevrilir (hata değildir).
         let allowed = sources.isEmpty || budget?.take() != false
         lock.withLock { rateLimited = !allowed }
@@ -595,7 +598,7 @@ public final class AITranslationCore: @unchecked Sendable {
         let translated: [String]
         do {
             translated = sources.isEmpty ? [] : try await request(sources, context: context, game: game)
-            setFailure(nil)
+            if !sources.isEmpty { setFailure(nil) }
         } catch is CancellationError {
             throw CancellationError()
         } catch let error as URLError where error.code == .cancelled && Task.isCancelled {

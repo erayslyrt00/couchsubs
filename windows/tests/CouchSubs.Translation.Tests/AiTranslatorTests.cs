@@ -765,6 +765,70 @@ public class AiTranslatorTests
         Assert.False(cache.TryGet("Run!", out _));
     }
 
+    // Hata beklemesi HTTP'yi durdurur; bütün cümle parçaları önbellekteyse yerel motor gerekmez.
+    [Theory]
+    [InlineData("server")]
+    [InlineData("timeout")]
+    [InlineData("invalid-reply")]
+    [InlineData("daily-quota")]
+    [InlineData("minute-quota")]
+    public async Task CachedSentencesSurviveServicePauseWithoutLocalWork(string failure)
+    {
+        var fake = new FakeAi((_, _) => failure switch
+        {
+            "timeout" => throw new TaskCanceledException("timeout"),
+            "invalid-reply" => Json("{}"),
+            "daily-quota" => Json(RateLimitBody("GenerateRequestsPerDayPerProjectPerModel-FreeTier"), HttpStatusCode.TooManyRequests),
+            "minute-quota" => Json(RateLimitBody(PerMinute), HttpStatusCode.TooManyRequests),
+            _ => Json("{}", HttpStatusCode.ServiceUnavailable),
+        });
+        var cache = new TranslationCache();
+        cache.Store("Run!", "Koş!");
+        cache.Store("Hide!", "Saklan!");
+        var local = new FakeLocal();
+        var translator = Make(AiProvider.Gemini, fake, local, cache);
+        Assert.Equal("yerel: Wait!", await translator.TranslateAsync("Wait!"));
+        var error = translator.LastError;
+        Assert.Equal("KRATOS: Koş! Saklan!", await translator.TranslateAsync("KRATOS: Run! Hide!"));
+        Assert.Single(fake.Requests);
+        Assert.Equal(["Wait!"], local.Calls);
+        Assert.Equal(error, translator.LastError); // Önbellek başarısı hizmetin düzeldiğini kanıtlamaz.
+        Assert.Equal("KRATOS", translator.SpokenLines("KRATOS: Run! Hide!").Last().Speaker);
+        // Tek bir parça eksikse mevcut geri dönüş sürer; yeni HTTP isteği ya da yapay bekleme yok.
+        Assert.Equal("yerel: Run! Jump!", await translator.TranslateAsync("Run! Jump!"));
+        Assert.Equal(["Wait!", "Run! Jump!"], local.Calls);
+        Assert.Single(fake.Requests);
+        Assert.False(cache.TryGet("Run! Jump!", out _));
+    }
+
+    [Fact]
+    public async Task RecordedRequestTimingsMatchLocalBudgetFallbackAndRecovery()
+    {
+        // 09:53:00'a göre ms. Kayıttaki 15 Gemini isteğini izleyen OPUS/Gemini geçişleri.
+        var timeline = new (int At, bool Cloud)[] {
+            (21734, true), (30010, true), (35159, true), (36602, true), (37585, true),
+            (38121, true), (40015, true), (43233, true), (45500, true), (49720, true),
+            (51248, true), (54432, true), (56567, true), (60607, true), (63772, true),
+            (68160, false), (76612, false), (77354, false), (80223, false), (81879, true),
+            (82560, false), (87568, false), (88425, false), (88661, false), (93364, true), (98714, true),
+        };
+        var time = DateTimeOffset.UnixEpoch;
+        var fake = new FakeAi();
+        var local = new FakeLocal();
+        var translator = Make(AiProvider.Gemini, fake, local, budget: new RequestBudget(15, () => time));
+        for (var i = 0; i < timeline.Length; i++)
+        {
+            time = DateTimeOffset.UnixEpoch.AddMilliseconds(timeline[i].At);
+            var source = $"Line number {i}.";
+            var result = await translator.TranslateAsync(source);
+            Assert.Equal((timeline[i].Cloud ? "[tr] " : "yerel: ") + source, result);
+            Assert.Equal(!timeline[i].Cloud, translator.LastLineWasRateLimited);
+            Assert.Null(translator.LastError);
+        }
+        Assert.Equal(18, fake.Requests.Count);
+        Assert.Equal(8, local.Calls.Count);
+    }
+
     [Fact]
     public async Task TimeoutFallsBack()
     {

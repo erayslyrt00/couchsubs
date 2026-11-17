@@ -693,6 +693,41 @@ final class AITranslationTests: XCTestCase {
         XCTAssertNil(cache.value(for: "Run!"))
     }
 
+    func testCachedSentencesSurviveServicePauseWithoutLocalWork() async throws {
+        for failure in ["server", "timeout", "invalid-reply", "daily-quota", "minute-quota"] {
+            FakeAI.requests = []
+            FakeAI.timeout = failure == "timeout"
+            switch failure {
+            case "daily-quota":
+                FakeAI.failure = (429, rateLimitBody(quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier"))
+            case "minute-quota":
+                FakeAI.failure = (429, rateLimitBody(quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"))
+            case "invalid-reply": FakeAI.failure = (200, "{}")
+            default: FakeAI.failure = (503, "{}")
+            }
+            let cache = TranslationCache()
+            cache.store("Koş!", for: "Run!")
+            cache.store("Saklan!", for: "Hide!")
+            let translator = make(.gemini, cache: cache)
+            var calls: [String] = []
+            let fallback: (String) async throws -> String = { calls.append($0); return "yerel: " + $0 }
+            let failed = try await translator.translate("Wait!", fallback: fallback)
+            XCTAssertEqual(failed, "yerel: Wait!")
+            let error = translator.lastFailure
+            let cached = try await translator.translate("KRATOS: Run! Hide!", fallback: fallback)
+            XCTAssertEqual(cached, "KRATOS: Koş! Saklan!", failure)
+            XCTAssertEqual(FakeAI.requests.count, 1, failure)
+            XCTAssertEqual(calls, ["Wait!"], failure)
+            XCTAssertEqual(translator.lastFailure, error, failure)
+            XCTAssertEqual(translator.spokenLines(for: "KRATOS: Run! Hide!") { _ in [] }.last?.speaker, "KRATOS")
+            let missing = try await translator.translate("Run! Jump!", fallback: fallback)
+            XCTAssertEqual(missing, "yerel: Run! Jump!")
+            XCTAssertEqual(calls, ["Wait!", "Run! Jump!"])
+            XCTAssertEqual(FakeAI.requests.count, 1)
+            XCTAssertNil(cache.value(for: "Run! Jump!"))
+        }
+    }
+
     func testTimeoutFallsBack() async throws {
         FakeAI.timeout = true
         let translator = make(.claude)
