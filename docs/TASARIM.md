@@ -146,6 +146,8 @@ Her iki platformda aynı adla bulunur.
   alanı 52 yükseklik ve `code` yazı. Etiketi alanın üstünde `callout`/`textSecondary`.
 - **Bölmeli seçim** – 2–4 seçenek: `surface2` ray (`control` köşe, 4 iç boşluk), seçili parça yükseltilmiş zemin
   (`inner` köşe) ve yarı kalın yazı; halka ve parıltı yok (Mac'te sistemin büyük boy segmented denetimi).
+  Telefonda seçili parça ayrıca 1 pt `accent` çerçeve alır: küçük ekranda yükseltilmiş zemin ile ray arasındaki fark
+  (yaklaşık 1,2:1) tek başına seçimi belli etmiyor.
 - **Seçenek karoları** – her seçeneğin kısa notu olan seçim (çeviri motoru): yan yana küçük karolar (ad
   `headline`, not `caption`), seçili olan *etkin* karo.
 - **Anahtar** – açık/kapalı ayarlar (oyun paketleri, ortak havuz): başlık (`body`) solda, anahtar sağda. Açık/kapalı
