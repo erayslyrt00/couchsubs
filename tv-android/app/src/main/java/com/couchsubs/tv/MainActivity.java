@@ -3,8 +3,10 @@ package com.couchsubs.tv;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
-import android.graphics.drawable.ColorDrawable;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputManager;
@@ -46,6 +48,19 @@ public class MainActivity extends Activity implements TvPage.Host {
     private static final String EXTRA_DISPLAY_MODE = "displayMode";
     private static final long WATCH_EVERY_MS = 1000;
     private static final long HELP_VISIBLE_MS = 25_000;
+    /** Giriş seçicide bundan çok düğme varsa yan yana sığmaz, alt alta dizilir. */
+    private static final int CHOICES_IN_ROW = 3;
+
+    // design/tokens.json, koyu görünüm (TV her zaman koyu): seçici ve yardım kutusu sayfadaki panelle aynı dilde.
+    private static final int SURFACE = 0xFF1C1E23;
+    private static final int SURFACE2 = 0xFF25282F;
+    private static final int TEXT_PRIMARY = 0xFFF3EEE4;
+    private static final int ACCENT = 0xFFF5B83D;
+    private static final int ACCENT_HI = 0xFFFFCF6B;
+    private static final int ON_ACCENT = 0xFF17181B;
+    private static final int BORDER = 0xFF30333A;
+    /** Odaktaki düğme biraz büyür: uzaktan bakınca odak yalnız renkle değil boyutla da seçilsin. */
+    private static final float FOCUS_SCALE = 1.05f;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private TvView tvView;
@@ -142,16 +157,21 @@ public class MainActivity extends Activity implements TvPage.Host {
         helpBox = new LinearLayout(this);
         helpBox.setOrientation(LinearLayout.VERTICAL);
         helpBox.setVisibility(View.GONE);
-        helpBox.setBackgroundColor(0xE6202024);
+        // surface %90 saydam, 16 köşe (tokens radius.card); odaktaki düğme büyüyünce kenarda kırpılmasın.
+        helpBox.setBackground(rounded((SURFACE & 0x00FFFFFF) | 0xE6000000, 16));
+        helpBox.setClipChildren(false);
+        helpBox.setClipToPadding(false);
         int pad = Math.round(28 * fitScale());
         helpBox.setPadding(pad, pad, pad, pad);
         help = new TextView(this);
-        help.setTextColor(Color.WHITE);
+        help.setTextColor(TEXT_PRIMARY);
         help.setTextSize(TypedValue.COMPLEX_UNIT_PX, 30 * fitScale());
         helpBox.addView(help);
         choices = new LinearLayout(this);
         choices.setOrientation(LinearLayout.HORIZONTAL);
         choices.setVisibility(View.GONE);
+        choices.setClipChildren(false);
+        choices.setClipToPadding(false);
         LinearLayout.LayoutParams choicesLayout = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         choicesLayout.topMargin = pad;
@@ -338,6 +358,7 @@ public class MainActivity extends Activity implements TvPage.Host {
         Button close = choiceButton(getString(R.string.picker_close));
         close.setOnClickListener(v -> closePicker());
         choices.addView(close);
+        arrangeChoices();
         help.setText(text);
         choices.setVisibility(View.VISIBLE);
         helpBox.setVisibility(View.VISIBLE);
@@ -359,24 +380,68 @@ public class MainActivity extends Activity implements TvPage.Host {
         return label;
     }
 
+    /**
+     * Seçici düğmesi (tokens.json; sayfadaki #no-picture düğmeleriyle aynı dil): durgunken surface2 zemin, 3 px border
+     * çerçeve ve ana metin rengi; odakta accent zemin, beyaz çerçeve ve onAccent yazı (basılıyken accentHi), 12 köşe
+     * (radius.control); odakta %5 büyür. Mavi ve gri sistem renkleri kullanılmaz.
+     */
     private Button choiceButton(String label) {
         Button button = new Button(this);
         button.setText(label);
         button.setAllCaps(false);
-        button.setTextColor(Color.WHITE);
+        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        button.setTextColor(new ColorStateList(
+                new int[][] {{android.R.attr.state_focused}, {android.R.attr.state_pressed}, {}},
+                new int[] {ON_ACCENT, ON_ACCENT, TEXT_PRIMARY}));
         button.setTextSize(TypedValue.COMPLEX_UNIT_PX, 28 * fitScale());
         StateListDrawable background = new StateListDrawable();
-        background.addState(new int[] {android.R.attr.state_focused}, new ColorDrawable(0xFF3B82F6));
-        background.addState(new int[] {}, new ColorDrawable(0xFF3A3A40));
+        int stroke = Math.max(1, Math.round(3 * fitScale()));
+        background.addState(new int[] {android.R.attr.state_pressed}, outlined(rounded(ACCENT_HI, 12), stroke, Color.WHITE));
+        background.addState(new int[] {android.R.attr.state_focused}, outlined(rounded(ACCENT, 12), stroke, Color.WHITE));
+        background.addState(new int[] {}, outlined(rounded(SURFACE2, 12), stroke, BORDER));
         button.setBackground(background);
+        // Temanın gölge ve yükselme animasyonu düz yüzey kuralına aykırı.
+        button.setStateListAnimator(null);
         int pad = Math.round(16 * fitScale());
         button.setPadding(2 * pad, pad, 2 * pad, pad);
         button.setFocusable(true);
-        LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        layout.rightMargin = pad;
-        button.setLayoutParams(layout);
+        button.setOnFocusChangeListener((view, focused) -> {
+            float scale = focused ? FOCUS_SCALE : 1f;
+            view.animate().scaleX(scale).scaleY(scale).setDuration(120).start();
+        });
         return button;
+    }
+
+    /**
+     * Düğmeleri dizer: az düğme yan yana, {@link #CHOICES_IN_ROW}'dan çoksa (çok HDMI girişli TV) alt alta; yan yana
+     * dizilince 1400 piksellik kutudan taşıyordu. Kumandada yan yana sol/sağ, alt alta yukarı/aşağı ile gezilir.
+     */
+    private void arrangeChoices() {
+        int count = choices.getChildCount();
+        boolean stacked = count > CHOICES_IN_ROW;
+        choices.setOrientation(stacked ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        int gap = Math.round(16 * fitScale());
+        for (int i = 0; i < count; i++) {
+            LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            boolean last = i == count - 1;
+            if (stacked) layout.bottomMargin = last ? 0 : gap;
+            else layout.rightMargin = last ? 0 : gap;
+            choices.getChildAt(i).setLayoutParams(layout);
+        }
+    }
+
+    /** Düz renkli, köşesi 1920 piksellik sayfa ölçüsünde verilen yuvarlak zemin. */
+    private GradientDrawable rounded(int color, float radius) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(radius * fitScale());
+        return drawable;
+    }
+
+    private static GradientDrawable outlined(GradientDrawable drawable, int width, int color) {
+        drawable.setStroke(width, color);
+        return drawable;
     }
 
     /**
