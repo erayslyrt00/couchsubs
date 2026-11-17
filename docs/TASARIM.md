@@ -90,8 +90,8 @@ Windows'ta aynı sayılar efektif piksel (epx) olarak kullanılır.
 | `code` | 22 | yarı kalın, eş genişlikli rakam | PS5 eşleme kodu |
 
 Altyazı içeriği arayüz değil içeriktir: canlı altyazı karosunda son satır 28 pt yarı kalın ve altyazı sarısında
-(`accentText`), öncekiler 17 pt normal ve `textPrimary`, altlarındaki özgün metin `caption`/`textSecondary` (opaklıkla
-soldurulmaz; çeviri ile özgün metin bir bakışta ayrılır). Paragraflarda satır arası yazı boyutunun yaklaşık 1,3 katıdır. 13 pt'nin altı
+(`accentText`), öncekiler 17 pt normal ve `textSecondary` renginde, altlarındaki özgün metin `caption` (opaklıkla
+soldurulmaz; çeviri ile özgün metin boyla ayrılır). Paragraflarda satır arası yazı boyutunun yaklaşık 1,3 katıdır. 13 pt'nin altı
 kullanılmaz.
 
 ## Boşluk ve biçim

@@ -247,9 +247,10 @@ struct RunningScreen: View {
                         if index > 0 { RowDivider() }
                         HStack(alignment: .top, spacing: Mobile.Space.gap) {
                             VStack(alignment: .leading, spacing: Mobile.Space.hair) {
-                                // Çeviri ana renkte, özgün metin ikincil renkte (Mac ile aynı; TASARIM.md › Yazı).
+                                // Önceki çeviri 17 pt normal ve ikincil renkte, altında küçük özgün metin (Mac ile aynı;
+                                // TASARIM.md › Yazı): canlı satır tek vurgu olarak kalır.
                                 Text(verbatim: line.translation).font(Mobile.TypeScale.headline.weight(.regular))
-                                    .foregroundStyle(Mobile.Palette.text)
+                                    .foregroundStyle(Mobile.Palette.secondary)
                                 Text(verbatim: line.source).font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
                             }
                             Spacer()

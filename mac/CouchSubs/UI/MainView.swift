@@ -365,10 +365,10 @@ private struct HistoryRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.space("hair")) {
-            // Çeviri ana renkte, özgün metin ikincil renkte ve küçük: ikisi bir bakışta ayrılır.
+            // Önceki çeviri 17 pt ikincil renkte, özgün metin küçük (docs/TASARIM.md › Yazı); canlı satır tek vurgu kalır.
             Text(verbatim: entry.translation)
                 .font(.csHeadline.weight(.regular))
-                .foregroundStyle(Color.csText)
+                .foregroundStyle(Color.csSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text(verbatim: entry.source)
                 .font(.csCaption)
