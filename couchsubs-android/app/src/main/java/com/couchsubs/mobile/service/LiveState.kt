@@ -39,6 +39,14 @@ data class LiveStatus(
     val game: String? = null,
     /** "Hangi oyunu oynuyorsunuz?" kartı açık. */
     val askingGame: Boolean = false,
+    /** Uygulanan alan profilinin oyunu (bkz. [PlayedGame.areas]); genel alanlarda null. */
+    val areaProfileGame: String? = null,
+    /** Paketten tanınan oyunun kayıtlı alanları önerildi: "X için kayıtlı alanlar var. Kullanılsın mı?". */
+    val offeredAreaProfileGame: String? = null,
+    /** Alanların kaydedilebileceği oyun (çeviri sürüyor ve oyun biliniyor). */
+    val areaProfileTarget: String? = null,
+    /** Alanlar profilden geldi ya da geri döndü: açık Ayarlar ekranı alanları yeniden okur. */
+    val areasVersion: Int = 0,
 ) {
     /**
      * Sunucunun olayı telefon ekranına: yeni satır öncekini üste iter; aynı cümlenin uzamış ya da düzelmiş okuması

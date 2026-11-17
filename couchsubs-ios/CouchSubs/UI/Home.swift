@@ -207,7 +207,7 @@ struct RunningScreen: View {
                 MobileNote(text: String(localized: "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller won't work in the game."),
                            tone: Mobile.Palette.secondary)
             }
-            GameSection(choice: model.gameChoice)
+            GameSection(choice: model.gameChoice, areas: model.gameAreas)
             Tile {
                 Text("Now").font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
                 if let current = model.recentLines.first {

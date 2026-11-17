@@ -172,6 +172,9 @@ final class PhoneModel: ObservableObject {
     private let pool: LinePool
     /// Oynanan oyun: PS5'in bildirdiği, kullanıcının seçtiği ya da paketten tanınan (havuza giden satırlar bu oyunla gider).
     let gameChoice: GameChoice
+    /// Oyuna göre alanlar: oyun değişince kayıtlı alanları uygular ya da önerir (bkz. CouchSubsCore GameAreas).
+    lazy var gameAreas = GameAreas(read: { [weak self] in self?.settings ?? UserSettings() },
+                                   write: { [weak self] in self?.settings = $0 })
     /// Bağlıyken birkaç dakikada bir PS5'e çalışan oyunu sorar (havuza giden satırlar oyunla gider). Testlerde kapalı.
     private var gameProbe: Task<Void, Never>?
     private let probesGame: Bool
@@ -203,7 +206,8 @@ final class PhoneModel: ObservableObject {
         self.tokenSink = tokenSink
         xboxAuth = XboxAuth(userToken: xboxToken, onUserToken: { token in tokenSink.handler?(token) })
         let loaded = defaults.data(forKey: StoreKey.settings).flatMap { try? JSONDecoder().decode(UserSettings.self, from: $0) }
-        let curated = (loaded ?? UserSettings()).withCuratedModels()
+        // Uygulama oturum sürerken kapandıysa oyunun profili açık kalmış olabilir: genel alanlar geri gelir.
+        let curated = GameAreas.restored((loaded ?? UserSettings()).withCuratedModels())
         settings = curated
         // "Şimdilik geç" ile PSN ve PS5 atlandıysa PS5'siz ana ekrana gidilir; altyazı hedefi seçilmediyse oradan sürer.
         let skipped = defaults.bool(forKey: Self.setupSkippedKey)
@@ -234,6 +238,7 @@ final class PhoneModel: ObservableObject {
             // Bu oyunun (havuzdan otomatik) paketi sunucuda yeni çıkmış olabilir.
             if game != nil { self?.onGameStarted() }
         }
+        gameChoice.onPublish = { [weak self] game, source in self?.gameAreas.follow(game: game, source: source) }
         gameChoice.packTitles = { [weak self] in GameCatalog.packGames(self?.installedPacks ?? []) }
         // Elle seçilen oyunda satırlar yalnız o oyunun paketinde aranır, paketi yoksa hiç aranmaz (#218).
         gameChoice.packs = packs
@@ -440,6 +445,7 @@ final class PhoneModel: ObservableObject {
         session.start()
         self.session = session
         startKeeper()
+        gameAreas.start()
         gameChoice.start(console: consoleName) { [weak self] in
             guard let self else { return false }
             return self.settings.askGame && self.settings.sharePool
@@ -467,6 +473,7 @@ final class PhoneModel: ObservableObject {
         runningSince = nil
         packInUse = nil
         gameChoice.stop()
+        gameAreas.stop()
         session?.stop()
         session = nil
         updateGameProbe(connected: false)

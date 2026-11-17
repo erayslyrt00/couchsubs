@@ -67,6 +67,7 @@ public partial class SettingsWindow : Window
         var streamBackground = controller.StreamBackground.ToString();
         StreamBackgroundChoice.SelectedItem = StreamBackgroundChoice.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == streamBackground);
         ShowArea(0);
+        ShowAreaProfile();
         // Num 8: oyunun o anki görüntüsü önizlemeye alınır.
         controller.SnapshotRequested += OnSnapshot;
         Closed += (_, _) => controller.SnapshotRequested -= OnSnapshot;
@@ -228,6 +229,45 @@ public partial class SettingsWindow : Window
         if (e.PropertyName == nameof(AppController.LastFrame)) ShowLiveFrame();
         if (e.PropertyName == nameof(AppController.InstalledPacks)) ShowPacks();
         if (e.PropertyName == nameof(AppController.Settings)) ShowShortcutTexts();
+        if (e.PropertyName is nameof(AppController.AreaProfileGame) or nameof(AppController.AreaProfileUnsaved)
+            or nameof(AppController.AreaProfileTarget))
+            ShowAreaProfile();
+        // Oyun değişince alanlar profilden gelir ya da genel alanlara dönülür: açık sekme yeni alanı gösterir.
+        if (e.PropertyName == nameof(AppController.AreaProfileGame) && !Region.IsDragging) ShowArea(area);
+    }
+
+    /// <summary>
+    /// "Bu oyunun alanları": profil etkinse hangi oyunun alanları olduğu (kaydedilmemiş değişiklik varsa "Profile kaydet");
+    /// değilse oynanan oyuna kaydetme; oyun bilinmiyorsa nasıl kaydedileceği.
+    /// </summary>
+    private void ShowAreaProfile()
+    {
+        var text = Localizer.Current;
+        var active = controller.AreaProfileGame;
+        var target = controller.AreaProfileTarget;
+        var unsaved = controller.AreaProfileUnsaved;
+        AreaProfileText.Text = active is not null ? text.Format("These areas are saved for %@.", active)
+            : target is not null ? text["These are your general areas."]
+            : text["Areas can be saved for a game while translating, once the game being played is known."];
+        AreaProfileHint.Text = active is not null
+            ? text[unsaved ? "Your changes are not saved yet; they are dropped when translating stops." : "They come back by themselves whenever you play this game."]
+            : target is not null ? text.Format("Save them for %@ and they come back by themselves the next time you play it.", target)
+            : text["The played game is shown on the home screen; you can choose it there."];
+        AreaProfileSave.Content = active is not null ? text["Save to profile"] : target is not null ? text.Format("Save for %@", target) : "";
+        AreaProfileSave.Visibility = target is not null && (active is null || unsaved) ? Visibility.Visible : Visibility.Collapsed;
+        AreaProfileDelete.Visibility = active is not null ? Visibility.Visible : Visibility.Collapsed;
+        AreaProfileButtons.Visibility = AreaProfileSave.Visibility == Visibility.Visible || active is not null ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnSaveAreaProfile(object sender, RoutedEventArgs e) => controller.SaveAreaProfile();
+
+    private void OnDeleteAreaProfile(object sender, RoutedEventArgs e)
+    {
+        if (controller.AreaProfileGame is not { } game) return;
+        var text = Localizer.Current;
+        if (MessageBox.Show(this, text.Format("Delete the saved areas for %@?", game), text["Delete profile"], MessageBoxButton.YesNo,
+                            MessageBoxImage.Question) == MessageBoxResult.Yes)
+            controller.DeleteAreaProfile();
     }
 
     /// <summary>Alan sekmesi açıkken önizleme oyunun görüntüsüyle saniyede bir yenilenir (çerçeve sürüklenirken beklenir).</summary>

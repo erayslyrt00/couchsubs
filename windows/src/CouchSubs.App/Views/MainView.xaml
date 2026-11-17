@@ -155,6 +155,15 @@
                                     <TextBlock x:Name="PlayedGameText" Style="{StaticResource HeadlineText}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                             </DockPanel>
+                            <!-- Oyunun kayıtlı alanları: uygulandı ("Geri al") ya da paketten tanınan oyunda soru ("Kullan" / "Hayır") -->
+                            <DockPanel x:Name="AreaProfileRow" Margin="0,12,0,0" Visibility="Collapsed">
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                                    <Button x:Name="AreaProfileUse" Content="{t:T 'Use'}" Padding="16,0" Click="OnUseAreaProfile" />
+                                    <Button x:Name="AreaProfileNo" Content="{t:T 'No'}" Padding="16,0" Margin="8,0,0,0" Click="OnDeclineAreaProfile" />
+                                    <Button x:Name="AreaProfileUndo" Content="{t:T 'Undo'}" Padding="16,0" Click="OnUndoAreaProfile" />
+                                </StackPanel>
+                                <TextBlock x:Name="AreaProfileText" Style="{StaticResource HintText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            </DockPanel>
                             <StackPanel x:Name="GameAsk" Visibility="Collapsed">
                                 <DockPanel>
                                     <Button DockPanel.Dock="Right" Content="{t:T 'Don\'t ask'}" Padding="12,0" Click="OnDontAskGame" />

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 package com.couchsubs.mobile.service
 
+import com.couchsubs.mobile.core.GameAreas
 import com.couchsubs.mobile.core.GameCatalog
 import com.couchsubs.mobile.core.GamePackLibrary
 import com.couchsubs.mobile.core.GameSense
 import com.couchsubs.mobile.core.RunningGame
+import com.couchsubs.mobile.core.restoreAreas
 import com.couchsubs.mobile.settings.AppSettings
 
 /**
@@ -21,6 +23,21 @@ object PlayedGame {
     @Volatile private var last: RunningGame? = null
     /** Oyun değişti (servis havuza ve paket sunucusuna bağlar); oturum yokken null. */
     @Volatile var onChange: ((RunningGame?) -> Unit)? = null
+    /**
+     * Oyuna göre alanlar: oyun değişince kayıtlı alanlar uygulanır ya da önerilir (bkz. [GameAreas]). Ekranlar
+     * [LiveStatus.areaProfileGame], [LiveStatus.offeredAreaProfileGame] ve [LiveStatus.areaProfileTarget]'ı okur.
+     */
+    val areas: GameAreas = GameAreas(changed = { publishAreas() })
+
+    private fun publishAreas() {
+        val state = areas
+        LiveState.update {
+            val game = state.activeGame
+            it.copy(areaProfileGame = game, offeredAreaProfileGame = state.offeredGame, areaProfileTarget = state.target,
+                areasVersion = if (game != it.areaProfileGame) it.areasVersion + 1 else it.areasVersion)
+        }
+    }
+
     /** Kurulu paketlerin oyun adları (öneriler için). */
     @Volatile var packTitles: () -> List<String> = { emptyList() }
     /** Hazır paketler: kullanıcı elle oyun seçince satırlar yalnız o oyunun paketinde aranır ([GameSense.packLimit], #218). */
@@ -38,12 +55,16 @@ object PlayedGame {
         this.startedAt = startedAt
         last = null
         LiveState.update { it.copy(askingGame = false) }
+        // Uygulama oturum sürerken kapandıysa oyunun profili açık kalmış olabilir: önce genel alanlar geri gelir.
+        settings.restoreAreas()
+        areas.start(settings)
         publish()
     }
 
     /** Çeviri durdu: kart kapanır, oyun havuza artık gitmez. */
     fun stop() {
         onChange = null
+        areas.stop()
         LiveState.update { it.copy(askingGame = false) }
     }
 
@@ -102,6 +123,7 @@ object PlayedGame {
         packs?.limitToGame(sense.packLimit)
         val current = sense.current
         LiveState.update { it.copy(game = current?.name) }
+        areas.follow(current, sense.source)
         if (current == last) return
         last = current
         onChange?.invoke(current)

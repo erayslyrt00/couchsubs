@@ -18,6 +18,8 @@ public final class GameChoice: ObservableObject {
     public let sense = GameSense()
     /// Oyun değişti (uygulama `LinePool.setGame`e bağlar).
     public var onChange: (RunningGame?) -> Void = { _ in }
+    /// Oyun ya da nereden bilindiği her yayımlanışta (aynı oyun paketten sonra elle seçilince de): `GameAreas.follow`.
+    public var onPublish: (RunningGame?, GameSense.Source?) -> Void = { _, _ in }
     /// Kurulu paketlerin oyun adları (öneriler için).
     public var packTitles: () -> [String] = { [] }
     /// Hazır paketler: kullanıcı elle oyun seçince satırlar yalnız o oyunun paketinde aranır (`GameSense.packLimit`).
@@ -120,6 +122,7 @@ public final class GameChoice: ObservableObject {
         packs?.limit(toGame: sense.packLimit)
         let current = sense.current
         source = sense.source
+        onPublish(current, source)
         guard current != game else { return }
         game = current
         onChange(current)

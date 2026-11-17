@@ -96,6 +96,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private string? playedGame;
     private bool askingGame;
     private CancellationTokenSource? gameAsk;
+    /// <summary>Bu oturumda geri alınan ya da istenmeyen alan profilleri (oturum boyunca yeniden uygulanmaz).</summary>
+    private readonly HashSet<string> declinedAreaProfiles = [];
+    /// <summary>Paketten tanınan oyunun önerilen profili ("Kayıtlı alanlar kullanılsın mı?"); yoksa null.</summary>
+    private string? offeredAreaProfile;
     private Timer? packTimer;
     private string metricsText = "";
     /// <summary>Çevrilen satırların geçmişi (arayüz iş parçacığında değişir).</summary>
@@ -126,6 +130,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         {
             CpuTranslationThreads = CpuThreadOptions.Normalize(loaded.CpuTranslationThreads, Environment.ProcessorCount),
         };
+        // Uygulama oturum sürerken kapandıysa oyunun profili açık kalmış olabilir: açılışta genel alanlar geri gelir.
+        if (settings.ActiveAreaProfile is not null || settings.GeneralAreas is not null) settings = settings.WithGeneralAreas();
         services.Translation.SelectCpuThreads(settings.CpuTranslationThreads);
         services.Translation.SelectDevice(settings.TranslationDevice);
         // Listede olmayan model varsayılana döndüyse ayar hemen kaydedilir.
@@ -365,6 +371,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (old.CpuTranslationThreads != value.CpuTranslationThreads)
                 services.Translation.SelectCpuThreads(value.CpuTranslationThreads);
             UpdateRegionWatcher();
+            if (old.ActiveAreaProfile != value.ActiveAreaProfile || old.AreaProfiles != value.AreaProfiles || old.Areas != value.Areas
+                || old.FrameSource != value.FrameSource)
+                Changed(nameof(AreaProfileGame), nameof(AreaProfileUnsaved), nameof(AreaProfileTarget));
             if (old.FrameSource != value.FrameSource || old.CaptureWindow != value.CaptureWindow)
                 Changed(nameof(CanStart), nameof(Ps5StatusText), nameof(ConsoleTitle));
             var windowAppChanged = value.FrameSource == FrameSource.RemotePlayWindow && old.RemotePlayApp != value.RemotePlayApp;
@@ -1436,6 +1445,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         session = null;
         UpdateGameProbe(connected: false);
         StopGameSense();
+        EndGameAreas();
         keeper?.Stop();
         keeper = null;
         pipeline?.Reset();
@@ -1613,6 +1623,105 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         AskingGame = false;
     }
 
+    // --- Oyuna göre alanlar (Ayarlar › Alan ve ana ekrandaki oyun kartı) ---
+
+    /// <summary>Uygulanan alan profilinin oyunu; genel alanlar kullanılıyorsa null.</summary>
+    public string? AreaProfileGame => settings.FindAreaProfile(settings.ActiveAreaProfile)?.Game;
+
+    /// <summary>Profil etkin ve alanlar profilden sonra değişti: "Profile kaydet" gösterilir (kaydedilmezse oturum bitince bırakılır).</summary>
+    public bool AreaProfileUnsaved => settings.AreasDifferFromProfile;
+
+    /// <summary>
+    /// Alanların kaydedilebileceği oyun: çeviri sürüyor ve oyun biliniyor. Profil etkinse o profilin oyunu; değilse
+    /// oynanan oyun ("Bu alanları X için kaydet").
+    /// </summary>
+    public string? AreaProfileTarget => session is null ? null : AreaProfileGame ?? PlayedGame;
+
+    /// <summary>Paketten tanınan oyunun kayıtlı alanları var; kullanıcıya sorulur. Kartta gösterilen oyun adı.</summary>
+    public string? OfferedAreaProfileGame => settings.FindAreaProfile(offeredAreaProfile)?.Game;
+
+    /// <summary>"Kullan": önerilen profil uygulanır.</summary>
+    public void UseOfferedAreaProfile()
+    {
+        if (settings.FindAreaProfile(offeredAreaProfile) is { } profile) ApplyAreaProfile(profile);
+        SetOfferedAreaProfile(null);
+    }
+
+    /// <summary>"Hayır": önerilen profil bu oturumda bir daha sorulmaz.</summary>
+    public void DeclineOfferedAreaProfile()
+    {
+        if (offeredAreaProfile is { } key) declinedAreaProfiles.Add(key);
+        SetOfferedAreaProfile(null);
+    }
+
+    /// <summary>"Geri al": genel alanlara dönülür; bu oyunun profili bu oturumda yeniden uygulanmaz.</summary>
+    public void UndoAreaProfile()
+    {
+        if (settings.ActiveAreaProfile is not { } key) return;
+        declinedAreaProfiles.Add(key);
+        Settings = settings.WithGeneralAreas();
+        SubtitleLog.Write("alan profili geri alındı: " + key);
+    }
+
+    /// <summary>Okunan alanlar etkin profile, profil yoksa oynanan oyuna kaydedilir.</summary>
+    public void SaveAreaProfile()
+    {
+        if (AreaProfileTarget is not { } game) return;
+        declinedAreaProfiles.RemoveWhere(key => key == AreaProfiles.Key(game, settings.AreaSource));
+        Settings = settings.WithSavedAreaProfile(game);
+        SubtitleLog.Write("alan profili kaydedildi: " + settings.ActiveAreaProfile);
+    }
+
+    /// <summary>Etkin profil silinir ve genel alanlara dönülür.</summary>
+    public void DeleteAreaProfile()
+    {
+        if (settings.ActiveAreaProfile is not { } key) return;
+        Settings = settings.WithoutAreaProfile(key);
+        SubtitleLog.Write("alan profili silindi: " + key);
+    }
+
+    private void ApplyAreaProfile(AreaProfile profile)
+    {
+        Settings = settings.WithAreaProfile(profile);
+        SubtitleLog.Write("alan profili uygulandı: " + profile.Key);
+    }
+
+    private void SetOfferedAreaProfile(string? key)
+    {
+        if (offeredAreaProfile == key) return;
+        offeredAreaProfile = key;
+        Changed(nameof(OfferedAreaProfileGame));
+    }
+
+    /// <summary>Oyun değişti (ya da çeviri başladı): o oyunun kayıtlı alanları uygulanır, önerilir ya da genel alanlara dönülür.</summary>
+    private void FollowGameAreas()
+    {
+        Changed(nameof(AreaProfileTarget));
+        if (session is null) return;
+        var decision = AreaProfiles.Decide(settings.ActiveAreaProfile, gameSense.Current?.Name, gameSense.Source, settings.AreaSource,
+                                           key => settings.FindAreaProfile(key) is not null, declinedAreaProfiles.Contains);
+        SetOfferedAreaProfile(decision.Step == AreaProfiles.Step.Offer ? decision.Key : null);
+        switch (decision.Step)
+        {
+            case AreaProfiles.Step.Apply when settings.FindAreaProfile(decision.Key) is { } profile:
+                ApplyAreaProfile(profile);
+                break;
+            case AreaProfiles.Step.UseGeneral:
+                Settings = settings.WithGeneralAreas();
+                SubtitleLog.Write("başka oyun: genel alanlara dönüldü");
+                break;
+        }
+    }
+
+    /// <summary>Oturum bitti: profil bırakılır (kaydedilmemiş alan değişiklikleri de), sorular sıfırlanır.</summary>
+    private void EndGameAreas()
+    {
+        declinedAreaProfiles.Clear();
+        SetOfferedAreaProfile(null);
+        if (settings.ActiveAreaProfile is not null || settings.GeneralAreas is not null) Settings = settings.WithGeneralAreas();
+        Changed(nameof(AreaProfileTarget));
+    }
+
     /// <summary>Oyun değiştiyse havuza bildirilir; yeni oyunun (havuzdan otomatik) paketi sunucuda yeni çıkmış olabilir.</summary>
     private void PublishGame()
     {
@@ -1620,6 +1729,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         services.GamePacks?.LimitToGame(gameSense.PackLimit);
         var current = gameSense.Current;
         PlayedGame = current?.Name;
+        FollowGameAreas();
         if (current == publishedGame) return;
         publishedGame = current;
         services.Pool?.SetGame(current);

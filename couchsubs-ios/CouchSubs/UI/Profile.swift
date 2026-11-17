@@ -274,6 +274,7 @@ struct SettingsScreen: View {
                         .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
                 }
             }
+            AreaProfileTile(areas: model.gameAreas)
             AreaTile()
             ExtraAreasTile()
             LoginPasscodeTile()

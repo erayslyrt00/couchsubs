@@ -260,6 +260,7 @@ private struct AreaCards: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
+        AreaProfileCard(areas: model.gameAreas)
         Card {
             Picker("Area preset", selection: Binding(get: { model.settings.areaPreset }, set: { model.settings.selectAreaPreset($0) })) {
                 ForEach(AreaPreset.allCases, id: \.self) { preset in Text(preset.title).tag(preset) }
@@ -274,6 +275,53 @@ private struct AreaCards: View {
         ExtraAreasCard()
         Card(title: "Translate the screen (⌥⌘T)") {
             HintText(text: "Press ⌥⌘T while playing: every text on the screen is translated once and shown on the TV in its own place. Press again to remove the translations.")
+        }
+    }
+}
+
+/// "Bu oyunun alanları": alanlar oynanan oyuna kaydedilir, o oyun yeniden oynanınca kendiliğinden gelir. Profil etkinse
+/// hangi oyunun alanları olduğu ve kaydedilmemiş değişiklikte "Profile kaydet" (Windows, iPhone ve Android ile aynı).
+private struct AreaProfileCard: View {
+    @ObservedObject var areas: GameAreas
+    /// Alanlar değişince (kaydedilmemiş değişiklik) kart yenilenir.
+    @EnvironmentObject private var model: AppModel
+    @State private var confirmDelete = false
+
+    var body: some View {
+        let active = model.settings.activeAreaProfile == nil ? nil : areas.activeGame
+        let target = areas.target
+        let unsaved = model.settings.areasDifferFromProfile
+        Card(title: "Areas for this game") {
+            if let active {
+                Text(verbatim: String(format: String(localized: "These areas are saved for %@."), active)).font(.csBody)
+                HintText(text: unsaved ? "Your changes are not saved yet; they are dropped when translating stops."
+                                       : "They come back by themselves whenever you play this game.")
+            } else if let target {
+                Text("These are your general areas.").font(.csBody)
+                Text(verbatim: String(format: String(localized: "Save them for %@ and they come back by themselves the next time you play it."), target))
+                    .font(.csCallout)
+                    .foregroundStyle(Color.csSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Areas can be saved for a game while translating, once the game being played is known.").font(.csBody)
+                HintText(text: "The played game is shown on the home screen; you can choose it there.")
+            }
+            if target != nil || active != nil {
+                HStack(spacing: Theme.space("s")) {
+                    if let target, active == nil || unsaved {
+                        Button(active == nil ? String(format: String(localized: "Save for %@"), target) : String(localized: "Save to profile")) {
+                            areas.save()
+                        }
+                        .buttonStyle(.secondary)
+                    }
+                    if active != nil {
+                        Button("Delete profile") { confirmDelete = true }.buttonStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .confirmationDialog(String(format: String(localized: "Delete the saved areas for %@?"), active ?? ""), isPresented: $confirmDelete) {
+            Button("Delete profile", role: .destructive) { areas.delete() }
         }
     }
 }

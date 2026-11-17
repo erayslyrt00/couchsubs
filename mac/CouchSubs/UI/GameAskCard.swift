@@ -8,13 +8,53 @@ import SwiftUI
 /// Çeviri sürerken: kart açıksa kart, değilse "Oynanan oyun" satırı.
 struct GameSection: View {
     @ObservedObject var choice: GameChoice
+    @ObservedObject var areas: GameAreas
 
     var body: some View {
         if choice.asking {
             GameAskCard(choice: choice)
         } else {
             PlayedGameRow(choice: choice)
+            GameAreasRow(areas: areas)
         }
+    }
+}
+
+/// Oyunun kayıtlı alanları: uygulandıysa "X için kayıtlı alanlar kullanılıyor · Geri al"; oyun yalnız paketten
+/// tanındıysa "X için kayıtlı alanlar var. Kullanılsın mı? · Kullan / Hayır" (Windows, iPhone ve Android ile aynı).
+struct GameAreasRow: View {
+    @ObservedObject var areas: GameAreas
+    /// Ayarlar değişince (profil uygulandı ya da bırakıldı) satır yenilenir.
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        if let offered = areas.offeredGame {
+            row(String(format: String(localized: "Saved areas for %@ are available. Use them?"), offered)) {
+                Button("Use") { areas.useOffered() }.buttonStyle(.secondary)
+                Button("No") { areas.declineOffered() }
+                    .buttonStyle(.plain)
+                    .font(.csCaption.weight(.semibold))
+                    .foregroundStyle(Color.csSecondary)
+            }
+        } else if model.settings.activeAreaProfile != nil, let active = areas.activeGame {
+            row(String(format: String(localized: "Using the saved areas for %@."), active)) {
+                Button("Undo") { areas.undo() }
+                    .buttonStyle(.plain)
+                    .font(.csCaption.weight(.semibold))
+                    .foregroundStyle(Color.csAccentText)
+            }
+        }
+    }
+
+    private func row<Buttons: View>(_ text: String, @ViewBuilder buttons: () -> Buttons) -> some View {
+        HStack(spacing: Theme.space("m")) {
+            TileIcon(symbol: "rectangle.dashed")
+            Text(verbatim: text).font(.csBody).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: Theme.space("m"))
+            buttons()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tile()
     }
 }
 

@@ -19,16 +19,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -50,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import com.couchsubs.mobile.R
 import com.couchsubs.mobile.Services
 import com.couchsubs.mobile.core.AreaPreset
+import com.couchsubs.mobile.core.areasDifferFromProfile
 import com.couchsubs.mobile.core.CropRegion
 import com.couchsubs.mobile.core.ExtraArea
 import com.couchsubs.mobile.core.ExtraAreaPreset
@@ -58,13 +62,67 @@ import com.couchsubs.mobile.core.moved
 import com.couchsubs.mobile.core.resized
 import com.couchsubs.mobile.core.withVertical
 import com.couchsubs.mobile.service.FramePreview
+import com.couchsubs.mobile.service.LiveState
+import com.couchsubs.mobile.service.PlayedGame
+
+/**
+ * Ayarlar › Bu oyunun alanları: alanlar oynanan oyuna kaydedilir, o oyun yeniden oynanınca kendiliğinden gelir. Profil
+ * etkinse hangi oyunun alanları olduğu ve kaydedilmemiş değişiklikte "Profile kaydet" (Windows, Mac ve iPhone ile aynı).
+ */
+@Composable
+fun AreaProfileTile() {
+    val status by LiveState.status.collectAsState()
+    val settings = Services.settings
+    // Alanlar bu ekranda değişince "kaydedilmedi" durumu yeniden okunur.
+    var edits by remember { mutableIntStateOf(0) }
+    DisposableEffect(settings) {
+        val listener = settings.onAreasChanged { edits++ }
+        onDispose { settings.removeListener(listener) }
+    }
+    val active = status.areaProfileGame
+    val target = status.areaProfileTarget
+    val unsaved = remember(edits, status.areasVersion, active) { settings.areasDifferFromProfile }
+    var confirmDelete by remember { mutableStateOf(false) }
+    Tile(Modifier.fillMaxWidth()) {
+        TileLabel(stringResource(R.string.area_profile_title))
+        val (headline, note) = when {
+            active != null -> stringResource(R.string.area_profile_saved, active) to
+                stringResource(if (unsaved) R.string.area_profile_unsaved else R.string.area_profile_comes_back)
+            target != null -> stringResource(R.string.area_profile_general) to stringResource(R.string.area_profile_save_note, target)
+            else -> stringResource(R.string.area_profile_unknown) to stringResource(R.string.area_profile_choose_game)
+        }
+        Text(headline, style = Tokens.Type.body, color = Tokens.Color.text)
+        Text(note, style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        if (target != null && (active == null || unsaved)) {
+            SecondaryButton(if (active == null) stringResource(R.string.area_profile_save_for, target) else stringResource(R.string.area_profile_save)) {
+                PlayedGame.areas.save()
+            }
+        }
+        if (active != null) DestructiveButton(stringResource(R.string.area_profile_delete)) { confirmDelete = true }
+    }
+    if (confirmDelete && active != null) AlertDialog(
+        onDismissRequest = { confirmDelete = false },
+        title = { Text(stringResource(R.string.area_profile_delete)) },
+        text = { Text(stringResource(R.string.area_profile_delete_body, active)) },
+        confirmButton = {
+            TextButton({
+                confirmDelete = false
+                PlayedGame.areas.delete()
+            }) { Text(stringResource(R.string.area_profile_delete), color = Tokens.Color.danger) }
+        },
+        dismissButton = { TextButton({ confirmDelete = false }) { Text(stringResource(R.string.cancel)) } },
+        containerColor = Tokens.Color.surface2,
+    )
+}
 
 /** Ayarlar › Altyazı alanı: Alt alan, Üst alan, Tam ekran, Özel; önizlemede çerçeve sürüklenir. */
 @Composable
 fun AreaTile() {
     val settings = Services.settings
-    var region by remember { mutableStateOf(settings.region) }
-    var preset by remember { mutableStateOf(settings.areaPreset) }
+    // Oyunun alanları uygulanınca ya da geri dönülünce ([LiveStatus.areasVersion]) kayıtlı alan yeniden okunur.
+    val version = LiveState.status.collectAsState().value.areasVersion
+    var region by remember(version) { mutableStateOf(settings.region) }
+    var preset by remember(version) { mutableStateOf(settings.areaPreset) }
     fun custom(value: CropRegion) {
         region = value
         preset = AreaPreset.CUSTOM
@@ -107,7 +165,8 @@ private fun SliderRow(title: String, value: Double, range: ClosedFloatingPointRa
 @Composable
 fun ExtraAreasTile() {
     val settings = Services.settings
-    var areas by remember { mutableStateOf(settings.extraAreas) }
+    val version = LiveState.status.collectAsState().value.areasVersion
+    var areas by remember(version) { mutableStateOf(settings.extraAreas) }
     var menu by remember { mutableStateOf(false) }
     fun save(value: List<ExtraArea>) {
         areas = value

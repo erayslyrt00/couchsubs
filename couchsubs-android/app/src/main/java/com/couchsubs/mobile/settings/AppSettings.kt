@@ -6,6 +6,10 @@ import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import com.couchsubs.mobile.core.AreaProfile
+import com.couchsubs.mobile.core.AreaProfiles
+import com.couchsubs.mobile.core.AreaSet
+import com.couchsubs.mobile.core.AreaStore
 import com.couchsubs.mobile.core.SubtitlePlacement
 import com.couchsubs.mobile.core.toJson
 import com.couchsubs.mobile.core.SubtitleStyle
@@ -88,7 +92,7 @@ class SecretStore(context: Context) {
 }
 
 /** Uygulama ayarları; gizli olanlar [SecretStore]'da. */
-class AppSettings(context: Context) {
+class AppSettings(context: Context) : AreaStore {
     private val prefs: SharedPreferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     val secrets = SecretStore(context)
 
@@ -259,6 +263,28 @@ class AppSettings(context: Context) {
     var extraAreas: List<com.couchsubs.mobile.core.ExtraArea>
         get() = com.couchsubs.mobile.core.ExtraArea.listFromJson(prefs.getString("extraAreas", null))
         set(value) = prefs.edit().putString("extraAreas", com.couchsubs.mobile.core.ExtraArea.listToJson(value.take(com.couchsubs.mobile.core.ExtraArea.MAX_COUNT))).apply()
+
+    /** Şu an okunan alanlar (altyazı alanı, hazır seçimi ve ek alanlar); oyuna göre alanlar bunu değiştirir. */
+    override var areas: AreaSet
+        get() = AreaSet(region, areaPreset, extraAreas)
+        set(value) = prefs.edit()
+            .putString("region", value.region.toJson().toString())
+            .putString("areaPreset", value.areaPreset.name)
+            .putString("extraAreas", com.couchsubs.mobile.core.ExtraArea.listToJson(value.extraAreas.take(com.couchsubs.mobile.core.ExtraArea.MAX_COUNT)))
+            .apply()
+
+    /** Oyuna göre kaydedilmiş alanlar (son kullanılan sonda, en çok [AreaProfiles.MAX_COUNT]). Eski kurulumlarda boş. */
+    override var areaProfiles: List<AreaProfile>
+        get() = AreaProfile.listFromJson(prefs.getString("areaProfiles", null))
+        set(value) = prefs.edit().putString("areaProfiles", AreaProfile.listToJson(value.takeLast(AreaProfiles.MAX_COUNT))).apply()
+
+    override var activeAreaProfile: String?
+        get() = prefs.getString("activeAreaProfile", null)
+        set(value) = prefs.edit().apply { if (value == null) remove("activeAreaProfile") else putString("activeAreaProfile", value) }.apply()
+
+    override var generalAreas: AreaSet?
+        get() = AreaSet.fromJson(prefs.getString("generalAreas", null)?.let { runCatching { JSONObject(it) }.getOrNull() })
+        set(value) = prefs.edit().apply { if (value == null) remove("generalAreas") else putString("generalAreas", value.toJson().toString()) }.apply()
 
     /** Bölge ya da ek alanlar değişince (çeviri sürerken yeni bölge hemen okunur). */
     fun onAreasChanged(action: () -> Unit): SharedPreferences.OnSharedPreferenceChangeListener {

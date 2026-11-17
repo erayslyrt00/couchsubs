@@ -531,6 +531,9 @@ final class AppModel: ObservableObject {
     private let pool: LinePool
     /// Oynanan oyun: PS5'in bildirdiği, kullanıcının seçtiği ya da paketten tanınan (havuza giden satırlar bu oyunla gider).
     let gameChoice: GameChoice
+    /// Oyuna göre alanlar: oyun değişince kayıtlı alanları uygular ya da önerir (bkz. CouchSubsCore GameAreas).
+    lazy var gameAreas = GameAreas(read: { [weak self] in self?.settings ?? UserSettings() },
+                                   write: { [weak self] in self?.settings = $0 })
     private var poolTimer: Task<Void, Never>?
     private var terminateObserver: NSObjectProtocol?
     /// Bağlıyken birkaç dakikada bir PS5'e çalışan oyunu sorar (havuza giden satırlar oyunla gider). Testlerde kapalı.
@@ -590,7 +593,8 @@ final class AppModel: ObservableObject {
         self.accountId = accountId
         self.console = console
         self.tv = tv
-        let curated = loaded.withCuratedModels()
+        // Uygulama oturum sürerken kapandıysa oyunun profili açık kalmış olabilir: genel alanlar geri gelir.
+        let curated = GameAreas.restored(loaded.withCuratedModels())
         settings = curated
         streamBackground = StreamBackground(stored: defaults.string(forKey: StoreKey.streamBackground))
         // Pencereler açılmadan önce: açılışta açık temanın bir an görünmesi olmaz.
@@ -630,6 +634,7 @@ final class AppModel: ObservableObject {
             // Bu oyunun (havuzdan otomatik) paketi sunucuda yeni çıkmış olabilir.
             if game != nil { self?.packsForGame() }
         }
+        gameChoice.onPublish = { [weak self] game, source in self?.gameAreas.follow(game: game, source: source) }
         gameChoice.packTitles = { [weak self] in GameCatalog.packGames(self?.installedPacks ?? []) }
         // Elle seçilen oyunda satırlar yalnız o oyunun paketinde aranır, paketi yoksa hiç aranmaz (#218).
         gameChoice.packs = packs
@@ -1239,6 +1244,7 @@ final class AppModel: ObservableObject {
         self.session = session
 
         startKeeper()
+        gameAreas.start()
         // Remote Play penceresinden okurken PS5 eşleşmesi olmayabilir; son oyun o zaman PS5 adı olmadan hatırlanır.
         gameChoice.start(console: console.map { $0.name.isEmpty ? $0.host : $0.name }) { [weak self] in
             guard let self else { return false }
@@ -1634,6 +1640,7 @@ final class AppModel: ObservableObject {
         session = nil
         updateGameProbe(connected: false)
         gameChoice.stop()
+        gameAreas.stop()
         keeper?.stop()
         keeper = nil
         pipeline?.reset()

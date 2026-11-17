@@ -366,7 +366,92 @@ public sealed record UserSettings
             .Where(ExtraLive)
             .Select(slot => ExtraRegion(slot) is { } region ? new WatchedArea("area" + slot, "Area " + slot, region) : null)
             .OfType<WatchedArea>()];
+
+    /// <summary>
+    /// Oyuna göre kaydedilmiş alanlar (son kullanılan sonda, en çok <see cref="Core.AreaProfiles.MaxCount"/>). Eski ayar
+    /// dosyalarında yoktur: profil kaydedilmedikçe davranış değişmez.
+    /// </summary>
+    public IReadOnlyList<AreaProfile> AreaProfiles { get; init; } = [];
+    /// <summary>Şu an uygulanan profilin anahtarı; genel alanlar kullanılıyorsa null.</summary>
+    public string? ActiveAreaProfile { get; init; }
+    /// <summary>
+    /// Profil uygulanırken kenara alınan genel alanlar; profil bırakılınca (oyun değişti, "Geri al", oturum bitti) geri
+    /// gelir. Uygulama oturum sürerken kapanırsa açılışta geri yüklenir.
+    /// </summary>
+    public AreaSet? GeneralAreas { get; init; }
+
+    /// <summary>Alanların ölçüldüğü görüntü: PS5/Xbox akışı ya da yakalanan pencere.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public AreaSource AreaSource => FrameSource == FrameSource.Ps5 ? AreaSource.Stream : AreaSource.Window;
+
+    /// <summary>Şu an okunan alanlar (altyazı alanı ve üç ek bölge).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public AreaSet Areas => new(Region, AreaPreset, ExtraRegion1, ExtraRegion2, ExtraRegion3, ExtraTarget1, ExtraTarget2, ExtraTarget3,
+                                ExtraLive1, ExtraLive2, ExtraLive3);
+
+    /// <summary>Okunan alanlar <paramref name="areas"/> olur; diğer ayarlara dokunulmaz.</summary>
+    public UserSettings WithAreas(AreaSet areas) => this with
+    {
+        Region = areas.Region, AreaPreset = areas.AreaPreset,
+        ExtraRegion1 = areas.ExtraRegion1, ExtraRegion2 = areas.ExtraRegion2, ExtraRegion3 = areas.ExtraRegion3,
+        ExtraTarget1 = areas.ExtraTarget1, ExtraTarget2 = areas.ExtraTarget2, ExtraTarget3 = areas.ExtraTarget3,
+        ExtraLive1 = areas.ExtraLive1, ExtraLive2 = areas.ExtraLive2, ExtraLive3 = areas.ExtraLive3,
+    };
+
+    public AreaProfile? FindAreaProfile(string? key) => key is null ? null : AreaProfiles.FirstOrDefault(profile => profile.Key == key);
+
+    /// <summary>Profil uygulanır: genel alanlar (henüz kenarda değilse) saklanır, okunan alanlar profilinki olur.</summary>
+    public UserSettings WithAreaProfile(AreaProfile profile) => WithAreas(profile.Areas) with
+    {
+        GeneralAreas = GeneralAreas ?? Areas,
+        ActiveAreaProfile = profile.Key,
+        AreaProfiles = Core.AreaProfiles.Saved(AreaProfiles, profile, item => item.Key),
+    };
+
+    /// <summary>Profil bırakılır, genel alanlar geri gelir (profilde kaydedilmemiş değişiklikler bırakılır).</summary>
+    public UserSettings WithGeneralAreas() => (GeneralAreas is { } general ? WithAreas(general) : this) with
+    {
+        GeneralAreas = null,
+        ActiveAreaProfile = null,
+    };
+
+    /// <summary>
+    /// Okunan alanlar <paramref name="game"/> için kaydedilir ve o profil etkin olur. Genel alanlar bu andaki alanlar
+    /// olarak kenara alınır (profil yokken yapılan değişiklik zaten genel ayardı).
+    /// </summary>
+    public UserSettings WithSavedAreaProfile(string game)
+    {
+        if (Core.AreaProfiles.Key(game, AreaSource) is not { } key) return this;
+        var profile = new AreaProfile(key, game, Areas);
+        return this with
+        {
+            AreaProfiles = Core.AreaProfiles.Saved(AreaProfiles, profile, item => item.Key),
+            ActiveAreaProfile = key,
+            GeneralAreas = GeneralAreas ?? Areas,
+        };
+    }
+
+    /// <summary>Profil silinir; etkinse genel alanlara dönülür.</summary>
+    public UserSettings WithoutAreaProfile(string key)
+    {
+        var next = ActiveAreaProfile == key ? WithGeneralAreas() : this;
+        return next with { AreaProfiles = [.. AreaProfiles.Where(profile => profile.Key != key)] };
+    }
+
+    /// <summary>Etkin profil var ve okunan alanlar ondan farklı: "Profile kaydet" gösterilir.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool AreasDifferFromProfile => FindAreaProfile(ActiveAreaProfile) is { } profile && profile.Areas != Areas;
 }
+
+/// <summary>Bir oyunun alanları: altyazı alanı ve üç ek bölge (yeri, sonucun gösterildiği yer ve sürekli okuma).</summary>
+public sealed record AreaSet(
+    CropRegion Region, AreaPreset AreaPreset,
+    CropRegion? ExtraRegion1, CropRegion? ExtraRegion2, CropRegion? ExtraRegion3,
+    ResultTarget ExtraTarget1, ResultTarget ExtraTarget2, ResultTarget ExtraTarget3,
+    bool ExtraLive1, bool ExtraLive2, bool ExtraLive3);
+
+/// <summary>Oyuna göre kaydedilmiş alanlar. <see cref="Key"/>: <see cref="Core.AreaProfiles.Key"/>; <see cref="Game"/>: gösterilen ad.</summary>
+public sealed record AreaProfile(string Key, string Game, AreaSet Areas);
 
 /// <summary>Tek seferlik çevirinin sonucunun gösterileceği yer.</summary>
 public enum ResultTarget { Tv, Pc, Both }

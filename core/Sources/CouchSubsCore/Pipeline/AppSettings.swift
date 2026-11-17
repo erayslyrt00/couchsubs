@@ -153,6 +153,12 @@ public struct UserSettings: Codable, Equatable {
     public var frameSource = FrameSource.ps5
     /// Pencereden okunurken hangi Remote Play uygulaması (bkz. `RemotePlayApp`).
     public var remotePlayApp = RemotePlayApp.automatic
+    /// Oyuna göre kaydedilmiş alanlar (son kullanılan sonda, en çok `AreaProfiles.maxCount`; bkz. `GameAreas`).
+    public var areaProfiles: [AreaProfile] = []
+    /// Şu an uygulanan profilin anahtarı; genel alanlar kullanılıyorsa nil.
+    public var activeAreaProfile: String?
+    /// Profil uygulanırken kenara alınan genel alanlar; profil bırakılınca geri gelir.
+    public var generalAreas: AreaSet?
 
     public init() {}
 
@@ -188,6 +194,10 @@ public struct UserSettings: Codable, Equatable {
         appearance = (try? values.decodeIfPresent(AppAppearance.self, forKey: .appearance)) ?? defaults.appearance
         frameSource = (try? values.decodeIfPresent(FrameSource.self, forKey: .frameSource)) ?? defaults.frameSource
         remotePlayApp = (try? values.decodeIfPresent(RemotePlayApp.self, forKey: .remotePlayApp)) ?? defaults.remotePlayApp
+        areaProfiles = Array(((try? values.decodeIfPresent([AreaProfile].self, forKey: .areaProfiles)) ?? defaults.areaProfiles)
+            .suffix(AreaProfiles.maxCount))
+        activeAreaProfile = try? values.decodeIfPresent(String.self, forKey: .activeAreaProfile)
+        generalAreas = try? values.decodeIfPresent(AreaSet.self, forKey: .generalAreas)
     }
 
     /// Hazır bölge seçilir; Özel seçilince kayıtlı bölge olduğu gibi kalır.

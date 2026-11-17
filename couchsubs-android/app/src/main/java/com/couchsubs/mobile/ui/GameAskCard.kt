@@ -32,7 +32,36 @@ import com.couchsubs.mobile.service.PlayedGame
  */
 @Composable
 fun GameSection(status: LiveStatus) {
-    if (status.askingGame) GameAskCard() else PlayedGameRow(status.game)
+    if (status.askingGame) GameAskCard() else {
+        PlayedGameRow(status.game)
+        GameAreasRow(status)
+    }
+}
+
+/**
+ * Oyunun kayıtlı alanları: uygulandıysa "X için kayıtlı alanlar kullanılıyor · Geri al"; oyun yalnız paketten
+ * tanındıysa "X için kayıtlı alanlar var. Kullanılsın mı? · Kullan / Hayır" (Windows, Mac ve iPhone ile aynı).
+ */
+@Composable
+private fun GameAreasRow(status: LiveStatus) {
+    val offered = status.offeredAreaProfileGame
+    val active = status.areaProfileGame
+    if (offered != null) {
+        Tile(Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.area_profile_offer, offered), style = Tokens.Type.body, color = Tokens.Color.text)
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
+                SecondaryButton(stringResource(R.string.area_profile_use)) { PlayedGame.areas.useOffered() }
+                GhostButton(stringResource(R.string.area_profile_no), color = Tokens.Color.secondary) { PlayedGame.areas.declineOffered() }
+            }
+        }
+    } else if (active != null) {
+        Tile(Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.area_profile_using, active), Modifier.weight(1f), style = Tokens.Type.body, color = Tokens.Color.text)
+                GhostButton(stringResource(R.string.area_profile_undo)) { PlayedGame.areas.undo() }
+            }
+        }
+    }
 }
 
 /**

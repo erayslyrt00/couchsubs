@@ -46,7 +46,8 @@ public partial class MainView : UserControl
             Refresh();
         if (e.PropertyName is nameof(AppController.Settings) or nameof(AppController.InstalledPacks))
             ShowTiles();
-        if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.PlayedGame) or nameof(AppController.AskingGame))
+        if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.PlayedGame) or nameof(AppController.AskingGame)
+            or nameof(AppController.AreaProfileGame) or nameof(AppController.OfferedAreaProfileGame))
             ShowGame();
         if (e.PropertyName is nameof(AppController.UpdateVersion) or nameof(AppController.Updating)
             or nameof(AppController.UpdateProgress) or nameof(AppController.UpdateError))
@@ -183,7 +184,28 @@ public partial class MainView : UserControl
         GameChangeButton.Content = text[controller.PlayedGame is null ? "Choose" : "Change"];
         if (asking) ShowGameSuggestions();
         else GameSearch.Text = "";
+        ShowAreaProfile(asking);
     }
+
+    /// <summary>
+    /// Oyunun kayıtlı alanları: uygulandıysa "X için kayıtlı alanlar kullanılıyor · Geri al"; oyun yalnız paketten
+    /// tanındıysa "X için kayıtlı alanlar var. Kullanılsın mı? · Kullan / Hayır" (Mac, iPhone ve Android ile aynı).
+    /// </summary>
+    private void ShowAreaProfile(bool asking)
+    {
+        var text = Localizer.Current;
+        var offered = controller.OfferedAreaProfileGame;
+        var active = controller.AreaProfileGame;
+        AreaProfileRow.Visibility = !asking && (offered ?? active) is not null ? Visibility.Visible : Visibility.Collapsed;
+        AreaProfileUse.Visibility = AreaProfileNo.Visibility = offered is not null ? Visibility.Visible : Visibility.Collapsed;
+        AreaProfileUndo.Visibility = offered is null && active is not null ? Visibility.Visible : Visibility.Collapsed;
+        AreaProfileText.Text = offered is not null ? text.Format("Saved areas for %@ are available. Use them?", offered)
+            : active is not null ? text.Format("Using the saved areas for %@.", active) : "";
+    }
+
+    private void OnUseAreaProfile(object sender, RoutedEventArgs e) => controller.UseOfferedAreaProfile();
+    private void OnDeclineAreaProfile(object sender, RoutedEventArgs e) => controller.DeclineOfferedAreaProfile();
+    private void OnUndoAreaProfile(object sender, RoutedEventArgs e) => controller.UndoAreaProfile();
 
     private void ShowGameSuggestions()
     {
