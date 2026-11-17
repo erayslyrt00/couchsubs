@@ -93,7 +93,8 @@ private struct SettingsSidebar: View {
     }
 }
 
-/// Kenar çubuğundaki bir satır (ayarlar bölümü ya da kurulum adımı).
+/// Kenar çubuğundaki bir satır (ayarlar bölümü ya da kurulum adımı): seçiliyken yüzey-2 zemin ve yarı kalın yazı,
+/// üzerine gelince de yüzey-2 zemin.
 struct SidebarRow: View {
     let title: LocalizedStringKey
     let symbol: String
@@ -112,11 +113,10 @@ struct SidebarRow: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, Theme.space("m"))
-            .frame(minHeight: 40)
+            .frame(minHeight: Theme.size("rowHeight"))
             .background(selected ? Color.csSurface2 : Color.clear, in: RoundedRectangle(cornerRadius: Theme.radius("control"), style: .continuous))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowButtonStyle(radius: "control"))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -158,16 +158,23 @@ private struct AppearanceCard: View {
 
     var body: some View {
         Card(title: model.settings.output == .tv ? "On the TV" : "Subtitle appearance") {
-            // 1920 piksellik TV ekranında yazı yüksekliği; sürüklerken TV'de örnek altyazı görünür.
-            Slider(value: Binding(get: { Double(model.settings.style.fontSize) },
-                                  set: { model.settings.style.fontSize = Int($0.rounded()) }), in: 20...80) {
-                Text("Text size")
-            } minimumValueLabel: {
-                Text("Small").font(.csCallout).foregroundStyle(Color.csSecondary)
-            } maximumValueLabel: {
-                Text("Large").font(.csCallout).foregroundStyle(Color.csSecondary)
-            } onEditingChanged: { editing in
-                if editing { model.sendTestSubtitle() }
+            // 1920 piksellik TV ekranında yazı yüksekliği; sürüklerken TV'de örnek altyazı görünür. Sağda değer (piksel),
+            // sabit genişlikte rakamlarla: sürüklerken kaydırıcı oynamaz.
+            HStack(spacing: Theme.space("m")) {
+                Slider(value: Binding(get: { Double(model.settings.style.fontSize) },
+                                      set: { model.settings.style.fontSize = Int($0.rounded()) }), in: 20...80) {
+                    Text("Text size")
+                } minimumValueLabel: {
+                    Text("Small").font(.csCallout).foregroundStyle(Color.csSecondary)
+                } maximumValueLabel: {
+                    Text("Large").font(.csCallout).foregroundStyle(Color.csSecondary)
+                } onEditingChanged: { editing in
+                    if editing { model.sendTestSubtitle() }
+                }
+                Text(verbatim: "\(model.settings.style.fontSize)")
+                    .font(.csCallout.monospacedDigit())
+                    .foregroundStyle(Color.csSecondary)
+                    .accessibilityHidden(true)
             }
             // Yer ayarları TV içindir; bilgisayar ekranındaki altyazı penceresi sürüklenerek taşınır (Genzo, 2026-11-13:
             // "ekrandaki konum ayarı işlemiyor").
@@ -214,8 +221,8 @@ private struct AppearanceCard: View {
                 Text("Full-width band").tag(SubtitleBackgroundShape.band)
             }
             HintText(text: "Drag Background all the way to Solid to fully hide the English subtitle in the game. A full-width band also covers the sides.")
-            Toggle("Bold text", isOn: $model.settings.style.bold)
-            Toggle("Keep previous lines above in fast dialogue", isOn: $model.settings.style.stackPrevious)
+            SwitchRow(title: "Bold text", isOn: $model.settings.style.bold)
+            SwitchRow(title: "Keep previous lines above in fast dialogue", isOn: $model.settings.style.stackPrevious)
             HintText(text: "When off, each new line replaces the previous one. Needs TV app 0.9.16 or later.")
             Picker("Text color", selection: $model.settings.style.textColor) {
                 Text("White").tag(SubtitleTextColor.white)
@@ -314,6 +321,8 @@ private struct ExtraAreaEditor: View {
                         .textFieldStyle(CSTextFieldStyle())
                     Toggle("Read this area", isOn: Binding(get: { area.enabled },
                                                            set: { on in settings.updateExtraArea(id: id) { $0.enabled = on } }))
+                        .toggleStyle(.switch)
+                        .tint(Color.csAccent)
                         .fixedSize()
                     Button("Remove") { settings.removeExtraArea(id: id) }.buttonStyle(.secondary)
                 }
@@ -381,6 +390,7 @@ private struct OBSCard: View {
                     obsCopied = true
                 }
                 .buttonStyle(.secondary)
+                .resetsAfterDelay($obsCopied)
             }
             HintText(text: "If OBS runs on another computer, use this Mac's network address instead of localhost. The overlay only shows subtitles while the translation is running.")
             if let networkAddress {
@@ -416,6 +426,7 @@ private struct AddressRow: View {
                 copied = true
             }
             .buttonStyle(.secondary)
+            .resetsAfterDelay($copied)
         }
     }
 }
@@ -803,14 +814,14 @@ private struct PackTile: View {
     }
 }
 
-/// Başlık solda, anahtar sağda.
-private struct SwitchRow: View {
+/// Açık/kapalı ayar: başlık (`body`) solda, anahtar sağda. Onay kutusu kullanılmaz.
+struct SwitchRow: View {
     let title: LocalizedStringKey
     @Binding var isOn: Bool
 
     var body: some View {
         HStack(spacing: Theme.space("m")) {
-            Text(title).font(.csHeadline).fixedSize(horizontal: false, vertical: true)
+            Text(title).font(.csBody).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: Theme.space("m"))
             Toggle(title, isOn: $isOn)
                 .labelsHidden()
@@ -947,6 +958,7 @@ private struct EngineTile: View {
     let option: TranslationEngine
     let selected: Bool
     let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
@@ -956,10 +968,12 @@ private struct EngineTile: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
-            .tile(selected ? .active : .plain, padding: Theme.space("m"))
-            .contentShape(Rectangle())
+            // Seçili olmayan karo üzerine gelince yüzey-2 zemin alır.
+            .tile(selected ? .active : .plain, padding: Theme.space("m"), fill: hovering && !selected ? Color.csSurface2 : Color.csSurface)
         }
-        .buttonStyle(.plain)
+        // Zemini karo değiştirir; düğme biçemi yalnız klavye odağının çerçevesini çizer.
+        .buttonStyle(RowButtonStyle(radius: "card", hoverFill: nil))
+        .onHover { hovering = $0 }
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 

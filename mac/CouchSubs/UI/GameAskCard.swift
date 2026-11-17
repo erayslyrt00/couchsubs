@@ -36,11 +36,13 @@ private struct GameAskCard: View {
             }
             HintText(text: "Lines that are not in a pack go to the shared pool with the game's name, so its ready translation comes sooner.")
             TextField("Search games", text: $query)
-                .textFieldStyle(CSTextFieldStyle(height: 36))
+                .textFieldStyle(CSTextFieldStyle())
                 .onSubmit { if !typed.isEmpty { choice.choose(typed) } }
+            // Öneri satırları üzerine gelince yüzey-2 zemin alır; zemin yazının iki yanına taşsın diye satır yatayda
+            // içeriden, liste dışarıdan aynı boşlukla kaydırılır (yazı hizası değişmez).
             VStack(spacing: 0) {
                 ForEach(Array(suggestions.enumerated()), id: \.element) { index, name in
-                    if index > 0 { Divider().overlay(Color.csBorder) }
+                    if index > 0 { Divider().overlay(Color.csBorder).padding(.horizontal, Theme.space("s")) }
                     Button { choice.choose(name) } label: {
                         HStack {
                             Text(verbatim: name).font(.csBody).foregroundStyle(Color.csText)
@@ -49,12 +51,13 @@ private struct GameAskCard: View {
                                 Text("Last played").font(.csCaption).foregroundStyle(Color.csSecondary)
                             }
                         }
-                        .padding(.vertical, Theme.space("s"))
-                        .contentShape(Rectangle())
+                        .padding(.horizontal, Theme.space("s"))
+                        .frame(minHeight: Theme.size("rowHeight"))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RowButtonStyle(radius: "inner"))
                 }
             }
+            .padding(.horizontal, -Theme.space("s"))
             if !typed.isEmpty, !suggestions.contains(where: { GameName.key($0) == GameName.key(typed) }) {
                 Button(String(format: String(localized: "Not listed: use “%@”"), typed)) { choice.choose(typed) }
                     .buttonStyle(.secondary)

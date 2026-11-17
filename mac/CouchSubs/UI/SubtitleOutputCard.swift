@@ -54,11 +54,15 @@ private struct ComputerScreenOptions: View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: Theme.space("m")) {
                 Toggle("Clicks pass through", isOn: $model.settings.overlayClickThrough)
+                    .toggleStyle(.switch)
+                    .tint(Color.csAccent)
                 Spacer()
                 adjust
             }
             VStack(alignment: .leading, spacing: Theme.space("s")) {
                 Toggle("Clicks pass through", isOn: $model.settings.overlayClickThrough)
+                    .toggleStyle(.switch)
+                    .tint(Color.csAccent)
                 adjust
             }
         }

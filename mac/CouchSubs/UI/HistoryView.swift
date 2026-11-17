@@ -33,15 +33,17 @@ struct HistoryView: View {
                 }
                 .tile()
             }
+            // Alttaki düğmeler aynı yükseklikte (Bitti ile birlikte `buttonLarge`).
             HStack(spacing: Theme.space("m")) {
                 Button(copiedAll ? "Copied" : "Copy all") {
                     copy(SubtitleHistory.plainText(model.history.entries))
                     copiedAll = true
                 }
-                .buttonStyle(.secondary)
+                .buttonStyle(CSButtonStyle(kind: .secondary, height: "buttonLarge"))
                 .disabled(model.history.entries.isEmpty)
+                .resetsAfterDelay($copiedAll)
                 Button("Clear") { confirmClear = true }
-                    .buttonStyle(CSButtonStyle(kind: .danger))
+                    .buttonStyle(CSButtonStyle(kind: .danger, height: "buttonLarge"))
                     .disabled(model.history.entries.isEmpty)
                 Spacer()
                 Button("Done") { dismiss() }
@@ -96,6 +98,7 @@ private struct HistoryEntryRow: View {
             .foregroundStyle(Color.csSecondary)
             .help(Text(copied ? "Copied" : "Copy"))
             .accessibilityLabel(Text("Copy"))
+            .resetsAfterDelay($copied)
         }
         .padding(.vertical, Theme.space("m"))
     }
