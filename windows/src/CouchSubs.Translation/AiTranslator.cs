@@ -345,6 +345,8 @@ public static class AiRequest
             400 when message.Contains("api_key_invalid") || message.Contains("api key not valid") => OnlineKeyState.Invalid,
             400 when message.Contains("credit balance") || message.Contains("insufficient_quota") => OnlineKeyState.QuotaExceeded,
             400 or 404 => OnlineKeyState.ModelRejected,
+            // Hizmete ulaşıldı ama şu an yoğun ya da arızalı (Gemini 503 "overloaded", Claude 529); internet çalışıyor.
+            408 or (>= 500 and <= 599) => OnlineKeyState.Busy,
             _ => OnlineKeyState.Unreachable,
         };
     }
@@ -584,7 +586,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException or AiException
                                       && !cancellationToken.IsCancellationRequested)
         {
-            Report(error is AiException ai ? ai.State : OnlineKeyState.Unreachable);
+            Report(StateOf(error));
             _pausedUntil = DateTimeOffset.UtcNow + RetryAfter;
             _pauseRateLimited = false;
             return Remember(await FallbackAsync(text, cancellationToken).ConfigureAwait(false), text);
@@ -681,7 +683,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
             catch (Exception error) when (error is HttpRequestException or TaskCanceledException or AiException
                                           && !cancellationToken.IsCancellationRequested)
             {
-                Report(error is AiException ai ? ai.State : OnlineKeyState.Unreachable);
+                Report(StateOf(error));
                 _pausedUntil = DateTimeOffset.UtcNow + RetryAfter;
                 _pauseRateLimited = false;
                 failed = true;
@@ -778,6 +780,17 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         }
     }
 
+    /// <summary>
+    /// İstek hatasının kullanıcıya gösterilen türü. Zaman aşımı (HttpClient'ın <see cref="TaskCanceledException"/>'ı;
+    /// kullanıcının iptali buraya gelmez) yoğunluk sayılır: hizmete ulaşıldı ama yanıt zamanında gelmedi.
+    /// </summary>
+    internal static OnlineKeyState StateOf(Exception error) => error switch
+    {
+        AiException ai => ai.State,
+        TaskCanceledException => OnlineKeyState.Busy,
+        _ => OnlineKeyState.Unreachable,
+    };
+
     private string[] Read(HttpResponseMessage response, string body, int count)
     {
         if (!response.IsSuccessStatusCode)
@@ -809,7 +822,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         catch (FailedException)
         {
             // Dakikalık sınıra takıldıysa anahtar geçerlidir ama şu an sınırdadır.
-            return new(translator.LastError ?? (translator.LastLineWasRateLimited ? OnlineKeyState.QuotaExceeded : OnlineKeyState.Unreachable));
+            return new(translator.LastError ?? (translator.LastLineWasRateLimited ? OnlineKeyState.Busy : OnlineKeyState.Unreachable));
         }
     }
 

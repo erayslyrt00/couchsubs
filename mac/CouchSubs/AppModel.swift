@@ -1553,7 +1553,7 @@ final class AppModel: ObservableObject {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         let result = await services.testAIKey(provider: provider, key: key, model: settings.model(for: provider))
         switch result {
-        case .success, .failure(.quotaExceeded), .failure(.modelRejected): saveKey(key, for: TranslationEngine(provider))
+        case .success, .failure(.quotaExceeded), .failure(.modelRejected), .failure(.busy): saveKey(key, for: TranslationEngine(provider))
         case .failure: break
         }
         return result
@@ -1577,7 +1577,7 @@ final class AppModel: ObservableObject {
         let result = await services.testLocalAI(server: server, key: key)
         if !typed.isEmpty {
             switch result {
-            case .success, .failure(.quotaExceeded), .failure(.modelRejected): saveKey(typed, for: .local)
+            case .success, .failure(.quotaExceeded), .failure(.modelRejected), .failure(.busy): saveKey(typed, for: .local)
             case .failure: break
             }
         }

@@ -34,6 +34,33 @@ class RateLimitTest {
 
     private val model = AiModel("gemini-x", "Hızlı")
 
+    /**
+     * Anahtar denemesinde Gemini yoğunsa (503, zaman aşımı, dakikalık sınır) anahtar reddedilmez, kaydedilir; bağlantı
+     * kurulamadıysa kaydedilmez. Günlük sınır kota hatasıdır.
+     */
+    @Test
+    fun busyServiceDoesNotRejectTheKey() {
+        val overloaded = 503 to """{"error":{"code":503,"message":"The model is overloaded. Please try again later.","status":"UNAVAILABLE"}}"""
+        for ((reply, expected) in listOf(overloaded to OnlineKeyState.BUSY, perMinute to OnlineKeyState.BUSY,
+                                         perDay to OnlineKeyState.QUOTA_EXCEEDED, ok to OnlineKeyState.VALID)) {
+            val state = KeyCheck.ai(AiProvider.GEMINI, "key", model, ScriptedHttp(reply))
+            assertEquals(reply.first.toString(), expected, state)
+            assertTrue(KeyCheck.accepted(state))
+        }
+        val slow = object : Http {
+            override fun send(method: String, url: String, headers: Map<String, String>, body: String?, timeoutMs: Int): Pair<Int, String> =
+                throw java.net.SocketTimeoutException("timeout")
+        }
+        assertEquals(OnlineKeyState.BUSY, KeyCheck.ai(AiProvider.GEMINI, "key", model, slow))
+        val offline = object : Http {
+            override fun send(method: String, url: String, headers: Map<String, String>, body: String?, timeoutMs: Int): Pair<Int, String> =
+                throw java.net.UnknownHostException("generativelanguage.googleapis.com")
+        }
+        val state = KeyCheck.ai(AiProvider.GEMINI, "key", model, offline)
+        assertEquals(OnlineKeyState.UNREACHABLE, state)
+        assertFalse(KeyCheck.accepted(state))
+    }
+
     @Test
     fun perMinuteLimitIsParsed() {
         assertEquals(AiRateLimit(7_000L, 5), AiRequest.rateLimit(perMinute.first, perMinute.second))

@@ -690,8 +690,9 @@ public class AiTranslatorTests
         Assert.Equal(new AiTestResult(OnlineKeyState.Valid, "KRATOS: [tr] We go now. [tr] Stay close, boy."), result);
         Assert.Null(fake.Requests[0].Request.Headers.Authorization);
 
+        // Model zamanında yanıt vermedi; yerel modelde bu da "sunucu açık mı, model yüklendi mi" iletisini gösterir.
         var down = new FakeAi((_, _) => throw new TaskCanceledException("timeout"));
-        Assert.Equal(OnlineKeyState.Unreachable,
+        Assert.Equal(OnlineKeyState.Busy,
                      (await AiTranslator.TestAsync(AiProvider.Local, "", "qwen2.5:7b", new HttpClient(down), server: server)).State);
     }
 
@@ -875,8 +876,14 @@ public class AiTranslatorTests
             """{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low"}}"""));
         Assert.Equal(OnlineKeyState.ModelRejected, AiRequest.Failure(HttpStatusCode.NotFound, ""));
         Assert.Equal(OnlineKeyState.ModelRejected, AiRequest.Failure(HttpStatusCode.BadRequest, "unknown model"));
-        Assert.Equal(OnlineKeyState.Unreachable, AiRequest.Failure((HttpStatusCode)529, ""));
-        Assert.Equal(OnlineKeyState.Unreachable, AiRequest.Failure(HttpStatusCode.InternalServerError, ""));
+        // Hizmete ulaşıldı ama yoğun ya da arızalı: internet hatası değildir.
+        Assert.Equal(OnlineKeyState.Busy, AiRequest.Failure((HttpStatusCode)529, ""));
+        Assert.Equal(OnlineKeyState.Busy, AiRequest.Failure(HttpStatusCode.InternalServerError, ""));
+        Assert.Equal(OnlineKeyState.Busy, AiRequest.Failure(HttpStatusCode.ServiceUnavailable,
+            """{"error":{"code":503,"message":"The model is overloaded. Please try again later.","status":"UNAVAILABLE"}}"""));
+        Assert.Equal(OnlineKeyState.Busy, AiRequest.Failure(HttpStatusCode.GatewayTimeout, ""));
+        Assert.Equal(OnlineKeyState.Busy, AiRequest.Failure(HttpStatusCode.RequestTimeout, ""));
+        Assert.Equal(OnlineKeyState.Unreachable, AiRequest.Failure(HttpStatusCode.Redirect, ""));
     }
 
     // --- Hata ve yerel çeviri ---
@@ -968,10 +975,16 @@ public class AiTranslatorTests
     [Fact]
     public async Task TimeoutFallsBack()
     {
+        // Zaman aşımı: hizmete ulaşıldı ama yanıt zamanında gelmedi; "internet bağlantınızı denetleyin" denmez.
         var fake = new FakeAi((_, _) => throw new TaskCanceledException("timeout"));
         var translator = Make(AiProvider.Claude, fake);
         Assert.Equal("yerel: Run!", await translator.TranslateAsync("Run!"));
-        Assert.Equal(OnlineKeyState.Unreachable, translator.LastError);
+        Assert.Equal(OnlineKeyState.Busy, translator.LastError);
+
+        // Bağlantı kurulamadıysa (DNS, ağ yok) gerçekten ulaşılamamıştır.
+        var offline = Make(AiProvider.Claude, new FakeAi((_, _) => throw new HttpRequestException("No such host is known.")));
+        Assert.Equal("yerel: Run!", await offline.TranslateAsync("Run!"));
+        Assert.Equal(OnlineKeyState.Unreachable, offline.LastError);
     }
 
     // --- Ücretsiz katman ---
@@ -1098,13 +1111,32 @@ public class AiTranslatorTests
         Assert.Equal(OnlineKeyState.QuotaExceeded, AiRequest.Failure(HttpStatusCode.TooManyRequests, ""));
     }
 
-    /// <summary>"Kaydet ve dene" dakikalık sınıra takılırsa anahtar geçerlidir ama sınırdadır (kaydedilir).</summary>
+    /// <summary>
+    /// "Dene" dakikalık sınıra takılırsa anahtar geçerlidir, hizmet şu an yoğundur (kaydedilir); "bakiye kalmadı" denmez.
+    /// Günlük sınır ise kota hatasıdır.
+    /// </summary>
     [Fact]
-    public async Task TestReportsRateLimitAsQuota()
+    public async Task TestReportsRateLimitAsBusy()
     {
         var fake = new FakeAi((_, _) => Json(RateLimitBody(PerMinute), HttpStatusCode.TooManyRequests));
         var result = await AiTranslator.TestAsync(AiProvider.Gemini, Secret, null, new HttpClient(fake));
-        Assert.Equal(OnlineKeyState.QuotaExceeded, result.State);
+        Assert.Equal(OnlineKeyState.Busy, result.State);
+
+        var daily = new FakeAi((_, _) => Json(RateLimitBody("GenerateRequestsPerDayPerProjectPerModel-FreeTier"), HttpStatusCode.TooManyRequests));
+        Assert.Equal(OnlineKeyState.QuotaExceeded, (await AiTranslator.TestAsync(AiProvider.Gemini, Secret, null, new HttpClient(daily))).State);
+    }
+
+    /// <summary>"Dene"de Gemini'nin 503 "overloaded" yanıtı ve zaman aşımı yoğunluktur, internet hatası değildir.</summary>
+    [Fact]
+    public async Task TestReportsOverloadAndTimeoutAsBusy()
+    {
+        var overloaded = new FakeAi((_, _) => Json("""{"error":{"code":503,"message":"The model is overloaded. Please try again later.","status":"UNAVAILABLE"}}""",
+                                                   HttpStatusCode.ServiceUnavailable));
+        Assert.Equal(OnlineKeyState.Busy, (await AiTranslator.TestAsync(AiProvider.Gemini, Secret, null, new HttpClient(overloaded))).State);
+        var slow = new FakeAi((_, _) => throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout"));
+        Assert.Equal(OnlineKeyState.Busy, (await AiTranslator.TestAsync(AiProvider.Gemini, Secret, null, new HttpClient(slow))).State);
+        var offline = new FakeAi((_, _) => throw new HttpRequestException("No such host is known."));
+        Assert.Equal(OnlineKeyState.Unreachable, (await AiTranslator.TestAsync(AiProvider.Gemini, Secret, null, new HttpClient(offline))).State);
     }
 
     // --- Önbellek ---
@@ -1155,7 +1187,7 @@ public class AiTranslatorTests
         Assert.DoesNotContain(Secret, new AiException(OnlineKeyState.Invalid).ToString());
 
         var timeout = new FakeAi((_, _) => throw new TaskCanceledException("timeout"));
-        Assert.Equal(OnlineKeyState.Unreachable, (await AiTranslator.TestAsync(AiProvider.OpenAi, Secret, null, new HttpClient(timeout))).State);
+        Assert.Equal(OnlineKeyState.Busy, (await AiTranslator.TestAsync(AiProvider.OpenAi, Secret, null, new HttpClient(timeout))).State);
         Assert.Equal(OnlineKeyState.Invalid, (await AiTranslator.TestAsync(AiProvider.Claude, "  ", null)).State);
     }
 
@@ -1236,12 +1268,12 @@ public class AiTranslatorTests
         var reported = new List<OnlineKeyState?>();
         translator.FailureChanged += reported.Add;
         Assert.Equal(new[] { "yerel: Open the map", "yerel: Leave the camp" }, await translator.TranslateAllAsync(["Open the map", "Leave the camp"]));
-        Assert.Equal(new OnlineKeyState?[] { OnlineKeyState.Unreachable }, reported);
+        Assert.Equal(new OnlineKeyState?[] { OnlineKeyState.Busy }, reported);
 
         var alone = MakeWithoutFallback(AiProvider.Claude, failing, new RequestBudget(1000));
         var error = await Assert.ThrowsAsync<TranslatorException>(() => ScreenTranslation.TranslateAsync(Screen(3), alone));
         Assert.Equal(TranslatorStatus.NeedsDownload, error.Status);
-        Assert.Equal(OnlineKeyState.Unreachable, alone.LastError);
+        Assert.Equal(OnlineKeyState.Busy, alone.LastError);
     }
 
     /// <summary>Yanıttaki dizi eksikse parçalar karışmaz: hepsi yerel çeviriye düşer.</summary>

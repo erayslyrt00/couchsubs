@@ -67,6 +67,7 @@ extension OnlineKeyState {
         case .quotaExceeded: self = .quotaExceeded
         case .modelRejected: self = .modelRejected
         case .unreachable: self = .unreachable
+        case .busy: self = .busy
         }
     }
 }

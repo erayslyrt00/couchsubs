@@ -848,6 +848,27 @@ public class AppControllerTests
         Assert.True(controller.UsesFreeGemini);
     }
 
+    /// <summary>
+    /// Hizmet o an yoğunsa (503, zaman aşımı, dakikalık sınır) anahtar reddedilmedi: kaydedilir. İleti internet
+    /// bağlantısını ya da bakiyeyi suçlamaz; yerel modelde ise sunucunun açık olup olmadığı sorulur.
+    /// </summary>
+    [Fact]
+    public async Task BusyServiceStillSavesTheKey()
+    {
+        var services = new FakeServices { AiTest = new AiTestResult(OnlineKeyState.Busy) };
+        var store = new MemoryStore();
+        var controller = Make(services, store);
+        Assert.Equal(OnlineKeyState.Busy, (await controller.SetAiKeyAsync(AiProvider.Gemini, "AIza-slow")).State);
+        Assert.Equal("AIza-slow", store.Load<string>(StoreKeys.GeminiKey));
+
+        var en = Localizer.ForLanguage("en");
+        var busy = OnlineKeyState.Busy.Describe(TranslationEngine.Gemini, en);
+        Assert.Equal("Gemini is busy or did not answer in time. Try again in a moment, or choose the faster model.", busy);
+        Assert.DoesNotContain("internet", OnlineKeyState.Busy.Describe(TranslationEngine.Gemini, Localizer.ForLanguage("tr")));
+        Assert.DoesNotContain("bakiye", OnlineKeyState.Busy.Describe(TranslationEngine.Gemini, Localizer.ForLanguage("tr")));
+        Assert.Equal(OnlineKeyState.Unreachable.DescribeLocal(null, en), OnlineKeyState.Busy.DescribeLocal(null, en));
+    }
+
     /// <summary>Ayarlardaki "Ücretsiz anahtar al" Gemini'yi seçer; anahtar gelene dek ücretsiz çeviri sürer.</summary>
     [Fact]
     public void ChooseFreeGeminiSelectsGeminiWithoutAKey()

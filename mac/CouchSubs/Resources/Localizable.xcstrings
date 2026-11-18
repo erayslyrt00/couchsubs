@@ -6821,6 +6821,22 @@
         }
       }
     },
+    "%@ is busy or did not answer in time. Try again in a moment, or choose the faster model.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ is busy or did not answer in time. Try again in a moment, or choose the faster model."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ şu an yoğun ya da zamanında yanıt vermedi. Biraz sonra yeniden deneyin ya da daha hızlı modeli seçin."
+          }
+        }
+      }
+    },
     "%@ is not translating right now": {
       "localizations": {
         "en": {

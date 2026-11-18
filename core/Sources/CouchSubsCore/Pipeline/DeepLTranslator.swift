@@ -4,8 +4,9 @@ import Foundation
 
 /// Çevrimiçi çeviri anahtarı (DeepL ya da yapay zekâ hizmeti) denendiğinde ne çıktı.
 public enum OnlineKeyState: Equatable {
-    /// `modelRejected`: hizmet model adını kabul etmedi (yalnız yapay zekâ hizmetlerinde).
-    case valid, invalid, quotaExceeded, modelRejected, unreachable
+    /// `modelRejected`: hizmet model adını kabul etmedi; `busy`: hizmet şu an yoğun ya da zamanında yanıt vermedi
+    /// (ikisi de yalnız yapay zekâ hizmetlerinde).
+    case valid, invalid, quotaExceeded, modelRejected, unreachable, busy
 }
 
 /// Çevrimiçi çevirmen hatasını bildirir; ana ekran "şu an çevirmiyor" uyarısını bundan gösterir.

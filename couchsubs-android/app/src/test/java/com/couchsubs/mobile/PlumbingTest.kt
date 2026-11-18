@@ -258,6 +258,12 @@ class OnlineTranslationTest {
         assertEquals(listOf("<b> etiketi kalır"), AiRequest.translations("[\"<b> etiketi kalır\"]", 1))
         assertEquals(OnlineKeyState.INVALID, AiRequest.failure(400, "API key not valid"))
         assertEquals(OnlineKeyState.MODEL_REJECTED, AiRequest.failure(404, ""))
+        // Hizmete ulaşıldı ama yoğun ya da arızalı: internet hatası değildir.
+        assertEquals(OnlineKeyState.BUSY, AiRequest.failure(503, """{"error":{"code":503,"message":"The model is overloaded. Please try again later.","status":"UNAVAILABLE"}}"""))
+        assertEquals(OnlineKeyState.BUSY, AiRequest.failure(500, ""))
+        assertEquals(OnlineKeyState.BUSY, AiRequest.failure(529, ""))
+        assertEquals(OnlineKeyState.BUSY, AiRequest.failure(408, ""))
+        assertEquals(OnlineKeyState.UNREACHABLE, AiRequest.failure(302, ""))
     }
 
     @Test

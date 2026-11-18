@@ -788,7 +788,7 @@ final class PhoneModel: ObservableObject {
         let accepted: Bool
         if let provider = engine.aiProvider {
             switch await services.testAIKey(provider: provider, key: key, model: settings.model(for: provider)) {
-            case .success, .failure(.quotaExceeded), .failure(.modelRejected): accepted = true
+            case .success, .failure(.quotaExceeded), .failure(.modelRejected), .failure(.busy): accepted = true
             case .failure: accepted = false
             }
         } else {

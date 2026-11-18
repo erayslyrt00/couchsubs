@@ -213,12 +213,15 @@ public struct LocalAIServer: Equatable, Sendable {
 public enum AIFailure: Error, Equatable, Sendable {
     /// Anahtar reddedildi (401/403 ya da Gemini'de "API key not valid").
     case invalidKey
-    /// Bakiye bitti, aylık sınır ya da dakikalık istek sınırı aşıldı (429, 402, Claude'da "credit balance").
+    /// Bakiye bitti ya da günlük/aylık sınır aşıldı (429, 402, Claude'da "credit balance").
     case quotaExceeded
     /// Hizmet isteği kabul etmedi (400, 404); ör. listedeki model hesapta açık değil.
     case modelRejected
-    /// Ağ hatası, zaman aşımı, hizmet arızası ya da anlaşılmayan yanıt.
+    /// Ağ hatası (bağlantı kurulamadı) ya da anlaşılmayan yanıt.
     case unreachable
+    /// Hizmete ulaşıldı ama şu an yoğun (5xx, Gemini 503 "overloaded", Claude 529), yanıt zamanında gelmedi ya da
+    /// "Dene" dakikalık sınıra takıldı. Anahtar reddedilmedi, internet de çalışıyor.
+    case busy
 }
 
 /// Hizmetin bildirdiği dakikalık istek sınırı aşımı (429). Gün sınırından farklı olarak kısa sürer; kullanıcıya hata
@@ -523,6 +526,8 @@ public enum AIRequest {
             if message.contains("credit balance") || message.contains("insufficient_quota") { return .quotaExceeded }
             return .modelRejected
         case 404: return .modelRejected
+        // Hizmete ulaşıldı ama şu an yoğun ya da arızalı; internet çalışıyor.
+        case 408, 500...599: return .busy
         default: return .unreachable
         }
     }
@@ -877,6 +882,9 @@ public final class AITranslationCore: @unchecked Sendable {
             throw CancellationError()
         } catch is CancellationError {
             throw CancellationError()
+        } catch let error as URLError where error.code == .timedOut {
+            // Hizmete ulaşıldı ama yanıt zamanında gelmedi: internet hatası değildir.
+            throw AIFailure.busy
         } catch {
             // URLError adresi taşır ama anahtarı taşımaz; yine de dışarı yalnız durum çıkar.
             throw AIFailure.unreachable
@@ -901,8 +909,8 @@ public final class AITranslationCore: @unchecked Sendable {
                                            budget: RequestBudget(perMinute: .max))
         do {
             let result = try await translator.translate(sample) { _ in
-                // Dakikalık sınıra takıldıysa anahtar geçerlidir ama şu an sınırdadır.
-                throw translator.lastFailure ?? (translator.lastLineWasRateLimited ? AIFailure.quotaExceeded : AIFailure.unreachable)
+                // Dakikalık sınıra takıldıysa anahtar geçerlidir, hizmet şu an yoğundur (bakiye bitmedi).
+                throw translator.lastFailure ?? (translator.lastLineWasRateLimited ? AIFailure.busy : AIFailure.unreachable)
             }
             return .success(result)
         } catch {

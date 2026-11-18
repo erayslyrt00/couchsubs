@@ -9,13 +9,29 @@ import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.Locale
 
 /** Çevrimiçi anahtarın durumu (ayarlardaki "Dene" ve ana ekrandaki uyarı için). */
-enum class OnlineKeyState { VALID, INVALID, QUOTA_EXCEEDED, MODEL_REJECTED, UNREACHABLE }
+/**
+ * Çevrimiçi çeviri anahtarı denendiğinde ne çıktı. BUSY: hizmete ulaşıldı ama şu an yoğun (5xx), yanıt zamanında
+ * gelmedi ya da dakikalık sınıra takıldı; anahtar reddedilmedi, internet de çalışıyor (Windows/Mac ile aynı).
+ */
+enum class OnlineKeyState {
+    VALID, INVALID, QUOTA_EXCEEDED, MODEL_REJECTED, UNREACHABLE, BUSY;
+
+    companion object {
+        /** İstek hatasının türü: zaman aşımı yoğunluktur (hizmete ulaşıldı, yanıt gelmedi), diğer ağ hataları ulaşılamadır. */
+        fun of(error: Exception): OnlineKeyState = when (error) {
+            is OnlineException -> error.state
+            is SocketTimeoutException -> BUSY
+            else -> UNREACHABLE
+        }
+    }
+}
 
 /** [rateLimited]: hizmet 429 döndü (DeepL: çok sık istek); bekleme süresince istek gönderilmez. */
 class OnlineException(val state: OnlineKeyState, val rateLimited: Boolean = false) : IOException("online translation failed: $state")
@@ -94,7 +110,8 @@ object KeyCheck {
     const val SAMPLE = "KRATOS: We go now. Stay close, boy."
 
     fun accepted(state: OnlineKeyState) =
-        state == OnlineKeyState.VALID || state == OnlineKeyState.QUOTA_EXCEEDED || state == OnlineKeyState.MODEL_REJECTED
+        state == OnlineKeyState.VALID || state == OnlineKeyState.QUOTA_EXCEEDED || state == OnlineKeyState.MODEL_REJECTED ||
+            state == OnlineKeyState.BUSY
 
     /** DeepL: /usage; bu ay kota dolduysa QUOTA_EXCEEDED. Bloklar. */
     fun deepL(key: String, http: Http = Http.Default): OnlineKeyState {
@@ -121,13 +138,12 @@ object KeyCheck {
         return try {
             val request = AiRequest.build(provider, key, model, listOf(SAMPLE), emptyList())
             val (status, body) = http.send("POST", request.url, request.headers, request.body, 15000)
-            if (status !in 200..299) return AiRequest.failure(status, body)
+            // Dakikalık sınıra takıldıysa anahtar geçerlidir, hizmet şu an yoğundur (bakiye bitmedi).
+            if (status !in 200..299) return if (AiRequest.rateLimit(status, body) != null) OnlineKeyState.BUSY else AiRequest.failure(status, body)
             AiRequest.translations(AiRequest.text(provider, body), 1)
             OnlineKeyState.VALID
-        } catch (error: OnlineException) {
-            error.state
         } catch (error: IOException) {
-            OnlineKeyState.UNREACHABLE
+            OnlineKeyState.of(error)
         } catch (error: JSONException) {
             OnlineKeyState.UNREACHABLE
         }
@@ -243,7 +259,7 @@ abstract class SentenceTranslator<C>(
             rateLimited(error.limit)
             return fallback(text)
         } catch (error: IOException) {
-            report((error as? OnlineException)?.state ?: OnlineKeyState.UNREACHABLE)
+            report(OnlineKeyState.of(error))
             pausedUntil = clock() + RETRY_AFTER_MS
             pauseRateLimited = (error as? OnlineException)?.rateLimited == true
             return fallback(text)
@@ -319,7 +335,7 @@ abstract class SentenceTranslator<C>(
     /** Toplu çeviri hata verdi: hata bildirilir ve bir dakika hizmet denenmez (dakikalık sınırda uyarısız, kısa). */
     protected fun failed(error: Exception) {
         if (error is AiRateLimitedException) return rateLimited(error.limit)
-        report((error as? OnlineException)?.state ?: OnlineKeyState.UNREACHABLE)
+        report(OnlineKeyState.of(error))
         pausedUntil = clock() + RETRY_AFTER_MS
         pauseRateLimited = (error as? OnlineException)?.rateLimited == true
     }
@@ -672,6 +688,8 @@ object AiRequest {
             status == 400 && ("api_key_invalid" in message || "api key not valid" in message) -> OnlineKeyState.INVALID
             status == 400 && ("credit balance" in message || "insufficient_quota" in message) -> OnlineKeyState.QUOTA_EXCEEDED
             status == 400 || status == 404 -> OnlineKeyState.MODEL_REJECTED
+            // Hizmete ulaşıldı ama şu an yoğun ya da arızalı (Gemini 503 "overloaded", Claude 529); internet çalışıyor.
+            status == 408 || status in 500..599 -> OnlineKeyState.BUSY
             else -> OnlineKeyState.UNREACHABLE
         }
     }

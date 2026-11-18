@@ -1979,7 +1979,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         key = key.Trim();
         var result = await services.TestAiKeyAsync(provider, key, provider.Model(settings.ModelFor(provider)).Id);
-        if (result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected)
+        if (result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected or OnlineKeyState.Busy)
             SaveKey(provider.Engine(), key);
         return result;
     }
@@ -2001,7 +2001,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         typed = typed.Trim();
         var key = typed.Length > 0 ? typed : store.Load<string>(StoreKeys.LocalAiKey) ?? "";
         var result = await services.TestLocalAiAsync(server, key);
-        if (typed.Length > 0 && result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected)
+        if (typed.Length > 0 && result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected or OnlineKeyState.Busy)
             SaveKey(TranslationEngine.Local, typed);
         return result;
     }

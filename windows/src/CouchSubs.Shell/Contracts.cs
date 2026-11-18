@@ -133,6 +133,7 @@ public static class TranslationEngines
             OnlineKeyState.Invalid => text.Format("%@ did not accept this key. Copy it again from your account page.", name),
             OnlineKeyState.QuotaExceeded => text.Format("Your %@ account has no credit left or has reached its limit.", name),
             OnlineKeyState.ModelRejected => text.Format("%@ did not accept the request. Choose the other model or try again later.", name),
+            OnlineKeyState.Busy => text.Format("%@ is busy or did not answer in time. Try again in a moment, or choose the faster model.", name),
             _ => text.Format("%@ could not be reached. Check your internet connection.", name),
         };
     }

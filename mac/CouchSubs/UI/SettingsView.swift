@@ -900,6 +900,7 @@ struct TranslationCard: View {
         case .quotaExceeded: String(format: String(localized: "Your %@ account has no credit left or has reached its limit."), name)
         case .modelRejected: String(format: String(localized: "%@ did not accept the request. Choose the other model or try again later."), name)
         case .unreachable: String(format: String(localized: "%@ could not be reached. Check your internet connection."), name)
+        case .busy: String(format: String(localized: "%@ is busy or did not answer in time. Try again in a moment, or choose the faster model."), name)
         }
     }
 
@@ -918,7 +919,7 @@ struct TranslationCard: View {
                 return String(format: String(localized: "LM Studio does not have the model %@. Download and load it in LM Studio, or check the model name."), server.model)
             }
             return String(format: String(localized: "The model %1$@ is not on the local server. Download it: ollama pull %1$@"), server.model)
-        case .unreachable:
+        case .unreachable, .busy:
             switch server.kind {
             case .ollama:
                 return String(format: String(localized: "Ollama is not running: %1$@ could not be reached, or the model did not answer in time. Open Ollama and download the model: ollama pull %2$@"), server.address, server.model)
@@ -1032,7 +1033,7 @@ private struct DeepLKeySection: View {
             String(localized: "This month's DeepL limit is used up. Until it renews, the translation model on this computer translates.")
         case .invalid:
             String(localized: "DeepL did not accept this key. Copy it again from your DeepL account page.")
-        case .unreachable, .modelRejected:
+        case .unreachable, .modelRejected, .busy:
             String(localized: "DeepL could not be reached. Check your internet connection.")
         }
     }

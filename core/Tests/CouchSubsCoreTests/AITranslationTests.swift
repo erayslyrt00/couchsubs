@@ -657,7 +657,7 @@ final class AITranslationTests: XCTestCase {
         let down = makeLocal()
         let first = try await down.translate("Run!", fallback: local)
         XCTAssertEqual(first, "yerel: Run!")
-        XCTAssertEqual(down.lastFailure, .unreachable)
+        XCTAssertEqual(down.lastFailure, .busy)
 
         FakeAI.timeout = false
         // Ollama'nın indirilmemiş model yanıtı.
@@ -677,7 +677,7 @@ final class AITranslationTests: XCTestCase {
 
         FakeAI.timeout = true
         let down = await AITranslationCore.test(provider: .local, key: "", model: "qwen2.5:7b", server: server, session: FakeAI.session())
-        XCTAssertEqual(down, .failure(.unreachable))
+        XCTAssertEqual(down, .failure(.busy))
     }
 
     /// Yerel modelde buluttan uzun beklenir; deneme modeli belleğe yükleyeceği için daha da uzun.
@@ -801,8 +801,13 @@ final class AITranslationTests: XCTestCase {
         XCTAssertEqual(AIRequest.failure(status: 400, body: Data(#"{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low"}}"#.utf8)), .quotaExceeded)
         XCTAssertEqual(AIRequest.failure(status: 404, body: empty), .modelRejected)
         XCTAssertEqual(AIRequest.failure(status: 400, body: Data("unknown model".utf8)), .modelRejected)
-        XCTAssertEqual(AIRequest.failure(status: 529, body: empty), .unreachable)
-        XCTAssertEqual(AIRequest.failure(status: 500, body: empty), .unreachable)
+        // Hizmete ulaşıldı ama yoğun ya da arızalı: internet hatası değildir.
+        XCTAssertEqual(AIRequest.failure(status: 529, body: empty), .busy)
+        XCTAssertEqual(AIRequest.failure(status: 500, body: empty), .busy)
+        XCTAssertEqual(AIRequest.failure(status: 503, body: Data(#"{"error":{"code":503,"message":"The model is overloaded. Please try again later.","status":"UNAVAILABLE"}}"#.utf8)), .busy)
+        XCTAssertEqual(AIRequest.failure(status: 504, body: empty), .busy)
+        XCTAssertEqual(AIRequest.failure(status: 408, body: empty), .busy)
+        XCTAssertEqual(AIRequest.failure(status: 302, body: empty), .unreachable)
     }
 
     // MARK: - Hata ve yerel çeviri
@@ -865,7 +870,8 @@ final class AITranslationTests: XCTestCase {
         let translator = make(.claude)
         let result = try await translator.translate("Run!", fallback: local)
         XCTAssertEqual(result, "yerel: Run!")
-        XCTAssertEqual(translator.lastFailure, .unreachable)
+        // Zaman aşımı: hizmete ulaşıldı ama yanıt zamanında gelmedi; "internet bağlantınızı denetleyin" denmez.
+        XCTAssertEqual(translator.lastFailure, .busy)
     }
 
     // MARK: - Ücretsiz katman
@@ -984,11 +990,23 @@ final class AITranslationTests: XCTestCase {
         XCTAssertEqual(AIRequest.failure(status: 429, body: Data()), .quotaExceeded)
     }
 
-    /// "Kaydet ve dene" dakikalık sınıra takılırsa anahtar geçerlidir ama sınırdadır (kaydedilir).
-    func testTestReportsRateLimitAsQuota() async {
+    /// "Dene" dakikalık sınıra takılırsa anahtar geçerlidir, hizmet şu an yoğundur (kaydedilir); "bakiye kalmadı" denmez.
+    /// Günlük sınır ise kota hatasıdır.
+    func testTestReportsRateLimitAsBusy() async {
         FakeAI.failure = (429, rateLimitBody(quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"))
         let result = await AITranslationCore.test(provider: .gemini, key: secret, model: nil, session: FakeAI.session())
-        XCTAssertEqual(result, .failure(.quotaExceeded))
+        XCTAssertEqual(result, .failure(.busy))
+
+        FakeAI.failure = (429, rateLimitBody(quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier"))
+        let daily = await AITranslationCore.test(provider: .gemini, key: secret, model: nil, session: FakeAI.session())
+        XCTAssertEqual(daily, .failure(.quotaExceeded))
+    }
+
+    /// "Dene"de Gemini'nin 503 "overloaded" yanıtı yoğunluktur, internet hatası değildir.
+    func testTestReportsOverloadAsBusy() async {
+        FakeAI.failure = (503, #"{"error":{"code":503,"message":"The model is overloaded. Please try again later.","status":"UNAVAILABLE"}}"#)
+        let result = await AITranslationCore.test(provider: .gemini, key: secret, model: nil, session: FakeAI.session())
+        XCTAssertEqual(result, .failure(.busy))
     }
 
     // MARK: - Önbellek
@@ -1032,7 +1050,7 @@ final class AITranslationTests: XCTestCase {
         FakeAI.failure = nil
         FakeAI.timeout = true
         let result = await AITranslationCore.test(provider: .openAI, key: secret, model: nil, session: FakeAI.session())
-        XCTAssertEqual(result, .failure(.unreachable))
+        XCTAssertEqual(result, .failure(.busy))
         let empty = await AITranslationCore.test(provider: .claude, key: "  ", model: nil, session: FakeAI.session())
         XCTAssertEqual(empty, .failure(.invalidKey))
     }
@@ -1110,7 +1128,7 @@ final class AITranslationTests: XCTestCase {
         core.onFailureChanged = { reported.append($0) }
         let result = try await core.translateAll(["Open the map", "Leave the camp"], fallback: local)
         XCTAssertEqual(result, ["yerel: Open the map", "yerel: Leave the camp"])
-        XCTAssertEqual(reported, [.unreachable])
+        XCTAssertEqual(reported, [.busy])
 
         let translator = AITranslator(provider: .claude, key: secret, model: nil, fallback: MissingFree(), session: FakeAI.session(),
                                       budget: RequestBudget(perMinute: 1000))
@@ -1119,7 +1137,7 @@ final class AITranslationTests: XCTestCase {
             XCTFail("hata beklenir")
         } catch {
             XCTAssertEqual(error as? TranslatorError, .needsDownload)
-            XCTAssertEqual(translator.lastFailure, .unreachable)
+            XCTAssertEqual(translator.lastFailure, .busy)
         }
     }
 
