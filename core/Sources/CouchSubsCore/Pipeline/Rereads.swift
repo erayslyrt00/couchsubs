@@ -75,7 +75,10 @@ enum Rereads {
             let differing = x.indices.filter { x[$0] != y[$0] }
             if !differing.isEmpty, differing.count * 2 <= x.count, differing.allSatisfy({ looksMisread(x[$0]) }) { return true }
         }
-        if looksMisread(newer) || looksMisread(older) { return related(newer, older) }
+        // Bölünmüş ya da birleşmiş sözcüklü bozuk okuma ("That smo e...") harf harf aynı satırdır (#296).
+        if looksMisread(newer) || looksMisread(older) {
+            return TextMatch.sameLetters(normNewer, normOlder) || related(newer, older)
+        }
         if x.isEmpty || x.count > y.count { return false }
         if x.count >= 2, x.count < y.count, isGappedSubsequence(x, y) { return true }
         let head = newer.drop(while: { $0.isWhitespace }).first

@@ -101,6 +101,29 @@ class RateLimitTest {
         assertEquals(1, names.count)
     }
 
+    /**
+     * Model dizide cümleyi boş bırakırsa (#296) cümle yerel çeviriyle denenir; yerel çeviri de boşsa cümle olduğu gibi
+     * kalır. İki durumda da boş yanıt önbelleğe yazılmaz (Windows: EmptyItemIsRetriedLocallyAndNotCached).
+     */
+    @Test
+    fun emptyItemIsRetriedLocallyAndNotCached() {
+        val empty = 200 to """{"candidates":[{"content":{"parts":[{"text":"[\"\"]"}]}}]}"""
+        val http = ScriptedHttp(empty)
+        val asked = mutableListOf<String>()
+        val translator = AiTranslator(AiProvider.GEMINI, "key", model, { asked.add(it); "yerel: $it" }, http,
+            budget = RequestBudget(1000))
+        assertEquals("yerel: Doesn't 00k good.", translator.translate("Doesn't 00k good."))
+        assertEquals(listOf("Doesn't 00k good."), asked)
+        translator.translate("Doesn't 00k good.")
+        assertEquals(2, http.count)
+
+        val blankHttp = ScriptedHttp(empty)
+        val blank = AiTranslator(AiProvider.GEMINI, "key", model, { "" }, blankHttp, budget = RequestBudget(1000))
+        assertEquals("Doesn't 00k good.", blank.translate("Doesn't 00k good."))
+        blank.translate("Doesn't 00k good.")
+        assertEquals(2, blankHttp.count)
+    }
+
     @Test
     fun perMinutePauseIsAtMostTwentySeconds() {
         val clock = Clock()

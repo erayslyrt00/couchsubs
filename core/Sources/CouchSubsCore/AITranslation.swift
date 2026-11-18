@@ -264,6 +264,10 @@ public enum AIRequest {
         Characters address each other informally (use "sen", not "siz") unless the line is clearly formal. \
         Keep character names, place names and speaker labels such as "ATREUS:" exactly as they are. \
         Keep line breaks. Keep the meaning and tone; do not add or leave out anything. \
+        The text is read from the screen by OCR and may have misread or missing letters ("Y u ave to ask?", \
+        "Doesn't 00k good."); translate the line the speaker clearly meant. \
+        A subtitle may continue the previous one (it starts in lowercase or with a word like "and"); \
+        translate it so that it reads as that continuation. \
         Reply with only the translation, no explanations, notes or quotes.
         """
 
@@ -709,10 +713,17 @@ public final class AITranslationCore: @unchecked Sendable {
         var local = false
         for (index, sentence) in zip(missing, translated) {
             let piece = pieces[index].text
-            if Self.isEcho(piece, sentence), let retried = try await Self.tryFallback(piece, fallback: fallback),
-               !Self.isEcho(piece, retried) {
+            // Model dizide bu cümleyi boş bıraktıysa (bozuk OCR okumasında olabiliyor, #296) yanıt yok sayılır.
+            let empty = sentence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if empty || Self.isEcho(piece, sentence), let retried = try await Self.tryFallback(piece, fallback: fallback),
+               !retried.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !Self.isEcho(piece, retried) {
                 // Yerel çeviri bu motorun önbelleğine yazılmaz.
                 translations[index] = retried
+                local = true
+                continue
+            }
+            if empty {
+                // Yerel çeviri de yoksa cümle olduğu gibi kalır; boş satır gösterilmez, sonuç önbelleğe yazılmaz.
                 local = true
                 continue
             }

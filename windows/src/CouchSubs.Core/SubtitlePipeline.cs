@@ -546,7 +546,9 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             var differing = Enumerable.Range(0, x.Length).Where(i => x[i] != y[i]).ToList();
             if (differing.Count >= 1 && differing.Count * 2 <= x.Length && differing.All(i => LooksMisread(x[i]))) return true;
         }
-        if (LooksMisread(newer) || LooksMisread(older)) return Related(newer, older);
+        // Bölünmüş ya da birleşmiş sözcüklü bozuk okuma ("That smo e..." / "That smoke...") harf harf aynı satırdır (#296).
+        if (LooksMisread(newer) || LooksMisread(older))
+            return TextMatch.SameLetters(normNewer, normOlder) || Related(newer, older);
         if (x.Length == 0 || x.Length > y.Length) return false;
         // Aradan sözcük düşmüş okuma ("Go to Bluffs." / "Go to Pacific Bluffs."): sözcükler aynı sırada ama bitişik değil.
         if (x.Length >= 2 && x.Length < y.Length && IsGappedSubsequence(x, y)) return true;

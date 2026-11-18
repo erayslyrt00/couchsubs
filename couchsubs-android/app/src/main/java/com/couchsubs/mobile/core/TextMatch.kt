@@ -29,6 +29,20 @@ object TextMatch {
         return 1 - previous[b.length].toDouble() / maxOf(a.length, b.length) >= threshold
     }
 
+    /** Boşluksuz harf dizisinin en az bu kadar uzun olması gerekir; kısa satırda bir harf bile anlamı değiştirir. */
+    const val SAME_LETTERS_MINIMUM = 6
+
+    /**
+     * Sadeleştirilmiş iki okuma boşluklar atılınca neredeyse aynı mı. Bozuk okumada OCR bir sözcüğü bölebilir ya da iki
+     * sözcüğü birleştirebilir ("That smo e..." / "That smoke...", #296); sözcük sayısı değişince sözcük sözcük
+     * karşılaştırma aynı satırı tanımaz. Çağıran, okumalardan birinin bozuk olduğunu ayrıca denetler (Windows: TextMatch.cs).
+     */
+    fun sameLetters(a: String, b: String): Boolean {
+        val x = a.replace(" ", "")
+        val y = b.replace(" ", "")
+        return minOf(x.length, y.length) >= SAME_LETTERS_MINIMUM && isSimilar(x, y, 0.8)
+    }
+
     /** Satırları ayrı ayrı sadeleştirip alt alta birleştirir; [isSameSubtitle] kaçırılan satırı bundan anlar. */
     fun normalizeRows(s: String): String =
         s.replace("\r\n", "\n").split('\n').map(::normalize).filter { it.isNotEmpty() }.joinToString("\n")

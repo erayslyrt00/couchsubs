@@ -17,6 +17,19 @@ final class RereadsTests: XCTestCase {
         XCTAssertTrue(Rereads.isRereadOf("Go to Bluffs", "Go to Pacific Bluffs."))
     }
 
+    /// OCR'ın sözcüğü böldüğü bozuk okuma, sözcük sayısı değişse de aynı satırdır (#296).
+    func testSplitWordMisreadIsReread() {
+        XCTAssertTrue(Rereads.isRereadOf("That smo e...", "That smoke..."))
+        XCTAssertTrue(Rereads.isRereadOf("Y u ave to ask?", "You have to ask?"))
+        XCTAssertFalse(Rereads.isRereadOf("That's my b at, kid.", "That smoke..."))
+    }
+
+    func testSameLetters() {
+        XCTAssertTrue(TextMatch.sameLetters("that smo e", "that smoke"))
+        XCTAssertFalse(TextMatch.sameLetters("get 0n", "get on")) // kısa: harf benzerliği aranmaz
+        XCTAssertFalse(TextMatch.sameLetters("that s my b at kid", "that smoke"))
+    }
+
     func testCompleteness() {
         XCTAssertTrue(Rereads.looksComplete("Hold the gate."))
         XCTAssertFalse(Rereads.looksComplete("hold the gate"))

@@ -26,6 +26,19 @@ public enum TextMatch {
         return 1 - Double(previous[y.count]) / Double(max(x.count, y.count)) >= threshold
     }
 
+    /// Boşluksuz harf dizisinin en az bu kadar uzun olması gerekir; kısa satırda bir harf bile anlamı değiştirir.
+    static let sameLettersMinimum = 6
+
+    /// Sadeleştirilmiş iki okuma boşluklar atılınca neredeyse aynı mı. Bozuk okumada OCR bir sözcüğü bölebilir ya da iki
+    /// sözcüğü birleştirebilir ("That smo e..." / "That smoke...", #296); sözcük sayısı değişince sözcük sözcük
+    /// karşılaştırma aynı satırı tanımaz. Çağıran, okumalardan birinin bozuk olduğunu ayrıca denetler
+    /// (Windows: TextMatch.SameLetters, Android: TextMatch.sameLetters).
+    public static func sameLetters(_ a: String, _ b: String) -> Bool {
+        let x = a.replacingOccurrences(of: " ", with: "")
+        let y = b.replacingOccurrences(of: " ", with: "")
+        return min(x.count, y.count) >= sameLettersMinimum && isSimilar(x, y, threshold: 0.8)
+    }
+
     /// Satırları ayrı ayrı sadeleştirip alt alta birleştirir; `isSameSubtitle` kaçırılan satırı bundan anlar.
     public static func normalizeRows(_ s: String) -> String {
         s.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false)

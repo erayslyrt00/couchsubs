@@ -35,6 +35,21 @@ public static class TextMatch
         return 1 - (double)previous[b.Length] / Math.Max(a.Length, b.Length) >= threshold;
     }
 
+    /// <summary>Boşluksuz harf dizisinin en az bu kadar uzun olması gerekir; kısa satırda bir harf bile anlamı değiştirir.</summary>
+    internal const int SameLettersMinimum = 6;
+
+    /// <summary>
+    /// Sadeleştirilmiş iki okuma boşluklar atılınca neredeyse aynı mı. Bozuk okumada OCR bir sözcüğü bölebilir ya da iki
+    /// sözcüğü birleştirebilir ("That smo e..." / "That smoke...", #296); sözcük sayısı değişince sözcük sözcük
+    /// karşılaştırma aynı satırı tanımaz. Çağıran, okumalardan birinin bozuk olduğunu ayrıca denetler.
+    /// </summary>
+    public static bool SameLetters(string a, string b)
+    {
+        var x = a.Replace(" ", "");
+        var y = b.Replace(" ", "");
+        return Math.Min(x.Length, y.Length) >= SameLettersMinimum && IsSimilar(x, y, 0.8);
+    }
+
     /// <summary>Satırları ayrı ayrı sadeleştirip alt alta birleştirir; <see cref="IsSameSubtitle"/> kaçırılan satırı bundan anlar.</summary>
     public static string NormalizeRows(string s) =>
         string.Join('\n', s.Replace("\r\n", "\n").Split('\n').Select(Normalize).Where(row => row.Length > 0));

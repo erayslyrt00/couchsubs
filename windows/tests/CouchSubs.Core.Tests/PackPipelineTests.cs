@@ -177,6 +177,59 @@ public class PackPipelineTests
         Assert.Equal(["Yeah? Damn."], translator.Requested);
     }
 
+    /// <summary>
+    /// OCR'ın sözcüğü böldüğü bozuk okuma ("That smo e..." / "That smoke...") sözcük sayısı değişse de yeniden okumadır,
+    /// yeniden çevrilmez (#296).
+    /// </summary>
+    [Theory]
+    [InlineData("That smoke...", "That smo e...")]
+    [InlineData("You have to ask?", "Y u ave to ask?")]
+    [InlineData("Good thing we moved the car.", "Good thing we m ved the car.")]
+    public async Task SplitWordMisreadOfATranslatedLineIsNotTranslatedAgain(string clean, string misread)
+    {
+        var sender = new FakeSender();
+        var translator = new FakeTranslator();
+        long clock = 0;
+        // Bozuk okuma bekleme süresinden (PackWait) uzun ekranda kalır; yeniden okuma sayılmasaydı bekleme bitince çevrilirdi.
+        var frames = Enumerable.Repeat(clean, 4).Concat(Enumerable.Repeat(misread, 14)).ToArray();
+        var pipeline = new SubtitlePipeline(new FakeReader(frames), translator, sender, clock: () => clock)
+        {
+            HoldWithoutPacks = true,
+            ReadingScore = text => text == misread ? 4 : 8,
+            LooksMisread = text => text == misread,
+        };
+        await RunTimed(pipeline, frames.Length, () => clock += 100);
+        Assert.Equal([clean], translator.Requested);
+    }
+
+    /// <summary>Harf benzerliği bozuk okumayla başlayan başka bir satırı yutmaz; o satır yine çevrilir.</summary>
+    [Fact]
+    public async Task DifferentMisreadLineIsStillTranslated()
+    {
+        var sender = new FakeSender();
+        var translator = new FakeTranslator();
+        long clock = 0;
+        const string next = "That's my b at, kid.";
+        var frames = Enumerable.Repeat("That smoke...", 4).Concat(Enumerable.Repeat(next, 4)).ToArray();
+        var pipeline = new SubtitlePipeline(new FakeReader(frames), translator, sender, clock: () => clock)
+        {
+            HoldWithoutPacks = true,
+            PackWait = 0,
+            ReadingScore = text => text.Length,
+            LooksMisread = text => text == next,
+        };
+        await RunTimed(pipeline, 8, () => clock += 100);
+        Assert.Equal(["That smoke...", next], translator.Requested);
+    }
+
+    [Theory]
+    [InlineData("that smo e", "that smoke", true)]
+    [InlineData("y u ave to ask", "you have to ask", true)]
+    [InlineData("get 0n", "get on", false)] // kısa: harf benzerliği aranmaz
+    [InlineData("that s my b at kid", "that smoke", false)]
+    public void SameLettersIgnoresWordBreaks(string a, string b, bool same) =>
+        Assert.Equal(same, TextMatch.SameLetters(a, b));
+
     /// <summary>Gelişmiş ayarlarda bekleme süreleri 0 olsa da bozuk tekrar okuma yeniden çevrilmez (denetim gecikme eklemez).</summary>
     [Fact]
     public async Task RereadCheckWorksWithZeroWaits()

@@ -256,14 +256,21 @@ abstract class SentenceTranslator<C>(
         var local = false
         for ((i, index) in missing.withIndex()) {
             val piece = pieces[index].text
-            if (retriesEcho && isEcho(piece, translated[i])) {
+            // Model dizide bu cümleyi boş bıraktıysa (bozuk OCR okumasında olabiliyor, #296) yanıt yok sayılır.
+            val empty = translated[i].isBlank()
+            if (retriesEcho && (empty || isEcho(piece, translated[i]))) {
                 val retried = tryLocal(piece)
-                if (retried != null && !isEcho(piece, retried)) {
+                if (retried != null && retried.isNotBlank() && !isEcho(piece, retried)) {
                     // Yerel çeviri bu motorun önbelleğine yazılmaz.
                     translations[index] = retried
                     local = true
                     continue
                 }
+            }
+            if (empty) {
+                // Yerel çeviri de yoksa cümle olduğu gibi kalır; boş satır gösterilmez, sonuç önbelleğe yazılmaz.
+                local = true
+                continue
             }
             translations[index] = translated[i]
             cache.store(cacheKey(piece, game), translated[i])
@@ -437,6 +444,11 @@ object AiRequest {
             "Characters address each other informally (use \"sen\", not \"siz\") unless the line is clearly formal. " +
             "Keep character names, place names and speaker labels such as \"ATREUS:\" exactly as they are. " +
             "Keep line breaks. Keep the meaning and tone; do not add or leave out anything. " +
+            // #296: OCR kaçan/yanlış harfler ve önceki altyazının devamı olan satırlar.
+            "The text is read from the screen by OCR and may have misread or missing letters (\"Y u ave to ask?\", " +
+            "\"Doesn't 00k good.\"); translate the line the speaker clearly meant. " +
+            "A subtitle may continue the previous one (it starts in lowercase or with a word like \"and\"); " +
+            "translate it so that it reads as that continuation. " +
             "Reply with only the translation, no explanations, notes or quotes."
 
     /** Kullanıcının ek talimatında en çok bu kadar karakter gider (fazlası kesilir). */

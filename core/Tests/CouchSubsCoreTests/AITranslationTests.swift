@@ -353,6 +353,30 @@ final class AITranslationTests: XCTestCase {
         XCTAssertEqual(FakeAI.requests.count, 3)
     }
 
+    /// Model dizide cümleyi boş bırakırsa (#296) cümle yerel çeviriyle denenir; yerel çeviri de boşsa cümle olduğu gibi
+    /// kalır. İki durumda da boş yanıt önbelleğe yazılmaz (Windows: EmptyItemIsRetriedLocallyAndNotCached).
+    func testEmptyItemIsRetriedLocallyAndNotCached() async throws {
+        FakeAI.replyText = #"[""]"#
+        let core = make(.openAI)
+        var asked: [String] = []
+        let local: (String) async throws -> String = { text in
+            asked.append(text)
+            return "yerel: " + text
+        }
+        let first = try await core.translate("Doesn't 00k good.", fallback: local)
+        XCTAssertEqual(first, "yerel: Doesn't 00k good.")
+        XCTAssertEqual(asked, ["Doesn't 00k good."])
+        _ = try await core.translate("Doesn't 00k good.", fallback: local)
+        XCTAssertEqual(FakeAI.requests.count, 2)
+
+        let blank = make(.openAI)
+        let empty: (String) async throws -> String = { _ in "" }
+        let kept = try await blank.translate("Doesn't 00k good.", fallback: empty)
+        XCTAssertEqual(kept, "Doesn't 00k good.")
+        _ = try await blank.translate("Doesn't 00k good.", fallback: empty)
+        XCTAssertEqual(FakeAI.requests.count, 4)
+    }
+
     func testOpenAIRequest() async throws {
         _ = try await make(.openAI).translate("Run!", fallback: local)
         let (request, body) = FakeAI.requests[0]

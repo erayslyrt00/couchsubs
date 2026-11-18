@@ -36,6 +36,11 @@ public static class AiRequest
         "Characters address each other informally (use \"sen\", not \"siz\") unless the line is clearly formal. " +
         "Keep character names, place names and speaker labels such as \"ATREUS:\" exactly as they are. " +
         "Keep line breaks. Keep the meaning and tone; do not add or leave out anything. " +
+        // #296: OCR kaçan/yanlış harfler ve önceki altyazının devamı olan satırlar.
+        "The text is read from the screen by OCR and may have misread or missing letters (\"Y u ave to ask?\", " +
+        "\"Doesn't 00k good.\"); translate the line the speaker clearly meant. " +
+        "A subtitle may continue the previous one (it starts in lowercase or with a word like \"and\"); " +
+        "translate it so that it reads as that continuation. " +
         "Reply with only the translation, no explanations, notes or quotes.";
 
     /// <summary>Kullanıcının ek talimatında en çok bu kadar karakter gider (fazlası kesilir).</summary>
@@ -593,11 +598,19 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         for (var i = 0; i < missing.Count; i++)
         {
             var piece = pieces[missing[i]].Text;
-            if (IsEcho(piece, translated[i]) && await TryFallbackAsync(piece, cancellationToken).ConfigureAwait(false) is { } retried
-                && !IsEcho(piece, retried))
+            // Model dizide bu cümleyi boş bıraktıysa (bozuk OCR okumasında olabiliyor, #296) yanıt yok sayılır.
+            var empty = string.IsNullOrWhiteSpace(translated[i]);
+            if ((empty || IsEcho(piece, translated[i])) && await TryFallbackAsync(piece, cancellationToken).ConfigureAwait(false) is { } retried
+                && !string.IsNullOrWhiteSpace(retried) && !IsEcho(piece, retried))
             {
                 // Yerel çeviri bu motorun önbelleğine yazılmaz.
                 translations[missing[i]] = retried;
+                local = true;
+                continue;
+            }
+            if (empty)
+            {
+                // Yerel çeviri de yoksa cümle olduğu gibi kalır; boş satır gösterilmez, sonuç önbelleğe yazılmaz.
                 local = true;
                 continue;
             }

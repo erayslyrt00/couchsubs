@@ -69,7 +69,8 @@ object Rereads {
             val differing = x.indices.filter { x[it] != y[it] }
             if (differing.isNotEmpty() && differing.size * 2 <= x.size && differing.all { looksMisread(x[it]) }) return true
         }
-        if (looksMisread(newer) || looksMisread(older)) return related(newer, older)
+        // Bölünmüş ya da birleşmiş sözcüklü bozuk okuma ("That smo e...") harf harf aynı satırdır (#296).
+        if (looksMisread(newer) || looksMisread(older)) return TextMatch.sameLetters(normNewer, normOlder) || related(newer, older)
         if (x.isEmpty() || x.size > y.size) return false
         if (x.size >= 2 && x.size < y.size && isGappedSubsequence(x, y)) return true
         val head = newer.trimStart().firstOrNull()

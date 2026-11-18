@@ -869,6 +869,32 @@ public class AiTranslatorTests
         Assert.Equal(3, fake.Requests.Count);
     }
 
+    /// <summary>
+    /// Model dizide cümleyi boş bırakırsa (#296: bozuk OCR okumasında Index-Translate 9B boş döndü) cümle yerel çeviriyle
+    /// denenir; yerel çeviri de boşsa cümle olduğu gibi kalır. İki durumda da boş yanıt önbelleğe yazılmaz.
+    /// </summary>
+    [Fact]
+    public async Task EmptyItemIsRetriedLocallyAndNotCached()
+    {
+        var fake = new FakeAi((request, _) => Wrap(request, "[\"\"]"));
+        var local = new FakeLocal();
+        var translator = MakeLocal(fake, local: local);
+        Assert.Equal("yerel: Doesn't 00k good.", await translator.TranslateAsync("Doesn't 00k good."));
+        Assert.Equal(["Doesn't 00k good."], local.Calls);
+        await translator.TranslateAsync("Doesn't 00k good.");
+        Assert.Equal(2, fake.Requests.Count);
+
+        var blank = MakeLocal(fake, local: new BlankLocal());
+        Assert.Equal("Doesn't 00k good.", await blank.TranslateAsync("Doesn't 00k good."));
+        await blank.TranslateAsync("Doesn't 00k good.");
+        Assert.Equal(4, fake.Requests.Count);
+    }
+
+    private sealed class BlankLocal : ITextTranslator
+    {
+        public Task<string> TranslateAsync(string text, CancellationToken cancellationToken = default) => Task.FromResult("");
+    }
+
     private sealed class EchoLocal : ITextTranslator
     {
         public Task<string> TranslateAsync(string text, CancellationToken cancellationToken = default) => Task.FromResult(text);
