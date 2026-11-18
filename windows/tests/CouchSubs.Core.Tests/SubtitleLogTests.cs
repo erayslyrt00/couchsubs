@@ -4,6 +4,7 @@ using CouchSubs.Core;
 
 namespace CouchSubs.Core.Tests;
 
+[Collection(nameof(SubtitleLog))]
 public class SubtitleLogTests
 {
     [Fact]

@@ -101,6 +101,8 @@ a trademark of Marvel and Sony Interactive Entertainment LLC.
 | SSH.NET (LG TV connection) | MIT | https://github.com/sshnet/SSH.NET |
 | BouncyCastle.Cryptography (used by SSH.NET) | MIT | https://github.com/bcgit/bc-csharp |
 | Microsoft.Extensions.Logging.Abstractions (used by SSH.NET) | MIT | https://github.com/dotnet/runtime |
+| ONNX Runtime 1.24.4 (`onnxruntime.dll`, `Microsoft.ML.OnnxRuntime.DirectML`; advanced text recognition) | MIT | https://github.com/microsoft/onnxruntime |
+| DirectML 1.15.4 (`DirectML.dll`, from the `Microsoft.AI.DirectML` package; GPU for advanced text recognition) | Microsoft Software License Terms (Microsoft DirectX Machine Learning) | https://www.nuget.org/packages/Microsoft.AI.DirectML/1.15.4 |
 | Microsoft Visual C++ 2015–2022 runtime (`vcruntime140*.dll`, `msvcp140*.dll`, `concrt140.dll`; needed by CTranslate2) | Microsoft Visual Studio license terms, "Distributable Code" (redist.txt) | https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files |
 
 The full copyright and license notices for Greenlight, the Xbox helper's bundled libraries, and the bundled Node.js
@@ -111,6 +113,10 @@ The Visual C++ runtime DLLs are Microsoft's redistributable files, copied unmodi
 `VC\Redist\MSVC\…\x64\Microsoft.VC14x.CRT` folder and placed next to `CouchSubs.exe` (app-local deployment, as
 Microsoft documents). They are system libraries in the sense of the GPL and are not covered by CouchSubs' AGPL license.
 
+`DirectML.dll` is Microsoft's redistributable file from the `Microsoft.AI.DirectML` NuGet package, distributed
+unmodified next to `CouchSubs.exe`. Its license terms (in the package as `LICENSE.txt`) allow redistribution only in
+applications for Windows and Xbox; it is not covered by CouchSubs' AGPL license.
+
 FFmpeg is built from the unmodified upstream release with the configuration in
 `.github/workflows/windows.yml`. You can rebuild `couchsubs_native.dll` with your own FFmpeg build using
 `windows/native/CMakeLists.txt` and place it next to `CouchSubs.exe`.
@@ -120,9 +126,12 @@ FFmpeg is built from the unmodified upstream release with the configuration in
 | Component | License | Source |
 |---|---|---|
 | OPUS-MT English→Turkish translation model (`opus-mt-tc-big-en-tr`, CTranslate2 conversion) | CC BY 4.0 | Language Technology Research Group, University of Helsinki — https://huggingface.co/Helsinki-NLP/opus-mt-tc-big-en-tr, conversion https://huggingface.co/Unbakedcookie/live-translator-models |
+| PP-OCRv6 small text detection and recognition models (advanced text recognition, Windows option only) | Apache-2.0, Baidu / PaddlePaddle | https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx, https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx (pinned revision) |
 | NVIDIA CUDA 12.8 cuBLAS and runtime (Windows GPU option only) | NVIDIA CUDA Toolkit license; downloaded license at `cuda-12.8/CUDA-LICENSE.txt` | https://developer.download.nvidia.com/compute/cuda/redist/ |
 
 The model is downloaded as a SHA-256-verified CTranslate2 float16 conversion from the pinned source above. CouchSubs uses int8 computation on CPU and float16 on a compatible NVIDIA CUDA GPU.
+
+The PP-OCRv6 models are downloaded unmodified from the pinned revisions above and verified with SHA-256 before use.
 
 ## Downloaded on first use of Turkish dubbing (Mac)
 

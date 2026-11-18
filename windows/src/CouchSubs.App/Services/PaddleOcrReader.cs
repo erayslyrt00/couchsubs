@@ -50,6 +50,30 @@ public sealed class PaddleOcrReader : ITextReader
         }
     }
 
+    /// <summary>
+    /// Bu okuyucunun oturumlarını bırakır (ekran kartı belleği boşalır). Paylaşılan önbellekteki oturum buysa önbellek de
+    /// boşalır; sonraki <see cref="Create"/> modelleri yeniden yükler. Aynı oturumu kullanan diğer okuyucular bundan sonra
+    /// <see cref="ObjectDisposedException"/> verir (sarmalayıcıları Windows'un yazı tanımasına döner).
+    /// </summary>
+    public void Release()
+    {
+        lock (CacheGate)
+            if (cache is { } cached && ReferenceEquals(cached.Engine, engine)) cache = null;
+        engine.Dispose();
+    }
+
+    /// <summary>Önbellekteki oturumları bırakır (seçim Windows'a dönünce ekran kartı belleği boşalsın).</summary>
+    public static void ReleaseAll()
+    {
+        Engine? engine;
+        lock (CacheGate)
+        {
+            engine = cache?.Engine;
+            cache = null;
+        }
+        engine?.Dispose();
+    }
+
     public string Read(Frame image) => ReadLines(image, deep: true).Text;
 
     public Reading ReadLines(Frame image, bool deep)
@@ -61,9 +85,23 @@ public sealed class PaddleOcrReader : ITextReader
         return new Reading(reading.Lines.Select(line => line with { Text = PaddleOcr.LatinOnly(line.Text) }).Where(line => line.Text.Length > 0));
     }
 
-    private sealed class Engine(InferenceSession detection, InferenceSession recognition, string[] characters, string device)
+    private sealed class Engine(InferenceSession detection, InferenceSession recognition, string[] characters, string device) : IDisposable
     {
+        private bool disposed;
+
         public string Device { get; } = device;
+
+        /// <summary>Süren okuma bitince oturumları bırakır; sonraki okumalar hata verir.</summary>
+        public void Dispose()
+        {
+            lock (this)
+            {
+                if (disposed) return;
+                disposed = true;
+                detection.Dispose();
+                recognition.Dispose();
+            }
+        }
 
         public static Engine Load(string directory)
         {
@@ -107,8 +145,10 @@ public sealed class PaddleOcrReader : ITextReader
             return new InferenceSession(path, options);
         }
 
+        /// <summary>Çağıran <c>lock (engine)</c> tutar (DirectML eşzamanlı çalıştırmayı desteklemez).</summary>
         public Reading Read(Frame image)
         {
+            ObjectDisposedException.ThrowIf(disposed, this);
             var input = PaddleOcr.PrepareDetection(image, PaddleOcr.DetectionLimitFor(image.Width, image.Height));
             List<PaddleOcr.Box> boxes;
             using (var results = detection.Run([NamedOnnxValue.CreateFromTensor(detection.InputNames[0],

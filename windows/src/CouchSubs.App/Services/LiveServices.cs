@@ -344,9 +344,16 @@ public sealed class LiveServices : IAppServices
     public ITextReader? MakeReader(string language, OcrEngine engine)
     {
         var reader = MakeReader(language);
+        // Seçim Windows'a dönünce gelişmiş okuyucunun oturumları bırakılır (ekran kartı belleği boşalır).
+        if (engine != OcrEngine.Advanced)
+        {
+            PaddleOcrReader.ReleaseAll();
+            return reader;
+        }
         // Sözlük ve bekletme ayarları (yukarıda) iki okuyucuda da geçerlidir; gelişmiş okuyucu açılamazsa Windows'unki kalır.
-        if (engine == OcrEngine.Advanced && advancedOcr.IsInstalled && PaddleOcrReader.Create(advancedOcr.Directory, language) is { } advanced)
-            return advanced;
+        // Okurken art arda hata verirse (ör. DirectML "device removed") oturumları bırakılır ve bu hatta Windows'unki okur.
+        if (advancedOcr.IsInstalled && PaddleOcrReader.Create(advancedOcr.Directory, language) is { } advanced)
+            return new FallbackTextReader(advanced, reader, advanced.Release);
         return reader;
     }
 
