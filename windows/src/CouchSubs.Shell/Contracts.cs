@@ -96,6 +96,18 @@ public enum TranslationEngine { Free, DeepL, Gemini, OpenAi, Claude, Local }
 [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<TranslationDevice>))]
 public enum TranslationDevice { Cpu, Gpu }
 
+/// <summary>Altyazıyı okuyan yazı tanıma: Windows'unki ya da gelişmiş (PP-OCRv6, model indirilir).</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<OcrEngine>))]
+public enum OcrEngine { Windows, Advanced }
+
+/// <summary>Gelişmiş yazı tanımanın modeli: kurulu mu, indir.</summary>
+public interface IOcrModel
+{
+    bool IsInstalled { get; }
+    long DownloadBytes { get; }
+    Task DownloadAsync(IProgress<double> progress, CancellationToken cancellationToken);
+}
+
 public static class TranslationEngines
 {
     public static AiProvider? Provider(this TranslationEngine engine) => engine switch
@@ -238,6 +250,8 @@ public sealed record UserSettings
     public int CpuTranslationThreads { get; init; } = CpuThreadOptions.Default;
     /// <summary>Değişmeyen altyazı bölgesinde tam OCR okumasını en fazla iki kare yeniden kullan.</summary>
     public bool FastSubtitleDetection { get; init; }
+    /// <summary>Altyazı okuyucusu. Gelişmiş seçili ama modeli inmemişse Windows'unki kullanılır.</summary>
+    public OcrEngine OcrEngine { get; init; } = OcrEngine.Windows;
     public DubbingSettings Dubbing { get; init; } = new();
     /// <summary>
     /// Açıksa çeviri <see cref="OnlineEngine"/> ile yapılır (anahtarı kayıtlıysa); kapalıysa ya da hizmete ulaşılamazsa
@@ -582,6 +596,13 @@ public interface IAppServices
     Task<string> InstallAndroidAppAsync(string host, BundledTvApp app, Action<TvInstallEvent> onEvent);
     /// <summary>Oyun dili için yazı tanıyıcı; bilgisayarda hiç OCR dili yoksa null.</summary>
     ITextReader? MakeReader(string language);
+    /// <summary>
+    /// Altyazı okuyucusu: <paramref name="engine"/> gelişmişse ve modeli kuruluysa PP-OCRv6, değilse
+    /// <see cref="MakeReader(string)"/>.
+    /// </summary>
+    ITextReader? MakeReader(string language, OcrEngine engine) => MakeReader(language);
+    /// <summary>Gelişmiş yazı tanımanın modeli; bu derlemede yoksa null.</summary>
+    IOcrModel? AdvancedOcr => null;
     /// <summary>
     /// Oyun dilinin kendi yazı tanıma paketi yüklü mü. Değilse okuyucu sistemin diliyle (ör. Türkçe) okur ve İngilizce
     /// altyazı "thıs.messs" gibi bozulur; kullanıcıya paketi yüklemesi söylenir.

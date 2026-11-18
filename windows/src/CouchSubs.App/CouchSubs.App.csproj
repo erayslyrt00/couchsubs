@@ -21,6 +21,8 @@
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3537.50" />
     <PackageReference Include="Velopack" Version="1.2.161" />
+    <!-- Gelişmiş yazı tanıma (PP-OCRv6): DirectML ile her ekran kartında, yoksa işlemcide (MIT). -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
   </ItemGroup>
 
   <!-- Paket sunucusu (server/packs): `dotnet publish -p:CouchSubsPacksUrl=https://…` ile verilir; boşsa paket indirme kapalı (PackUpdater). -->

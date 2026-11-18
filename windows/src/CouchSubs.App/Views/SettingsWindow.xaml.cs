@@ -88,6 +88,8 @@ public partial class SettingsWindow : Window
         CpuThreadChoice.SelectedItem = CpuThreadChoice.Items.Cast<ComboBoxItem>()
             .First(item => (int)item.Tag == CpuThreadOptions.Normalize(settings.CpuTranslationThreads, Environment.ProcessorCount));
         FastSubtitleDetection.IsChecked = settings.FastSubtitleDetection;
+        OcrEngineChoice.SelectedItem = OcrEngineChoice.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.OcrEngine.ToString());
+        ShowAdvancedOcr();
         ShowCpuThreads();
         ShowEngine();
         GamePacks.IsChecked = settings.GamePacks;
@@ -235,6 +237,9 @@ public partial class SettingsWindow : Window
             ShowStyleTitle();
         if (e.PropertyName == nameof(AppController.LastFrame)) ShowLiveFrame();
         if (e.PropertyName == nameof(AppController.InstalledPacks)) ShowPacks();
+        if (e.PropertyName is nameof(AppController.Settings) or nameof(AppController.AdvancedOcrInstalled) or nameof(AppController.AdvancedOcrDownloading)
+            or nameof(AppController.AdvancedOcrProgress) or nameof(AppController.AdvancedOcrError))
+            ShowAdvancedOcr();
         if (e.PropertyName == nameof(AppController.Settings)) ShowShortcutTexts();
         if (e.PropertyName is nameof(AppController.AreaProfileGame) or nameof(AppController.AreaProfileUnsaved)
             or nameof(AppController.AreaProfileTarget))
@@ -555,6 +560,35 @@ public partial class SettingsWindow : Window
         if (loading) return;
         Update(s => s.WithEngine(SelectedEngine));
         ShowEngine();
+    }
+
+    private void OnOcrEngine(object sender, SelectionChangedEventArgs e)
+    {
+        if (OcrEngineChoice.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        var engine = Enum.Parse<OcrEngine>(tag);
+        if (controller.Settings.OcrEngine == engine) return;
+        Update(s => s with { OcrEngine = engine });
+        // İlk seçişte model kendiliğinden iner; inene kadar Windows'un yazı tanıması okur.
+        if (engine == OcrEngine.Advanced && !controller.AdvancedOcrInstalled) _ = controller.DownloadAdvancedOcrAsync();
+        ShowAdvancedOcr();
+    }
+
+    private async void OnDownloadAdvancedOcr(object sender, RoutedEventArgs e) => await controller.DownloadAdvancedOcrAsync();
+
+    /// <summary>Gelişmiş yazı tanıma seçiliyse modelin durumu: indirme düğmesi, ilerleme, hata.</summary>
+    private void ShowAdvancedOcr()
+    {
+        OcrEnginePanel.Visibility = controller.AdvancedOcrAvailable ? Visibility.Visible : Visibility.Collapsed;
+        var advanced = controller.Settings.OcrEngine == OcrEngine.Advanced;
+        AdvancedOcrDownload.Visibility = advanced && !controller.AdvancedOcrInstalled ? Visibility.Visible : Visibility.Collapsed;
+        AdvancedOcrDownloadButton.IsEnabled = !controller.AdvancedOcrDownloading;
+        AdvancedOcrProgress.Visibility = AdvancedOcrProgressText.Visibility =
+            controller.AdvancedOcrDownloading ? Visibility.Visible : Visibility.Collapsed;
+        AdvancedOcrProgress.Value = controller.AdvancedOcrProgress;
+        AdvancedOcrProgressText.Text = Localizer.Current["Downloading the model… %lld%%"]
+            .Replace("%lld", ((int)(controller.AdvancedOcrProgress * 100)).ToString()).Replace("%%", "%");
+        AdvancedOcrError.Text = controller.AdvancedOcrError ?? "";
+        AdvancedOcrError.Visibility = advanced && controller.AdvancedOcrError is not null ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OnTranslationDevice(object sender, SelectionChangedEventArgs e)

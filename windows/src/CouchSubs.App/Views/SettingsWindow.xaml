@@ -237,6 +237,23 @@
                     <!-- Gelişmiş: kötü okunan satırların bekleme süreleri (SubtitlePipeline.PackWait / CleanWait). -->
                     <c:Card Title="{t:T 'Advanced'}" Margin="0,12,0,0">
                         <StackPanel>
+                            <!-- Yazı tanıma: Windows'unki ya da gelişmiş (PP-OCRv6, PaddleOcrReader). -->
+                            <StackPanel x:Name="OcrEnginePanel" Margin="0,0,0,16">
+                                <TextBlock Text="{t:T 'Text recognition'}" Margin="0,0,0,8" />
+                                <ComboBox x:Name="OcrEngineChoice" SelectionChanged="OnOcrEngine" Width="320" HorizontalAlignment="Left">
+                                    <ComboBoxItem Content="{t:T 'Windows (default)'}" Tag="Windows" />
+                                    <ComboBoxItem Content="{t:T 'Advanced · reads bright scenes better'}" Tag="Advanced" />
+                                </ComboBox>
+                                <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                           Text="{t:T 'Advanced recognition reads white subtitles on bright scenes (sky, snow, daylight) much better. It runs on your graphics card, or on the CPU when there is none, and uses more of it than the Windows recognition. The model is downloaded once (31 MB).'}" />
+                                <StackPanel x:Name="AdvancedOcrDownload" Margin="0,8,0,0" Visibility="Collapsed">
+                                    <Button x:Name="AdvancedOcrDownloadButton" Content="{t:T 'Download the model'}" Style="{StaticResource PrimaryButton}"
+                                            HorizontalAlignment="Left" Click="OnDownloadAdvancedOcr" />
+                                    <ProgressBar x:Name="AdvancedOcrProgress" Height="6" Maximum="1" Margin="0,8,0,0" Visibility="Collapsed" />
+                                    <TextBlock x:Name="AdvancedOcrProgressText" Style="{StaticResource HintText}" Margin="0,4,0,0" Visibility="Collapsed" />
+                                </StackPanel>
+                                <TextBlock x:Name="AdvancedOcrError" Foreground="{DynamicResource dangerBrush}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed" />
+                            </StackPanel>
                             <CheckBox x:Name="FastSubtitleDetection" Content="{t:T 'Check unchanged subtitle areas more often'}"
                                       Checked="OnFastSubtitleDetection" Unchecked="OnFastSubtitleDetection" />
                             <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,6,0,16"

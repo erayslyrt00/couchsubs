@@ -427,7 +427,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                                      || old.CpuTranslationThreads != value.CpuTranslationThreads;
             if (translationChanged && !isRunning) RefreshTranslatorStatus();
             if (isRunning && (old.SourceLanguage != value.SourceLanguage || old.TargetLanguage != value.TargetLanguage
-                              || translationChanged || old.FastSubtitleDetection != value.FastSubtitleDetection))
+                              || translationChanged || old.FastSubtitleDetection != value.FastSubtitleDetection
+                              || old.OcrEngine != value.OcrEngine))
             {
                 RefreshTranslatorStatus();
                 MakePipeline();
@@ -1941,9 +1942,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         // Eski hatta süren okuma beklenmez; yeni hat ilk karesini hemen alır.
         frameGate.Reset();
         ActiveSourceLanguage = settings.SourceLanguage;
-        var reader = services.MakeReader(settings.SourceLanguage);
+        var reader = services.MakeReader(settings.SourceLanguage, settings.OcrEngine);
         activeReader = reader;
-        OcrMissing = reader is null || !services.HasOcrLanguage(settings.SourceLanguage);
+        // Gelişmiş yazı tanıma Windows'un dil paketine gerek duymaz.
+        OcrMissing = reader is null || (!(settings.OcrEngine == OcrEngine.Advanced && AdvancedOcrInstalled)
+                                        && !services.HasOcrLanguage(settings.SourceLanguage));
         if (reader is null) return;
         var scheduler = new ReadScheduler(maxReuse: settings.FastSubtitleDetection
             ? ReadScheduler.FastMaxReuse : ReadScheduler.DefaultMaxReuse);
@@ -2004,7 +2007,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         }
         if (regionWatcher is null)
         {
-            if (services.MakeReader(settings.SourceLanguage) is not { } reader) return;
+            if (services.MakeReader(settings.SourceLanguage, settings.OcrEngine) is not { } reader) return;
             regionWatcher = new RegionWatcher(reader, MakeTranslator(), server) { Log = SubtitleLog.Write };
         }
         regionWatcher.PackLookup = PacksActive ? services.FindInPacks : null;
@@ -2525,6 +2528,42 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         finally
         {
             Updating = false;
+        }
+    }
+
+    // --- Gelişmiş yazı tanıma ---
+
+    /// <summary>Bu derlemede gelişmiş yazı tanıma var mı.</summary>
+    public bool AdvancedOcrAvailable => services.AdvancedOcr is not null;
+    public bool AdvancedOcrInstalled => services.AdvancedOcr?.IsInstalled == true;
+    public long AdvancedOcrDownloadBytes => services.AdvancedOcr?.DownloadBytes ?? 0;
+    public bool AdvancedOcrDownloading { get => advancedOcrDownloading; private set => Set(ref advancedOcrDownloading, value); }
+    public double AdvancedOcrProgress { get => advancedOcrProgress; private set => Set(ref advancedOcrProgress, value); }
+    public string? AdvancedOcrError { get => advancedOcrError; private set => Set(ref advancedOcrError, value); }
+    private bool advancedOcrDownloading;
+    private double advancedOcrProgress;
+    private string? advancedOcrError;
+
+    /// <summary>Gelişmiş yazı tanımanın modellerini indirir (~31 MB); çeviri sürüyorsa okuyucu hemen değişir.</summary>
+    public async Task DownloadAdvancedOcrAsync()
+    {
+        if (services.AdvancedOcr is not { } model || advancedOcrDownloading || model.IsInstalled) return;
+        AdvancedOcrDownloading = true;
+        AdvancedOcrError = null;
+        try
+        {
+            await Task.Run(() => model.DownloadAsync(new ImmediateProgress(value => post(() => AdvancedOcrProgress = value)), CancellationToken.None));
+            if (isRunning && settings.OcrEngine == OcrEngine.Advanced) MakePipeline();
+        }
+        catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException or TaskCanceledException
+                                          or UnauthorizedAccessException)
+        {
+            AdvancedOcrError = error.Message;
+        }
+        finally
+        {
+            AdvancedOcrDownloading = false;
+            Changed(nameof(AdvancedOcrInstalled));
         }
     }
 

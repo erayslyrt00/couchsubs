@@ -322,6 +322,28 @@ internal sealed class FakeServices : IAppServices
         ReaderLanguages.Add(language);
         return HasOcr ? new FakeReader(ReaderLines) : null;
     }
+    public List<OcrEngine> ReaderEngines { get; } = [];
+    public ITextReader? MakeReader(string language, OcrEngine engine)
+    {
+        ReaderEngines.Add(engine);
+        return MakeReader(language);
+    }
+    public FakeOcrModel? OcrModel { get; set; }
+    public IOcrModel? AdvancedOcr => OcrModel;
+}
+
+internal sealed class FakeOcrModel : IOcrModel
+{
+    public bool IsInstalled { get; set; }
+    public long DownloadBytes => 31_000_000;
+    public Exception? Error { get; set; }
+    public Task DownloadAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    {
+        if (Error is not null) throw Error;
+        progress.Report(1);
+        IsInstalled = true;
+        return Task.CompletedTask;
+    }
 }
 
 public class AppControllerTests
@@ -1302,6 +1324,43 @@ public class AppControllerRunTests
         // Güvenli depoda yalnız kurulumun bitip bitmediği durur.
         Assert.Equal([StoreKeys.SetupComplete], store.Values.Keys);
         Assert.Equal(58, AppControllerTests.Make(store: store, settings: settings).Settings.Style.FontSize);
+    }
+
+    [Fact]
+    public async Task ChangingTextRecognitionWhileRunningRebuildsPipelineWithTheNewReader()
+    {
+        var (controller, services, _) = Ready();
+        await controller.StartAsync();
+        controller.Settings = controller.Settings with { OcrEngine = OcrEngine.Advanced };
+        Assert.Equal([OcrEngine.Windows, OcrEngine.Advanced], services.ReaderEngines);
+        controller.Dispose();
+    }
+
+    [Fact]
+    public async Task DownloadingTheAdvancedModelWhileItIsChosenSwitchesTheReader()
+    {
+        var (controller, services, _) = Ready();
+        services.OcrModel = new FakeOcrModel();
+        controller.Settings = controller.Settings with { OcrEngine = OcrEngine.Advanced };
+        await controller.StartAsync();
+        Assert.False(controller.AdvancedOcrInstalled);
+        await controller.DownloadAdvancedOcrAsync();
+        Assert.True(controller.AdvancedOcrInstalled);
+        Assert.Null(controller.AdvancedOcrError);
+        Assert.Equal([OcrEngine.Advanced, OcrEngine.Advanced], services.ReaderEngines);
+        controller.Dispose();
+    }
+
+    [Fact]
+    public async Task AFailedAdvancedModelDownloadIsReported()
+    {
+        var (controller, services, _) = Ready();
+        services.OcrModel = new FakeOcrModel { Error = new HttpRequestException("offline") };
+        await controller.DownloadAdvancedOcrAsync();
+        Assert.False(controller.AdvancedOcrInstalled);
+        Assert.Equal("offline", controller.AdvancedOcrError);
+        Assert.False(controller.AdvancedOcrDownloading);
+        controller.Dispose();
     }
 
     [Fact]

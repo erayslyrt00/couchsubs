@@ -64,6 +64,36 @@ public sealed class Frame(byte[] pixels, int width, int height, int stride)
         }
         return result;
     }
+
+    /// <summary>İki doğrusal büyütme ya da küçültme, kesirli oranla (OpenCV'nin INTER_LINEAR'ı gibi piksel ortalarından).</summary>
+    public Frame Resized(int width, int height)
+    {
+        var result = Blank(width, height);
+        double scaleX = (double)Width / width, scaleY = (double)Height / height;
+        for (var ty = 0; ty < height; ty++)
+        {
+            var sy = Math.Clamp(((ty + 0.5) * scaleY) - 0.5, 0, Height - 1.0);
+            var y0 = (int)sy;
+            var y1 = Math.Min(y0 + 1, Height - 1);
+            var fy = sy - y0;
+            for (var tx = 0; tx < width; tx++)
+            {
+                var sx = Math.Clamp(((tx + 0.5) * scaleX) - 0.5, 0, Width - 1.0);
+                var x0 = (int)sx;
+                var x1 = Math.Min(x0 + 1, Width - 1);
+                var fx = sx - x0;
+                int a = (y0 * Stride) + (x0 * 4), b = (y0 * Stride) + (x1 * 4), c = (y1 * Stride) + (x0 * 4), d = (y1 * Stride) + (x1 * 4);
+                var o = (ty * result.Stride) + (tx * 4);
+                for (var k = 0; k < 4; k++)
+                {
+                    var top = Pixels[a + k] + ((Pixels[b + k] - Pixels[a + k]) * fx);
+                    var bottom = Pixels[c + k] + ((Pixels[d + k] - Pixels[c + k]) * fx);
+                    result.Pixels[o + k] = (byte)Math.Round(top + ((bottom - top) * fy));
+                }
+            }
+        }
+        return result;
+    }
 }
 
 /// <summary>Görüntüde altyazının arandığı bölge, kenarlara oranla (0–1, üstten ve soldan).</summary>
