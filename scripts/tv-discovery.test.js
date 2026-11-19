@@ -681,6 +681,20 @@ test('sunucu adresi değişse de aynı anahtar kimliğiyle tekrar onay gerekmez'
   assert.strictEqual(tv.lastOpened(), secureAddress + '/events?k=' + secureKey);
   assert(!tv.requests.some(r => r.method === 'POST'));
 });
+test('eşleşmiş TV anahtarlı bağlantıda ek alan bloklarını kendi yerlerinde gösterir', () => {
+  const auth = { key: secureKey, id: secureId };
+  const tv = startTv({ saved: secureAddress, alive: new Set([secureAddress]), auth, identities: { [secureId]: secureKey } });
+  tv.clock.advance(1000);
+  assert.strictEqual(tv.lastOpened(), secureAddress + '/events?k=' + secureKey);
+  const blocks = [
+    { text: 'Demirciyi bul', box: { left: 0.7, top: 0.05, right: 0.95, bottom: 0.08 }, line: 0.03 },
+    { text: 'Ahıra git', box: { left: 0.55, top: 0.2, right: 0.65, bottom: 0.23 }, line: 0.03 }
+  ];
+  tv.emit('region', { id: 'q', text: 'Demirciyi bul\nAhıra git', box: { left: 0.55, top: 0.05, right: 0.95, bottom: 0.23 }, blocks });
+  const group = tv.element('regions').children[0];
+  assert.strictEqual(group.className, 'region-blocks');
+  assert.deepStrictEqual(group.children.map((c) => c.textContent), ['Demirciyi bul', 'Ahıra git']);
+});
 test('anahtar yenilenince yanlış anahtarla sonsuz yeniden deneme yerine eşleştirme açılır', () => {
   const auth = { key: secureKey, id: secureId };
   const tv = startTv({ saved: secureAddress, alive: new Set([secureAddress]), auth, storedKeys: { [secureAddress]: secureKey } });

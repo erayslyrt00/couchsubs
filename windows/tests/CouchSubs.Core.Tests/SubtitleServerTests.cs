@@ -137,6 +137,29 @@ public class SubtitleServerTests
         Assert.Contains("data: {\"id\":\"q\",\"text\":\"\"}", lines);
     }
 
+    /// <summary>Eşleştirilmiş TV anahtarlı bağlantıda da ek alan bloklarını (<c>blocks</c>) aynen alır; eski (anahtarsız)
+    /// bağlantılar kapalıyken anahtarsız istek reddedilir.</summary>
+    [Fact]
+    public async Task KeyedStreamCarriesRegionBlocks()
+    {
+        using var server = new SubtitleServer(0, allowLegacy: false);
+        var port = await server.StartAsync();
+        using var anonymous = await Http.GetAsync($"http://127.0.0.1:{port}/events", HttpCompletionOption.ResponseHeadersRead);
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        using var response = await Http.GetAsync($"http://127.0.0.1:{port}/events?k={server.AccessKey}", HttpCompletionOption.ResponseHeadersRead);
+        await WaitUntil(() => server.ConnectedClients == 1);
+        server.SendRegion("q", "Find\nGo", new TextBox(0.6, 0.05, 0.95, 0.2), 0.03, null,
+                          [new ScreenTranslation.Item("Find", "Find", new TextBox(0.7, 0.05, 0.95, 0.08), 0.03),
+                           new ScreenTranslation.Item("Go", "Go", new TextBox(0.6, 0.15, 0.7, 0.2), 0.04)]);
+        server.ClearRegions();
+
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+        var lines = await ReadLines(reader, "event: region-clear");
+        Assert.Contains("data: {\"blocks\":[{\"box\":{\"bottom\":0.08,\"left\":0.7,\"right\":0.95,\"top\":0.05},\"line\":0.03,\"text\":\"Find\"}," +
+                        "{\"box\":{\"bottom\":0.2,\"left\":0.6,\"right\":0.7,\"top\":0.15},\"line\":0.04,\"text\":\"Go\"}]," +
+                        "\"box\":{\"bottom\":0.2,\"left\":0.6,\"right\":0.95,\"top\":0.05},\"id\":\"q\",\"line\":0.03,\"text\":\"Find\\nGo\"}", lines);
+    }
+
     [Fact]
     public async Task ObsOverlayIsServedAndNotCountedAsTv()
     {
