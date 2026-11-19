@@ -954,6 +954,15 @@ public partial class SettingsWindow : Window
         var slot = area;
         Update(s => slot == 0 ? s with { Region = region, AreaPreset = AreaPresets.Matching(region) } : s.WithExtraRegion(slot, region));
         if (slot == 0) ShowPreset();
+        // Kapalı ek bölgeyi çizmek onu açar: eskiden çerçeve "Bu alanı kullan" işaretlenene dek kilitliydi, ipucu "alanı çiz"
+        // derken sürükleme hiçbir şey yapmıyordu ve bölgenin yeri değiştirilemiyor sanılıyordu.
+        else if (UseArea.IsChecked != true)
+        {
+            var wasLoading = loading;
+            loading = true;
+            UseArea.IsChecked = true;
+            loading = wasLoading;
+        }
     }
 
     /// <summary>Altyazı bölgesinin hazır seçimi işaretlenir; Özel'de kaydırıcılar bölgeyi gösterir.</summary>
@@ -1040,7 +1049,8 @@ public partial class SettingsWindow : Window
             ExtraLivePanel.Visibility = Visibility.Visible;
             ExtraLive.IsChecked = settings.ExtraLive(slot);
             (settings.ExtraTarget(slot) switch { ResultTarget.Pc => ExtraPc, ResultTarget.Both => ExtraBoth, _ => ExtraTv }).IsChecked = true;
-            Region.IsEnabled = extra is not null;
+            // Kapalı ek bölge de çizilebilir; çizince açılır (bkz. OnRegion).
+            Region.IsEnabled = true;
             Region.DefaultRegion = ExtraDefaults[slot - 1];
             Region.Centered = false;
             Region.ShowRegion(extra ?? ExtraDefaults[slot - 1]);
@@ -1077,7 +1087,6 @@ public partial class SettingsWindow : Window
     {
         if (loading || area == 0) return;
         var on = UseArea.IsChecked == true;
-        Region.IsEnabled = on;
         var slot = area;
         var region = Region.Region;
         Update(s => s.WithExtraRegion(slot, on ? region : null));
@@ -1101,7 +1110,6 @@ public partial class SettingsWindow : Window
         loading = true;
         UseArea.IsChecked = true;
         loading = false;
-        Region.IsEnabled = true;
         Region.ShowRegion(region);
         Update(s => s.WithExtraRegion(slot, region));
     }
