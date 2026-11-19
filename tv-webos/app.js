@@ -375,6 +375,36 @@
     return box.right > box.left && box.bottom > box.top ? box : null;
   }
 
+  function fillText(el, text, icons) {
+    /* Çevirinin içindeki kumanda simgeleri ("Koşmak için [△] basılı tut"): bilgisayar simgeyi oyun karesinden kesip
+       PNG olarak gönderir; icons = [{at, src}], at düz metindeki yeridir. Simge yoksa düz metin yazılır. */
+    el.textContent = '';
+    var list = [];
+    for (var i = 0; icons && i < icons.length; i++) {
+      var icon = icons[i];
+      if (icon && typeof icon.at === 'number' && typeof icon.src === 'string' && icon.src.indexOf('data:image/') === 0) {
+        list.push(icon);
+      }
+    }
+    if (!list.length) {
+      el.textContent = text;
+      return;
+    }
+    list.sort(function (a, b) { return a.at - b.at; });
+    var position = 0;
+    for (var j = 0; j < list.length; j++) {
+      var at = Math.max(position, Math.min(text.length, Math.floor(list[j].at)));
+      if (at > position) el.appendChild(document.createTextNode(text.slice(position, at)));
+      var image = document.createElement('img');
+      image.className = 'icon';
+      image.alt = '';
+      image.src = list[j].src;
+      el.appendChild(image);
+      position = at;
+    }
+    if (position < text.length) el.appendChild(document.createTextNode(text.slice(position)));
+  }
+
   // --- Uzun çeviriyi bölme ---
   // Uzun çeviri en çok 3 satıra, kelime sınırından ve dengeli bölünür; 3 satıra sığmazsa yazı biraz küçülür (en çok
   // %75'e kadar). Konuşan adı ("ARTHUR:") sonraki sözcükle birleşik kalır, hep ilk satırdadır. Satır sınırı TV'de
@@ -686,7 +716,7 @@
       if (!box || !item.text) continue;
       var el = document.createElement('div');
       el.className = item.paragraphs === true ? 'item paragraphs' : 'item';
-      el.textContent = item.text;
+      fillText(el, item.text, item.icons);
       var left = Math.max(0, box.left - SCREEN_PAD);
       var top = Math.max(0, box.top - SCREEN_PAD);
       var boxHeight = (box.bottom - box.top + 2 * SCREEN_PAD) * height;
@@ -746,7 +776,7 @@
     $('regions').className = '';
     var width = window.innerWidth || 1920;
     var height = window.innerHeight || 1080;
-    el.textContent = data.text;
+    fillText(el, data.text, data.icons);
     el.style.left = el.style.right = el.style.top = el.style.bottom = '';
     if ((box.left + box.right) / 2 > 0.5) {
       el.style.right = (Math.max(0, 1 - box.right - REGION_PAD) * 100) + '%';

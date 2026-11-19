@@ -31,8 +31,22 @@ data class CropRegion(val top: Double = 0.62, val bottom: Double = 0.97, val lef
     val box get() = TextBox(left, top, right, bottom)
 }
 
-/** Yazı tanımanın bulduğu bir satır; kutu okunan alana göredir, bilinmiyorsa null. */
-data class TextLine(val text: String, val box: TextBox? = null)
+/**
+ * Yazı tanımanın bulduğu bir satır; kutu okunan alana göredir, bilinmiyorsa null. [words]: okuyucu sözcüklerin yerini de
+ * veriyorsa (ML Kit) sözcükler, satırla aynı oranlarda; kumanda simgesini bulmak için ([ButtonIcons]). [icons]: metindeki
+ * her [ButtonIcons.MARKER] için, sırasıyla, simgenin yeri ve okunan hali.
+ */
+data class TextLine(val text: String, val box: TextBox? = null, val words: List<TextWord>? = null, val icons: List<IconSlot>? = null)
+
+/** Yazı tanımanın bulduğu bir sözcük ve yeri (okunan alanın kenarlarına oranla). */
+data class TextWord(val text: String, val box: TextBox)
+
+/**
+ * Yazının içindeki kumanda simgesi ("Hold △ to sprint"). Yazı tanıma simgeyi harf sanır ("A", "Ä") ya da hiç okumaz;
+ * [text] okunan hali (boş olabilir), [box] karedeki yeri, [image] kareden kesilen simgenin PNG'si (data: adresi;
+ * kesilemediyse null). Windows: Reading.cs IconSlot.
+ */
+data class IconSlot(val box: TextBox, val text: String, val image: String? = null)
 
 /** Bir karenin okunan satırları, yukarıdan aşağı (Windows: Reading.cs, Mac: Reading.swift). */
 class Reading(lines: List<TextLine>) {
@@ -64,10 +78,18 @@ class Reading(lines: List<TextLine>) {
         }
 
     /** Oyunun düğme ipuçları ("R2 Swing", "△ Pick up") çıkarılmış hali; bunlar altyazı değildir. */
-    fun withoutButtonPrompts() = Reading(lines.filter { !ButtonPrompts.isPrompt(it.text) })
+    /**
+     * Düğme ipuçları ("R2 Swing", "Press @ to open the map") çıkarılmış hali. Simgesi bulunmuş satır (`withButtonIcons`;
+     * "Ekranı çevir" ve ek alanlar) kalır: simgesiyle çevrilir, düğme görünür. Simgesi bulunamayan ipucu atılır; çevrilmediği
+     * için üstü örtülmez (Windows: WithoutButtonPrompts).
+     */
+    fun withoutButtonPrompts() = Reading(lines.filter { !it.icons.isNullOrEmpty() || !ButtonPrompts.isPrompt(it.text) })
 
     /** Yazı tanımanın uydurduğu sözcük çöpleri ("ou$3e") ayıklanmış hali. */
     fun withoutOcrNoise() = Reading(lines.map { it.copy(text = OcrNoise.clean(it.text)) })
+
+    /** Yazının içindeki kumanda simgeleri [ButtonIcons.MARKER] ile işaretlenmiş hali (bkz. [ButtonIcons.mark]). */
+    fun withButtonIcons() = Reading(ButtonIcons.joinHints(this).lines.map { ButtonIcons.mark(it) })
 
     /**
      * Aynı satırda yan yana okunan parçalar soldan sağa tek satır olur. Renkli konuşan adını ("Arthur:", RDR2) yazı
@@ -201,6 +223,33 @@ object ButtonPrompts {
         val next = all.drop(to + 1).firstOrNull { token -> token.any { it.isLetter() } } ?: return false
         return all.size - to - 1 <= 10 && next.lowercase() !in objects
     }
+
+    /**
+     * `isIconPrompt` kalıbındaki satırın yazı tanıma sözcüklerinde fiilin ve "to"nun sırası; aralarında en az bir tuş
+     * kalıntısı yoksa ya da kalıp tutmazsa null. Aradaki kalıntılar ("I LI", "(9 0", "2 and R2") simgenin okunuşudur:
+     * `ButtonIcons.mark` onları kareden kesilecek simge yapar (Windows: ButtonPrompts.IconRemnantSpan).
+     */
+    internal fun iconRemnantSpan(words: List<String>, line: String): Pair<Int, Int>? {
+        val tokens = line.split(separators).map { it.trim { c -> c in BRACKETS } }.filter { it.isNotEmpty() }
+        if (!isIconPrompt(tokens, line)) return null
+        val verb = words.indexOfFirst { word -> word.trim { c -> c in BRACKETS }.any { it.isLetter() } }
+        if (verb < 0 || words[verb].trim { c -> c in BRACKETS }.lowercase() !in verbs) return null
+        var end = verb + 2
+        while (end < words.size && end <= verb + 4) {
+            if (words[end].trim { c -> c in BRACKETS }.lowercase() == "to") {
+                val between = words.subList(verb + 1, end)
+                    .flatMap { it.split(separators) }
+                    .map { it.trim { c -> c in BRACKETS } }
+                    .filter { it.isNotEmpty() }
+                return if (between.all(::isIconRemnant)) Pair(verb, end) else null
+            }
+            end++
+        }
+        return null
+    }
+
+    /** "and"/"or": iki tuş kalıntısının arasındaki bağlaç, simge değildir ("Release 2 and R2 to breathe out"). */
+    internal fun isConnector(token: String) = token.lowercase() in connectors
 
     /**
      * Etkileşim/HUD etiketi: en çok üç sözcük, hiç küçük harf yok (en az bir büyük harf var), cümle sonu noktalaması

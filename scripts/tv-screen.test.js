@@ -16,6 +16,8 @@ const browser = [process.env.COUCHSUBS_TEST_BROWSER, process.env.CHROME_BIN,
   '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].find(p => p && fs.existsSync(p));
 const item = (text, left, top, right, bottom, line = .03) => ({ text, box: { left, top, right, bottom }, line });
+// 1×1 PNG.
+const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 const upper = item('Bu bölgedeki bütün gizli belgeleri bul ve güvenli bölgeye geri dön.', .10, .20, .28, .23);
 const lower = item('Görevler', .10, .26, .28, .28, .02);
 const scenarios = {
@@ -31,6 +33,9 @@ const scenarios = {
     item('Görevler', .1, .24, .2, .26, .02)],
   invalid: [null, {text:'Geçersiz',box:{left:.2,top:.2,right:.1,bottom:.3}},
     item('', .1, .23, .28, .24), item('Kaydet', .1, .2, .28, .23)],
+  // Çevirinin içindeki kumanda simgesi (bilgisayar oyun karesinden keser); resim olmayan adres yok sayılır.
+  icons: [Object.assign(item('Koşmak için basılı tutun.', .1, .2, .28, .23), {icons: [{at: 12, src: PNG}]}),
+    Object.assign(item('Kaydet', .1, .5, .28, .53), {icons: [{at: 0, src: 'javascript:alert(1)'}]})],
 };
 
 function render(width, height) {
@@ -56,7 +61,9 @@ function render(width, height) {
           var b = el.getBoundingClientRect();
           return {text: el.textContent, left:b.left, right:b.right, top:b.top, bottom:b.bottom,
             width:b.width, height:b.height, font:parseFloat(getComputedStyle(el).fontSize),
-            clientHeight:el.clientHeight, scrollHeight:el.scrollHeight, align:getComputedStyle(el).textAlign};
+            clientHeight:el.clientHeight, scrollHeight:el.scrollHeight, align:getComputedStyle(el).textAlign,
+            images:el.querySelectorAll('img.icon').length,
+            lead:el.firstChild && el.firstChild.nodeType === 3 ? el.firstChild.textContent : ''};
         });
       }
       hideScreen(); result.hidden = $('screen').className; result.count = $('screen').children.length;
@@ -134,6 +141,13 @@ test('TV ekran çevirisi: ' + width + '×' + height, {skip: !browser && 'Chrome/
   });
   await t.test('boş/geçersiz kutular sağlam etiketi küçültmez', () => {
     assert.deepEqual(r.invalid, r.isolated);
+  });
+  await t.test('kumanda simgesi çevirinin içinde yerinde durur', () => {
+    assert.equal(r.icons[0].text, 'Koşmak için basılı tutun.');
+    assert.equal(r.icons[0].images, 1);
+    assert.equal(r.icons[0].lead, 'Koşmak için ');
+    assert.equal(r.icons[1].images, 0);
+    assert.equal(r.icons[1].text, 'Kaydet');
   });
   await t.test('kapatma ve normal altyazıdan geçiş korunur', () => {
     assert.equal(r.hidden, 'hidden'); assert.equal(r.count, 0);

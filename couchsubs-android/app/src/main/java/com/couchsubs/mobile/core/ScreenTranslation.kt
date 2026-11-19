@@ -15,6 +15,8 @@ object ScreenTranslation {
         val box: TextBox,
         /** Satırlarının tipik yüksekliği, karenin yüksekliğine oranla; yazı boyu buna göre seçilir. */
         val lineHeight: Double,
+        /** Her parçadaki kumanda simgeleri, parçadaki [ButtonIcons.MARKER] sırasıyla; simge yoksa null. */
+        val icons: List<List<IconSlot>>? = null,
     )
 
     data class Item(
@@ -23,6 +25,8 @@ object ScreenTranslation {
         val translation: String,
         val box: TextBox,
         val lineHeight: Double,
+        /** Çevirinin içindeki kumanda simgeleri (kareden kesilmiş); TV [translation]'ın o yerine koyar. */
+        val icons: List<IconPlacement>? = null,
     ) {
         /** Birden çok parça var: satır satır, sola yaslı gösterilir. */
         val paragraphs: Boolean get() = translation.contains('\n')
@@ -33,16 +37,20 @@ object ScreenTranslation {
 
     /**
      * Grupları sırayla çevirir; her grup çevrilince o ana kadarki sonuçlarla [progress] çağrılır. Çevirisi aslıyla aynı
-     * olan (ad, sayı, zaten Türkçe yazı) grup gösterilmez. [cancelled] true dönerse iş bırakılır.
+     * olan (ad, sayı, zaten Türkçe yazı) grup gösterilmez. [cancelled] true dönerse iş bırakılır. [frame] okunan kareyse
+     * yazıların içindeki kumanda simgeleri ondan kesilip çeviriye konur.
      */
     fun translateGroups(
-        reading: Reading, translate: (String) -> String, cancelled: () -> Boolean = { false }, progress: (List<Item>) -> Unit = {},
+        reading: Reading, translate: (String) -> String, cancelled: () -> Boolean = { false }, frame: GrayFrame? = null,
+        progress: (List<Item>) -> Unit = {},
     ): List<Item> {
         val items = mutableListOf<Item>()
-        for (group in groups(reading)) {
+        for (group in withImages(groups(reading), frame)) {
             if (cancelled()) return items
-            val translated = group.paragraphs.map { translate(it) }
-            val item = item(group, translated) ?: continue
+            // Simgeler çeviride uydurma adlarla korunur (IconText).
+            val prepared = group.paragraphs.map { IconText.protect(it) }
+            val translated = prepared.map { translate(it.text) }
+            val item = item(group, prepared, translated) ?: continue
             items.add(item)
             progress(items.toList())
         }
@@ -51,39 +59,61 @@ object ScreenTranslation {
 
     /**
      * Çevirmen parçaları tek istekte çevirebiliyorsa (yapay zekâ) ekranın bütün parçaları birlikte gider ve sonuç bir
-     * kerede gelir; yoksa gruplar sırayla çevrilip hazırlandıkça bildirilir.
+     * kerede gelir; yoksa gruplar sırayla çevrilip hazırlandıkça bildirilir. [frame] okunan kareyse yazıların içindeki
+     * kumanda simgeleri ondan kesilip çeviriye konur.
      */
     fun translate(
-        reading: Reading, translator: TextTranslator, cancelled: () -> Boolean = { false }, progress: (List<Item>) -> Unit = {},
+        reading: Reading, translator: TextTranslator, cancelled: () -> Boolean = { false }, frame: GrayFrame? = null,
+        progress: (List<Item>) -> Unit = {},
     ): List<Item> {
-        if (!translator.translatesTogether) return translateGroups(reading, { translator.translate(it) }, cancelled, progress)
-        val groups = groups(reading)
-        val paragraphs = groups.flatMap { it.paragraphs }
+        if (!translator.translatesTogether) return translateGroups(reading, { translator.translate(it) }, cancelled, frame, progress)
+        val groups = withImages(groups(reading), frame)
+        // Simgeler çeviride uydurma adlarla korunur (IconText).
+        val prepared = groups.map { group -> group.paragraphs.map { IconText.protect(it) } }
+        val paragraphs = prepared.flatMap { group -> group.map { it.text } }
         if (paragraphs.isEmpty()) return emptyList()
         val translations = translator.translateAll(paragraphs)
         if (cancelled()) return emptyList()
         val items = mutableListOf<Item>()
         var next = 0
-        for (group in groups) {
+        for ((index, group) in groups.withIndex()) {
             val count = group.paragraphs.size
-            val translated = (next until next + count).map { if (it < translations.size) translations[it] else paragraphs[it] }
+            // Gelmeyen çeviri boş kalır: parça aslıyla gösterilir.
+            val translated = (next until next + count).map { if (it < translations.size) translations[it] else "" }
             next += count
-            item(group, translated)?.let(items::add)
+            item(group, prepared[index], translated)?.let(items::add)
         }
         if (items.isNotEmpty()) progress(items.toList())
         return items
     }
 
+    /** Simgeli grupların simgeleri [frame]'den kesilir; kare yoksa gruplar olduğu gibi kalır. */
+    private fun withImages(groups: List<Group>, frame: GrayFrame?): List<Group> {
+        if (frame == null) return groups
+        return groups.map { group ->
+            val icons = group.icons
+            if (icons == null) group else group.copy(icons = icons.map { ButtonIcons.withImages(it, frame) })
+        }
+    }
+
     /** Grubun gösterilecek çevirisi; çevirisi aslıyla aynıysa (ad, sayı, zaten Türkçe yazı) null. */
-    private fun item(group: Group, translations: List<String>): Item? {
+    private fun item(group: Group, prepared: List<IconText.Protected>, translations: List<String>): Item? {
         var changed = false
-        val texts = group.paragraphs.zip(translations).map { (paragraph, translation) ->
-            val text = translation.trim().ifEmpty { paragraph }
-            changed = changed || !TextMatch.isSimilar(TextMatch.normalize(paragraph), TextMatch.normalize(text), 0.90)
-            text
+        val texts = mutableListOf<String>()
+        val slots = mutableListOf<IconSlot>()
+        for ((i, paragraph) in group.paragraphs.withIndex()) {
+            val translation = translations.getOrElse(i) { "" }.trim()
+            val text = if (translation.isEmpty()) IconText.indexed(paragraph, slots.size)
+            else IconText.restore(translation, prepared[i].names, slots.size)
+            changed = changed ||
+                !TextMatch.isSimilar(TextMatch.normalize(IconText.plain(paragraph)), TextMatch.normalize(IconText.plain(text)), 0.90)
+            texts.add(text)
+            group.icons?.getOrNull(i)?.let { slots.addAll(it) }
         }
         if (!changed) return null
-        return Item(group.paragraphs.joinToString("\n"), texts.joinToString("\n"), group.box, group.lineHeight)
+        val rendered = IconText.render(texts.joinToString("\n"), slots)
+        return Item(group.paragraphs.joinToString("\n") { IconText.plain(it) }, rendered.text, group.box, group.lineHeight,
+            rendered.icons.takeIf { it.isNotEmpty() })
     }
 
     /**
@@ -92,7 +122,7 @@ object ScreenTranslation {
      * biniyorsa ve yazı boyu benziyorsa o gruba katılır. Gruplar yukarıdan aşağı, en çok [MAX_GROUPS].
      */
     fun groups(reading: Reading): List<Group> {
-        val lines = reading.withoutButtonPrompts().withoutOcrNoise().lines
+        val lines = reading.withButtonIcons().withoutButtonPrompts().withoutOcrNoise().lines
             .filter { it.box != null && ScreenText.isWords(it.text) }
             .sortedBy { it.box!!.top }
         val groups = mutableListOf<MutableList<TextLine>>()
@@ -105,7 +135,8 @@ object ScreenTranslation {
         return groups.take(MAX_GROUPS).map { group ->
             val heights = group.map { it.box!!.bottom - it.box!!.top }.sorted()
             val box = group.drop(1).fold(group[0].box!!) { total, line -> total.union(line.box!!) }
-            Group(ScreenText.paragraphs(group), box, heights[heights.size / 2])
+            val icons = ScreenText.paragraphIcons(group)
+            Group(ScreenText.paragraphs(group), box, heights[heights.size / 2], if (icons.any { it.isNotEmpty() }) icons else null)
         }
     }
 

@@ -33,7 +33,21 @@ public readonly record struct TextBox(double Left, double Top, double Right, dou
 /// Yazı tanımanın bulduğu bir satır; kutu okunan alana göredir, bilinmiyorsa null. Güven 0–1'dir; okuyucu vermiyorsa
 /// null (Windows'un yazı tanıması vermez).
 /// </summary>
-public sealed record TextLine(string Text, TextBox? Box = null, double? Confidence = null);
+/// <param name="Words">Okuyucu sözcüklerin yerini de veriyorsa (Windows yazı tanıması) sözcükler, satırla aynı oranlarda;
+/// kumanda simgesini bulmak için (<see cref="ButtonIcons"/>).</param>
+/// <param name="Icons">Metindeki her <see cref="ButtonIcons.Marker"/> için, sırasıyla, simgenin yeri ve okunan hali.</param>
+public sealed record TextLine(string Text, TextBox? Box = null, double? Confidence = null,
+                              IReadOnlyList<TextWord>? Words = null, IReadOnlyList<IconSlot>? Icons = null);
+
+/// <summary>Yazı tanımanın bulduğu bir sözcük ve yeri (okunan alanın kenarlarına oranla).</summary>
+public sealed record TextWord(string Text, TextBox Box);
+
+/// <summary>
+/// Yazının içindeki kumanda simgesi ("Hold △ to sprint"). Yazı tanıma simgeyi harf sanar ("A", "Ä") ya da hiç okumaz;
+/// <paramref name="Text"/> okunan hali (boş olabilir), <paramref name="Box"/> karedeki yeri, <paramref name="Image"/>
+/// kareden kesilen simgenin PNG'si (data: adresi; kesilemediyse null).
+/// </summary>
+public sealed record IconSlot(TextBox Box, string Text, string? Image = null);
 
 /// <summary>Bir karenin okunan satırları, yukarıdan aşağı (Mac: CouchSubsCore/Reading.swift).</summary>
 public sealed class Reading
@@ -77,8 +91,13 @@ public sealed class Reading
         Lines.Where(line => line.Confidence is not null).Select(line => line.Confidence!.Value).ToList() is { Count: > 0 } values
             ? values.Average() : null;
 
-    /// <summary>Oyunun düğme ipuçları ("R2 Swing", "△ Pick up") çıkarılmış hali; bunlar altyazı değildir.</summary>
-    public Reading WithoutButtonPrompts() => new(Lines.Where(line => !ButtonPrompts.IsPrompt(line.Text)));
+    /// <summary>
+    /// Oyunun düğme ipuçları ("R2 Swing", "△ Pick up", "Press @ to open the map") çıkarılmış hali; bunlar altyazı
+    /// değildir. Simgesi bulunmuş satır (<see cref="WithButtonIcons"/>; "Ekranı çevir" ve ek alanlar) kalır: simgesiyle
+    /// çevrilir, düğme görünür. Simgesi bulunamayan ipucu atılır; çevrilmediği için üstü örtülmez, düğme yine görünür.
+    /// </summary>
+    public Reading WithoutButtonPrompts() =>
+        new(Lines.Where(line => line.Icons is { Count: > 0 } || !ButtonPrompts.IsPrompt(line.Text)));
 
     /// <summary>
     /// Yazı tanımanın uydurduğu sözcük çöpleri ("ou$3e", "waters2aljd") ayıklanmış hali; çevirmen bunları olduğu
@@ -176,7 +195,15 @@ public sealed class Reading
     private static int WordCount(string text) => text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
 
     /// <summary>Satır kutularını <paramref name="area"/> içindeki oranlardan dış çerçevenin oranlarına taşır.</summary>
-    public Reading PlacedIn(TextBox area) => new(Lines.Select(line => line with { Box = line.Box?.PlacedIn(area) }));
+    public Reading PlacedIn(TextBox area) => new(Lines.Select(line => line with
+    {
+        Box = line.Box?.PlacedIn(area),
+        Words = line.Words?.Select(word => word with { Box = word.Box.PlacedIn(area) }).ToList(),
+        Icons = line.Icons?.Select(icon => icon with { Box = icon.Box.PlacedIn(area) }).ToList(),
+    }));
+
+    /// <summary>Yazının içindeki kumanda simgeleri <see cref="ButtonIcons.Marker"/> ile işaretlenmiş hali (bkz. <see cref="ButtonIcons.Mark"/>).</summary>
+    public Reading WithButtonIcons() => new(ButtonIcons.JoinHints(this).Lines.Select(ButtonIcons.Mark));
 }
 
 /// <summary>
@@ -272,6 +299,35 @@ public static class ButtonPrompts
         var next = all.Skip(to + 1).FirstOrDefault(token => token.Any(char.IsLetter));
         return next is not null && all.Count - to - 1 <= 10 && !Objects.Contains(next);
     }
+
+    /// <summary>
+    /// <see cref="IsIconPrompt"/> kalıbındaki satırın yazı tanıma sözcüklerinde fiilin ve "to"nun sırası; aralarında en
+    /// az bir tuş kalıntısı yoksa ya da kalıp tutmazsa null. Aradaki kalıntılar ("I LI", "(9 0", "2 and R2") simgenin
+    /// okunuşudur: <see cref="ButtonIcons.Mark"/> onları kareden kesilecek simge yapar ("Ekranı çevir" ve ek alanlarda
+    /// ipucu simgesiyle çevrilir; ana altyazıda ipucu yine atılır).
+    /// </summary>
+    internal static (int Verb, int To)? IconRemnantSpan(IReadOnlyList<string> words, string line)
+    {
+        var tokens = line.Split(Separators, StringSplitOptions.RemoveEmptyEntries)
+            .Select(token => token.Trim(Brackets)).Where(token => token.Length > 0).ToList();
+        if (!IsIconPrompt(tokens, line)) return null;
+        var verb = -1;
+        for (var i = 0; i < words.Count && verb < 0; i++)
+            if (words[i].Trim(Brackets).Any(char.IsLetter)) verb = i;
+        if (verb < 0 || !Verbs.Contains(words[verb].Trim(Brackets))) return null;
+        for (var to = verb + 2; to < words.Count && to <= verb + 4; to++)
+        {
+            if (!words[to].Trim(Brackets).Equals("to", StringComparison.OrdinalIgnoreCase)) continue;
+            var between = words.Skip(verb + 1).Take(to - verb - 1)
+                .SelectMany(word => word.Split(Separators, StringSplitOptions.RemoveEmptyEntries).Select(part => part.Trim(Brackets)))
+                .Where(part => part.Length > 0);
+            return between.All(IsIconRemnant) ? (verb, to) : null;
+        }
+        return null;
+    }
+
+    /// <summary>"and"/"or": iki tuş kalıntısının arasındaki bağlaç, simge değildir ("Release 2 and R2 to breathe out").</summary>
+    internal static bool IsConnector(string token) => Connectors.Contains(token);
 
     /// <summary>
     /// Etkileşim/HUD etiketi: en çok üç sözcük, hiç küçük harf yok (en az bir büyük harf var), cümle sonu noktalaması

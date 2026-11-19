@@ -102,8 +102,9 @@ class SubtitleServer(
          * Ek alanın çevirisi: alanın kimliği (`id`), çeviri (`text`; boşsa kutu kalkar), yazının karedeki yeri (`box`) ve
          * satır yüksekliği (`line`, ekrana oranla). TV çeviriyi o yerde küçük bir kutuda gösterir (Mac/iPhone ile aynı).
          */
-        fun regionFrame(id: String, text: String, box: TextBox?, lineHeight: Double?): String {
+        fun regionFrame(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>? = null): String {
             val json = mutableMapOf<String, Any?>("id" to id, "text" to text)
+            if (!icons.isNullOrEmpty()) json["icons"] = iconsJson(icons)
             if (box != null) json["box"] = boxJson(box)
             if (lineHeight != null) json["line"] = Json.Decimal(Math.round(lineHeight.coerceIn(0.0, 1.0) * 10000) / 10000.0)
             return frame("region", json)
@@ -120,10 +121,14 @@ class SubtitleServer(
                     "text" to item.translation,
                 )
                 if (item.paragraphs) json["paragraphs"] = true
+                item.icons?.takeIf { it.isNotEmpty() }?.let { json["icons"] = iconsJson(it) }
                 json
             }
             return frame("screen", mapOf("duration" to durationMs, "items" to list))
         }
+
+        /** Çevirinin içindeki kumanda simgeleri: düz metindeki yeri (`at`) ve PNG'si (`src`); eski TV uygulamaları yok sayar. */
+        fun iconsJson(icons: List<IconPlacement>) = icons.map { mapOf("at" to it.at, "src" to it.image) }
 
         fun styleFrame(style: SubtitleStyle) = frame(
             "style", mapOf(
@@ -196,8 +201,11 @@ class SubtitleServer(
         onEvent?.invoke(SubtitleEvent.Cleared)
     }
 
-    override fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?) {
-        broadcast(regionFrame(id, text, box, lineHeight), subtitle = true)
+    override fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?) = sendRegion(id, text, box, lineHeight, null)
+
+    /** [icons]: çevirinin içindeki kumanda simgeleri ([ButtonIcons]); `icons` alanıyla gider. */
+    override fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>?) {
+        broadcast(regionFrame(id, text, box, lineHeight, icons), subtitle = true)
         onEvent?.invoke(SubtitleEvent.Region(id, text, box))
     }
 

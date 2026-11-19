@@ -1580,8 +1580,9 @@ final class AppModel: ObservableObject {
         screenTask = Task { [weak self] in
             do {
                 let reading = try await Task.detached(priority: .userInitiated) { try reader.readLines(frame, deep: false) }.value
-                // Yapay zekâda ekranın bütün yazıları tek istekte gider (bkz. AITranslationCore.translateAll).
-                let items = try await ScreenTranslation.translate(reading, using: translator) { shown in
+                // Yapay zekâda ekranın bütün yazıları tek istekte gider (bkz. AITranslationCore.translateAll). Yazının
+                // içindeki kumanda simgeleri okunan kareden kesilip TV'de çevirinin içine konur (ButtonIcons).
+                let items = try await ScreenTranslation.translate(reading, using: translator, frame: frame) { shown in
                     guard !Task.isCancelled else { return }
                     let milliseconds = ScreenTranslation.displayMilliseconds(shown)
                     server.sendScreen(shown, durationMs: milliseconds)

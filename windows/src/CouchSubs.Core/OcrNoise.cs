@@ -23,6 +23,12 @@ public static partial class OcrNoise
         for (var index = 0; index < tokens.Length; index++)
         {
             var token = tokens[index];
+            // Kumanda simgesinin yeri (ButtonIcons.Marker) çöp değildir.
+            if (token[0] == ButtonIcons.Marker)
+            {
+                kept.Add(token);
+                continue;
+            }
             var (lead, core, trail) = Split(token);
             // Tek başına "l" ya da "|" çoğu zaman yanlış okunmuş "I"dır ("l don't know", "|'ll go"); ardından küçük
             // harfle başlayan sözcük yoksa ve token ?/! ile bitmiyorsa altyazı kutusunun kenarı olabilir.

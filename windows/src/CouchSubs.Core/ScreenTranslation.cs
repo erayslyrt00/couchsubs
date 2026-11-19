@@ -13,10 +13,14 @@ public static class ScreenTranslation
     /// <param name="Paragraphs">Grubun ayrı ayrı çevrilecek parçaları (başlık, cümle, menü satırı...).</param>
     /// <param name="Box">Grubun karedeki yeri, kenarlara oranla.</param>
     /// <param name="LineHeight">Satırlarının tipik yüksekliği, karenin yüksekliğine oranla; TV yazı boyunu buna göre seçer.</param>
-    public sealed record Group(IReadOnlyList<string> Paragraphs, TextBox Box, double LineHeight);
+    /// <param name="Icons">Her parçadaki kumanda simgeleri, parçadaki <see cref="ButtonIcons.Marker"/> sırasıyla.</param>
+    public sealed record Group(IReadOnlyList<string> Paragraphs, TextBox Box, double LineHeight,
+                               IReadOnlyList<IReadOnlyList<IconSlot>>? Icons = null);
 
     /// <param name="Translation">Parçaların çevirisi, her parça ayrı satırda.</param>
-    public sealed record Item(string Source, string Translation, TextBox Box, double LineHeight)
+    /// <param name="Icons">Çevirinin içindeki kumanda simgeleri (kareden kesilmiş); TV <c>Translation</c>'ın o yerine koyar.</param>
+    public sealed record Item(string Source, string Translation, TextBox Box, double LineHeight,
+                              IReadOnlyList<IconPlacement>? Icons = null)
     {
         /// <summary>Birden çok parça var: TV satır satır, sola yaslı gösterir.</summary>
         public bool Paragraphs => Translation.Contains('\n');
@@ -37,43 +41,51 @@ public static class ScreenTranslation
         // Küçük karede (720p) köşe yazıları birkaç piksel boyundadır; büyütmek yazı tanımanın onları da bulmasını sağlar.
         var reading = await Task.Run(() => reader.ReadLines(frame.Height < 900 ? frame.Scaled(2) : frame, false), cancellationToken)
             .ConfigureAwait(false);
-        return await TranslateAsync(reading, translator, progress, cancellationToken).ConfigureAwait(false);
+        return await TranslateAsync(reading, translator, progress, cancellationToken, frame).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Okunmuş karenin gruplarını çevirir. Çevirmen parçaları tek istekte çevirebiliyorsa (yapay zekâ) ekranın bütün
     /// parçaları birlikte gider ve sonuç bir kerede gelir; yoksa gruplar sırayla çevrilip hazırlandıkça bildirilir.
+    /// <paramref name="frame"/> okunan kareyse yazıların içindeki kumanda simgeleri ondan kesilip çeviriye konur.
     /// </summary>
     public static async Task<IReadOnlyList<Item>> TranslateAsync(
         Reading reading, ITextTranslator translator,
-        Action<IReadOnlyList<Item>>? progress = null, CancellationToken cancellationToken = default)
+        Action<IReadOnlyList<Item>>? progress = null, CancellationToken cancellationToken = default, Frame? frame = null)
     {
         var items = new List<Item>();
         var groups = Groups(reading);
+        if (frame is not null)
+            groups = [.. groups.Select(group => group.Icons is null ? group
+                : group with { Icons = [.. group.Icons.Select(icons => ButtonIcons.WithImages(icons, frame))] })];
+        // Simgeler çeviride uydurma adlarla korunur (IconText).
+        var protectedGroups = groups.Select(group => group.Paragraphs.Select(IconText.Protect).ToList()).ToList();
         if (translator.TranslatesTogether)
         {
-            var paragraphs = groups.SelectMany(group => group.Paragraphs).ToList();
+            var paragraphs = protectedGroups.SelectMany(group => group.Select(p => p.Text)).ToList();
             if (paragraphs.Count == 0) return items;
             var translations = await translator.TranslateAllAsync(paragraphs, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             var next = 0;
-            foreach (var group in groups)
+            for (var g = 0; g < groups.Count; g++)
             {
+                var group = groups[g];
                 var translated = Enumerable.Range(next, group.Paragraphs.Count)
-                    .Select(i => i < translations.Count ? translations[i] : paragraphs[i]).ToList();
+                    .Select(i => i < translations.Count ? translations[i] : "").ToList();
                 next += group.Paragraphs.Count;
-                if (Build(group, translated) is { } item) items.Add(item);
+                if (Build(group, protectedGroups[g], translated) is { } item) items.Add(item);
             }
             if (items.Count > 0) progress?.Invoke([.. items]);
             return items;
         }
-        foreach (var group in groups)
+        for (var g = 0; g < groups.Count; g++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var group = groups[g];
             var translated = new List<string>(group.Paragraphs.Count);
-            foreach (var paragraph in group.Paragraphs)
-                translated.Add(await translator.TranslateAsync(paragraph, cancellationToken).ConfigureAwait(false));
-            if (Build(group, translated) is not { } item) continue;
+            foreach (var paragraph in protectedGroups[g])
+                translated.Add(await translator.TranslateAsync(paragraph.Text, cancellationToken).ConfigureAwait(false));
+            if (Build(group, protectedGroups[g], translated) is not { } item) continue;
             items.Add(item);
             progress?.Invoke([.. items]);
         }
@@ -81,19 +93,25 @@ public static class ScreenTranslation
     }
 
     /// <summary>Grubun gösterilecek çevirisi; çevirisi aslıyla aynıysa (ad, sayı, zaten Türkçe yazı) null.</summary>
-    private static Item? Build(Group group, IReadOnlyList<string> translations)
+    private static Item? Build(Group group, IReadOnlyList<(string Text, IReadOnlyList<string> Names)> prepared,
+                               IReadOnlyList<string> translations)
     {
         var changed = false;
         var texts = new List<string>(group.Paragraphs.Count);
+        var slots = new List<IconSlot>();
         for (var i = 0; i < group.Paragraphs.Count; i++)
         {
             var paragraph = group.Paragraphs[i];
             var text = translations[i].Trim();
-            if (text.Length == 0) text = paragraph;
-            changed |= !TextMatch.IsSimilar(TextMatch.Normalize(paragraph), TextMatch.Normalize(text), 0.90);
+            text = text.Length == 0 ? IconText.Indexed(paragraph, slots.Count) : IconText.Restore(text, prepared[i].Names, slots.Count);
+            changed |= !TextMatch.IsSimilar(TextMatch.Normalize(IconText.Plain(paragraph)), TextMatch.Normalize(IconText.Plain(text)), 0.90);
             texts.Add(text);
+            slots.AddRange(group.Icons is { } all && i < all.Count ? all[i] : []);
         }
-        return changed ? new Item(string.Join('\n', group.Paragraphs), string.Join('\n', texts), group.Box, group.LineHeight) : null;
+        if (!changed) return null;
+        var (translation, placements) = IconText.Render(string.Join('\n', texts), slots);
+        return new Item(string.Join('\n', group.Paragraphs.Select(IconText.Plain)), translation, group.Box, group.LineHeight,
+                        placements.Count > 0 ? placements : null);
     }
 
     /// <summary>
@@ -103,7 +121,7 @@ public static class ScreenTranslation
     /// </summary>
     public static IReadOnlyList<Group> Groups(Reading reading)
     {
-        var lines = reading.WithoutButtonPrompts().WithoutOcrNoise().Lines
+        var lines = reading.WithButtonIcons().WithoutButtonPrompts().WithoutOcrNoise().Lines
             .Where(line => line.Box is not null && IsWords(line.Text))
             .OrderBy(line => line.Box!.Value.Top)
             .ToList();
@@ -121,7 +139,8 @@ public static class ScreenTranslation
         {
             var heights = group.Select(line => line.Box!.Value.Bottom - line.Box!.Value.Top).OrderBy(value => value).ToList();
             var box = group.Select(line => line.Box!.Value).Aggregate((a, b) => a.Union(b));
-            return new Group(Paragraphs(group), box, heights[heights.Count / 2]);
+            var icons = ParagraphIcons(group);
+            return new Group(Paragraphs(group), box, heights[heights.Count / 2], icons.Any(list => list.Count > 0) ? icons : null);
         })];
     }
 
@@ -160,6 +179,29 @@ public static class ScreenTranslation
         {
             if (result.Count > 0 && !StartsNew(result[^1], line)) result[^1] += " " + line;
             else result.Add(line);
+        }
+        return result;
+    }
+
+    /// <summary><see cref="Paragraphs"/> ile aynı bölmede her parçanın kumanda simgeleri, metindeki sırasıyla.</summary>
+    internal static IReadOnlyList<IReadOnlyList<IconSlot>> ParagraphIcons(IReadOnlyList<TextLine> lines)
+    {
+        var texts = new List<string>();
+        var result = new List<List<IconSlot>>();
+        foreach (var line in lines)
+        {
+            var text = line.Text.Trim();
+            var icons = line.Icons ?? [];
+            if (texts.Count > 0 && !StartsNew(texts[^1], text))
+            {
+                texts[^1] += " " + text;
+                result[^1].AddRange(icons);
+            }
+            else
+            {
+                texts.Add(text);
+                result.Add([.. icons]);
+            }
         }
         return result;
     }

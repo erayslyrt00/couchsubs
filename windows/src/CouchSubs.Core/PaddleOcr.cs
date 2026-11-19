@@ -247,25 +247,71 @@ public static class PaddleOcr
     /// </summary>
     public static (string Text, double Confidence) Decode(ReadOnlySpan<float> probabilities, int steps, string[] characters)
     {
+        var (text, confidence, _) = DecodeWithPlaces(probabilities, steps, characters);
+        return (text, confidence);
+    }
+
+    /// <summary>
+    /// <see cref="Decode"/> gibi; ayrıca her okunan karakterin satırdaki yeri (ortası, zaman adımı biriminde). Sözcük
+    /// yerlerini çıkarmaya yarar (<see cref="Words"/>): yazının içindeki kumanda simgesi böyle bulunur.
+    /// </summary>
+    public static (string Text, double Confidence, IReadOnlyList<(string Character, double Center)> Places) DecodeWithPlaces(
+        ReadOnlySpan<float> probabilities, int steps, string[] characters)
+    {
         var classes = characters.Length;
         var text = new System.Text.StringBuilder();
+        var places = new List<(string, double)>();
         var total = 0.0;
         var count = 0;
         var previous = -1;
-        for (var t = 0; t < steps; t++)
+        var start = 0;
+        for (var t = 0; t <= steps; t++)
         {
-            var row = probabilities.Slice(t * classes, classes);
             var best = 0;
-            for (var c = 1; c < classes; c++)
-                if (row[c] > row[best]) best = c;
-            if (best != 0 && best != previous)
+            if (t < steps)
             {
-                text.Append(characters[best]);
-                total += row[best];
-                count++;
+                var row = probabilities.Slice(t * classes, classes);
+                for (var c = 1; c < classes; c++)
+                    if (row[c] > row[best]) best = c;
+                if (best != 0 && best != previous)
+                {
+                    text.Append(characters[best]);
+                    total += row[best];
+                    count++;
+                }
             }
+            // Aynı karakterin art arda adımları bitti: yeri o adımların ortası.
+            if (previous > 0 && best != previous) places.Add((characters[previous], (start + t) / 2.0));
+            if (best != previous) start = t;
             previous = best;
         }
-        return count == 0 ? ("", 0) : (text.ToString(), total / count);
+        return count == 0 ? ("", 0, []) : (text.ToString(), total / count, places);
     }
+
+    /// <summary>
+    /// Karakter yerlerinden sözcükler: boşluk karakteri sözcükleri ayırır; her sözcük ilk ve son harfinin ortasından
+    /// yarım harf aralığı dışarı taşar (aralık, sözcüklerin içindeki harflerin ortalama uzaklığıdır). Birim zaman adımıdır.
+    /// </summary>
+    public static IReadOnlyList<(string Text, double Left, double Right)> Words(IReadOnlyList<(string Character, double Center)> places)
+    {
+        var words = new List<List<(string Character, double Center)>>();
+        var current = new List<(string, double)>();
+        foreach (var place in places)
+        {
+            if (string.IsNullOrWhiteSpace(place.Character))
+            {
+                if (current.Count > 0) words.Add(current);
+                current = [];
+            }
+            else current.Add(place);
+        }
+        if (current.Count > 0) words.Add(current);
+        var gaps = words.SelectMany(word => word.Skip(1).Select((place, i) => place.Center - word[i].Center)).Order().ToList();
+        var pitch = gaps.Count > 0 ? gaps[gaps.Count / 2] : 2.0;
+        return [.. words.Select(word => (string.Concat(word.Select(place => place.Character)),
+                                         word[0].Center - (pitch / 2), word[^1].Center + (pitch / 2)))];
+    }
+
+    /// <summary>Çince, Japonca ve Korece karakterleri atar (<see cref="LatinOnly"/>'nin sözcük karşılığı; harfsiz sözcük kalır).</summary>
+    public static string WithoutCjk(string text) => new([.. text.Where(c => !IsCjk(c))]);
 }

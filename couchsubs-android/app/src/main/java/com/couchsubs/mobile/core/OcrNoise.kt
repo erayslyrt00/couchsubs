@@ -18,6 +18,11 @@ object OcrNoise {
         val kept = mutableListOf<String>()
         val tokens = line.split(Regex("\\s+")).filter { it.isNotEmpty() }
         for ((index, token) in tokens.withIndex()) {
+            // Kumanda simgesinin yeri (ButtonIcons.MARKER) çöp değildir.
+            if (token[0] == ButtonIcons.MARKER) {
+                kept.add(token)
+                continue
+            }
             val (lead, core, trail) = split(token)
             // Tek başına "l" ya da "|" çoğu zaman yanlış okunmuş "I"dır; ardından küçük harfle başlayan sözcük yoksa
             // ve token ?/! ile bitmiyorsa altyazı kutusunun kenarı olabilir.

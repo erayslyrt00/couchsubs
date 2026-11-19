@@ -16,6 +16,11 @@ public enum OcrNoise {
         var kept: [String] = []
         let tokens = line.split(whereSeparator: \.isWhitespace).map(String.init)
         for (index, token) in tokens.enumerated() {
+            // Kumanda simgesinin yeri (`ButtonIcons.marker`) çöp değildir.
+            if token.unicodeScalars.first == ButtonIcons.markerScalar {
+                kept.append(token)
+                continue
+            }
             let (lead, core, trail) = split(token)
             // Tek başına "l" ya da "|" çoğu zaman yanlış okunmuş "I"dır ("l don't know", "|'ll go"); ardından küçük
             // harfle başlayan sözcük yoksa ve token ?/! ile bitmiyorsa altyazı kutusunun kenarı olabilir.

@@ -69,6 +69,13 @@ html, body {
   overflow: hidden;
 }
 #screen .item.paragraphs { text-align: left; white-space: pre-line; }
+/* Çevirinin içindeki kumanda simgesi (oyun karesinden kesilmiş): yazı boyunda, satırın ortasında. */
+#screen .icon, #regions .icon {
+  height: 1.15em;
+  width: auto;
+  margin: 0 0.2em;
+  vertical-align: -0.25em;
+}
 
 /* Ek alanlar (görev, telefon, bildirim): çeviri İngilizce yazının yerinde küçük bir kutuda; altyazının ve "ekranı
    çevir"in altında kalır. */

@@ -85,13 +85,37 @@ public struct VisionReader: TextReader {
             .compactMap { observation -> TextLine? in
                 guard let candidate = observation.topCandidates(1).first, candidate.confidence >= 0.5 else { return nil }
                 // Vision'ın kutusu sol alttan ölçülür; burada üstten ölçülür.
-                let box = observation.boundingBox
-                return TextLine(candidate.string.trimmingCharacters(in: .whitespacesAndNewlines),
-                                box: TextBox(left: box.minX, top: 1 - box.maxY, right: box.maxX, bottom: 1 - box.minY),
-                                confidence: Double(candidate.confidence))
+                let box = Self.textBox(observation.boundingBox)
+                return TextLine(candidate.string.trimmingCharacters(in: .whitespacesAndNewlines), box: box,
+                                confidence: Double(candidate.confidence), words: Self.words(of: candidate, in: box))
             }
             .sorted { ($0.box?.top ?? 0) < ($1.box?.top ?? 0) }
         return Reading(lines: lines)
+    }
+
+    private static func textBox(_ rect: CGRect) -> TextBox {
+        TextBox(left: rect.minX, top: 1 - rect.maxY, right: rect.maxX, bottom: 1 - rect.minY)
+    }
+
+    /// Boşlukla ayrılan her sözcüğün yeri (`VNRecognizedText.boundingBox(for:)`); yazının içindeki kumanda simgesini
+    /// bulmaya yarar (`ButtonIcons`, Windows: WindowsOcrReader sözcük kutuları). Vision bazı sürümlerde sözcük yerine
+    /// bütün satırın kutusunu verebilir; sözcükler soldan sağa sıralı değilse ya da biri satırın neredeyse tamamını
+    /// kaplıyorsa sözcük yerleri kullanılmaz (nil: yerler harf sayısına göre kestirilir).
+    static func words(of candidate: VNRecognizedText, in line: TextBox) -> [TextWord]? {
+        let text = candidate.string
+        var words: [TextWord] = []
+        for word in text.split(whereSeparator: \.isWhitespace) {
+            guard let observation = try? candidate.boundingBox(for: word.startIndex..<word.endIndex) else { return nil }
+            words.append(TextWord(String(word), box: textBox(observation.boundingBox)))
+        }
+        guard !words.isEmpty else { return nil }
+        let lineWidth = line.right - line.left
+        for (index, word) in words.enumerated() {
+            guard word.box.right > word.box.left else { return nil }
+            if words.count > 1, word.box.right - word.box.left >= lineWidth * 0.9 { return nil }
+            if index > 0, word.box.left < words[index - 1].box.left { return nil }
+        }
+        return words
     }
 
     private static func stripRect(of image: CGImage, widthFraction: Double) -> CGRect {

@@ -2,9 +2,11 @@
 package com.couchsubs.mobile.ocr
 
 import com.couchsubs.mobile.core.CropRegion
+import com.couchsubs.mobile.core.GrayFrame
 import com.couchsubs.mobile.core.Reading
 import com.couchsubs.mobile.core.TextBox
 import com.couchsubs.mobile.core.TextLine
+import com.couchsubs.mobile.core.TextWord
 import com.couchsubs.mobile.remoteplay.VideoFrame
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
@@ -13,7 +15,10 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.util.concurrent.TimeUnit
 
 /** Karenin altyazı bölgesinden kopyalanmış parlaklık (Y) düzlemi: yazı tanımaya bu gider, kare hemen bırakılır. */
-class RegionPixels(val nv21: ByteArray, val width: Int, val height: Int, val signature: Long)
+class RegionPixels(val nv21: ByteArray, val width: Int, val height: Int, val signature: Long) {
+    /** Kumanda simgelerinin kesileceği gri kare (NV21'in başı parlaklık düzlemidir; kopya alınmaz). */
+    val gray: GrayFrame get() = GrayFrame(nv21, width, height)
+}
 
 /**
  * Altyazı bölgesini Google ML Kit (cihaz üstü, Latin modeli uygulamayla gelir) ile okur. Renk gerekmez: yalnız parlaklık
@@ -64,7 +69,16 @@ class SubtitleReader : AutoCloseable {
                         it.right.toDouble() / pixels.width, it.bottom.toDouble() / pixels.height,
                     )
                 }
-                lines.add(TextLine(line.text, box))
+                // Sözcük yerleri yazının içindeki kumanda simgesini bulmaya yarar (ButtonIcons); yeri eksik sözcük varsa hiçbiri verilmez.
+                val words = line.elements.mapNotNull { element ->
+                    element.boundingBox?.let {
+                        TextWord(element.text, TextBox(
+                            it.left.toDouble() / pixels.width, it.top.toDouble() / pixels.height,
+                            it.right.toDouble() / pixels.width, it.bottom.toDouble() / pixels.height,
+                        ))
+                    }
+                }
+                lines.add(TextLine(line.text, box, words = if (words.isNotEmpty() && words.size == line.elements.size) words else null))
             }
         }
         // Yukarıdan aşağı (ML Kit blok sırası her zaman öyle değil).

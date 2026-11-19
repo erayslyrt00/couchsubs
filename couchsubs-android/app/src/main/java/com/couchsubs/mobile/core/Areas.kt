@@ -139,6 +139,25 @@ object ScreenText {
         return result
     }
 
+    /** [paragraphs] ile aynı bölmede her parçanın kumanda simgeleri, metindeki sırasıyla (Windows: ScreenTranslation.ParagraphIcons). */
+    fun paragraphIcons(lines: List<TextLine>): List<List<IconSlot>> {
+        val texts = mutableListOf<String>()
+        val result = mutableListOf<MutableList<IconSlot>>()
+        for (line in lines) {
+            val text = line.text.trim()
+            val icons = line.icons ?: emptyList()
+            val previous = texts.lastOrNull()
+            if (previous != null && !startsNew(previous, text)) {
+                texts[texts.size - 1] = "$previous $text"
+                result[result.size - 1].addAll(icons)
+            } else {
+                texts.add(text)
+                result.add(icons.toMutableList())
+            }
+        }
+        return result
+    }
+
     private fun startsNew(previous: String, line: String): Boolean {
         if (SubtitleStabilizer.endsSentence(previous)) return true
         return line.firstOrNull()?.isUpperCase() == true && previous.split(Regex("\\s+")).count { it.isNotEmpty() } <= 3 && !previous.endsWith(",")
@@ -192,6 +211,11 @@ object RegionSignature {
 interface RegionSender {
     /** [text] boşsa alanın kutusu kalkar. */
     fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?)
+
+    /** Çevirinin içinde kumanda simgeleri varsa ([ButtonIcons]); simgeyi bilmeyen gönderici düz metni yollar. */
+    fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>?) =
+        sendRegion(id, text, box, lineHeight)
+
     fun clearRegions()
 }
 
@@ -213,9 +237,12 @@ class RegionWatcher(
     companion object {
         const val DEFAULT_INTERVAL_MS = 1000L
 
-        /** Okumadan çevrilecek parçalar, kutusu (kareye oranla) ve satır yüksekliği. */
-        fun candidate(reading: Reading, region: CropRegion): Candidate {
-            val lines = reading.withoutButtonPrompts().withoutOcrNoise().lines
+        /**
+         * Okumadan çevrilecek parçalar, kutusu (kareye oranla) ve satır yüksekliği. Yazının içindeki kumanda simgeleri
+         * [frame]'den (okunan alan) kesilir; çeviride yerleri korunur.
+         */
+        fun candidate(reading: Reading, region: CropRegion, frame: GrayFrame? = null): Candidate {
+            val lines = reading.withButtonIcons().withoutButtonPrompts().withoutOcrNoise().lines
                 .filter { ScreenText.isWords(it.text) }
                 .sortedBy { it.box?.top ?: 0.0 }
             val paragraphs = ScreenText.paragraphs(lines)
@@ -223,14 +250,20 @@ class RegionWatcher(
             val box = boxes.reduceOrNull { a, b -> a.union(b) }?.placedIn(region.box)
             val heights = boxes.map { (it.bottom - it.top) * (region.bottom - region.top) }.sorted()
             val lineHeight = if (heights.isEmpty()) null else heights[heights.size / 2]
-            return Candidate(paragraphs, box, lineHeight, TextMatch.normalize(paragraphs.joinToString(" ")))
+            val icons = ScreenText.paragraphIcons(lines)
+            val cut = if (frame == null || icons.all { it.isEmpty() }) null else icons.map { ButtonIcons.withImages(it, frame) }
+            return Candidate(paragraphs, box, lineHeight, TextMatch.normalize(paragraphs.joinToString(" ")), cut)
         }
     }
 
-    /** Bir alanın karesi: okunacak gri görüntü ve izi. */
-    class Crop(val pixels: Any, val signature: ByteArray)
+    /** Bir alanın karesi: okunacak gri görüntü ve izi; [frame] kumanda simgelerinin kesileceği aynı görüntü. */
+    class Crop(val pixels: Any, val signature: ByteArray, val frame: GrayFrame? = null)
 
-    data class Candidate(val paragraphs: List<String>, val box: TextBox?, val lineHeight: Double?, val key: String)
+    /** [icons]: her parçadaki kumanda simgeleri (kareden kesilmiş), parçadaki sırasıyla. */
+    data class Candidate(
+        val paragraphs: List<String>, val box: TextBox?, val lineHeight: Double?, val key: String,
+        val icons: List<List<IconSlot>>? = null,
+    )
 
     private class State {
         var signature: ByteArray? = null
@@ -239,6 +272,7 @@ class RegionWatcher(
         var shown = ""
         var renderedKey: String? = null
         var renderedText: String? = null
+        var renderedIcons: List<IconPlacement>? = null
         var renderedBox: TextBox? = null
         var renderedLineHeight: Double? = null
     }
@@ -321,7 +355,7 @@ class RegionWatcher(
         }
         if (started != session) return
         reads++
-        val candidate = candidate(reading, area.region)
+        val candidate = candidate(reading, area.region, crop.frame)
         if (state.lastRead == candidate.key) {
             state.candidate = null
             commit(candidate, area, state, started)
@@ -336,7 +370,7 @@ class RegionWatcher(
             val text = state.renderedText
             if (state.renderedKey != candidate.key || text.isNullOrEmpty()) return
             if (state.renderedBox == candidate.box && state.renderedLineHeight == candidate.lineHeight) return
-            sender.sendRegion(area.id, text, candidate.box, candidate.lineHeight)
+            sender.sendRegion(area.id, text, candidate.box, candidate.lineHeight, state.renderedIcons)
             state.renderedBox = candidate.box
             state.renderedLineHeight = candidate.lineHeight
             return
@@ -347,14 +381,18 @@ class RegionWatcher(
             sender.sendRegion(area.id, "", null, null)
             state.renderedKey = candidate.key
             state.renderedText = ""
+            state.renderedIcons = null
             state.renderedBox = null
             state.renderedLineHeight = null
             return
         }
+        // Simgeler paket aramasında yok sayılır, çeviride uydurma adlarla korunur (IconText).
+        val prepared = candidate.paragraphs.map { IconText.protect(it) }
         val translated = try {
             // Zaten Türkçe olan parça çevrilmez: aslı kalır, tümü öyleyse kutu gösterilmez.
-            candidate.paragraphs.map {
-                packLookup?.invoke(it)?.text ?: if (skipsTurkish && TurkishText.isSure(it)) it else translator.translate(it)
+            candidate.paragraphs.mapIndexed { i, paragraph ->
+                packLookup?.invoke(IconText.plain(paragraph))?.text
+                    ?: if (skipsTurkish && TurkishText.isSure(paragraph)) paragraph else translator.translate(prepared[i].text)
             }
         } catch (error: Exception) {
             // Çevrilemedi: önceki yazı kutuda kalır, aynı yazı sonraki turda yeniden denenir.
@@ -365,18 +403,29 @@ class RegionWatcher(
             return
         }
         if (started != session || state.shown != candidate.key) return
-        val text = candidate.paragraphs.zip(translated).map { (source, translation) -> translation.trim().ifEmpty { source } }
+        val slots = mutableListOf<IconSlot>()
+        val text = mutableListOf<String>()
+        for ((i, source) in candidate.paragraphs.withIndex()) {
+            val translation = translated[i].trim()
+            text.add(if (translation.isEmpty()) IconText.indexed(source, slots.size) else IconText.restore(translation, prepared[i].names, slots.size))
+            candidate.icons?.getOrNull(i)?.let { slots.addAll(it) }
+        }
         // Çevirisi aslıyla aynı (ad, sayı, zaten hedef dilde): kutu gösterilmez.
-        val same = candidate.paragraphs.zip(text).all { (a, b) -> TextMatch.isSimilar(TextMatch.normalize(a), TextMatch.normalize(b), 0.90) }
+        val same = candidate.paragraphs.zip(text).all { (a, b) ->
+            TextMatch.isSimilar(TextMatch.normalize(IconText.plain(a)), TextMatch.normalize(IconText.plain(b)), 0.90)
+        }
         if (same) {
             sender.sendRegion(area.id, "", null, null)
             state.renderedText = ""
+            state.renderedIcons = null
             state.renderedBox = null
             state.renderedLineHeight = null
         } else {
-            val joined = text.joinToString("\n")
-            sender.sendRegion(area.id, joined, candidate.box, candidate.lineHeight)
-            state.renderedText = joined
+            val rendered = IconText.render(text.joinToString("\n"), slots)
+            val icons = rendered.icons.takeIf { it.isNotEmpty() }
+            sender.sendRegion(area.id, rendered.text, candidate.box, candidate.lineHeight, icons)
+            state.renderedText = rendered.text
+            state.renderedIcons = icons
             state.renderedBox = candidate.box
             state.renderedLineHeight = candidate.lineHeight
         }

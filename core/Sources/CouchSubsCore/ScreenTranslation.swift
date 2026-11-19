@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import CoreGraphics
 import Foundation
 
 /// "Ekranı çevir": karenin tamamı bir kez okunur, yazılar yerlerine göre gruplara ayrılır (menü, görev paneli, bilgi
@@ -14,6 +15,8 @@ public enum ScreenTranslation {
         public var box: TextBox
         /// Satırlarının tipik yüksekliği, karenin yüksekliğine oranla; TV yazı boyunu buna göre seçer.
         public var lineHeight: Double
+        /// Her parçadaki kumanda simgeleri, parçadaki `ButtonIcons.marker` sırasıyla; simge yoksa nil.
+        public var icons: [[IconSlot]]? = nil
     }
 
     public struct Item: Equatable, Sendable {
@@ -22,12 +25,15 @@ public enum ScreenTranslation {
         public var translation: String
         public var box: TextBox
         public var lineHeight: Double
+        /// Çevirinin içindeki kumanda simgeleri (kareden kesilmiş); TV `translation`'ın o yerine koyar.
+        public var icons: [IconPlacement]?
 
-        public init(source: String, translation: String, box: TextBox, lineHeight: Double) {
+        public init(source: String, translation: String, box: TextBox, lineHeight: Double, icons: [IconPlacement]? = nil) {
             self.source = source
             self.translation = translation
             self.box = box
             self.lineHeight = lineHeight
+            self.icons = icons
         }
 
         /// Birden çok parça var: TV satır satır, sola yaslı gösterir.
@@ -38,15 +44,17 @@ public enum ScreenTranslation {
     public static let maxGroups = 30
 
     /// Grupları sırayla çevirir; her grup çevrilince o ana kadarki sonuçlarla `progress` çağrılır. Çevirisi aslıyla
-    /// aynı olan (ad, sayı, zaten Türkçe yazı) grup gösterilmez.
+    /// aynı olan (ad, sayı, zaten Türkçe yazı) grup gösterilmez. `frame` okunan kareyse yazıların içindeki kumanda
+    /// simgeleri ondan kesilip çeviriye konur; simgelerin yeri çeviride uydurma adlarla korunur (`IconText`).
     public static func translate(_ reading: Reading, using translate: (String) async throws -> String,
-                                 progress: ([Item]) -> Void = { _ in }) async throws -> [Item] {
+                                 frame: CGImage? = nil, progress: ([Item]) -> Void = { _ in }) async throws -> [Item] {
         var items: [Item] = []
-        for group in groups(reading) {
+        for group in withImages(groups(reading), from: frame) {
             try Task.checkCancellation()
+            let prepared = group.paragraphs.map(IconText.protect)
             var translated: [String] = []
-            for paragraph in group.paragraphs { translated.append(try await translate(paragraph)) }
-            guard let item = item(group, translated) else { continue }
+            for paragraph in prepared { translated.append(try await translate(paragraph.text)) }
+            guard let item = item(group, prepared, translated) else { continue }
             items.append(item)
             progress(items)
         }
@@ -54,48 +62,68 @@ public enum ScreenTranslation {
     }
 
     /// Çevirmen parçaları tek istekte çevirebiliyorsa (yapay zekâ) ekranın bütün parçaları birlikte gider ve sonuç bir
-    /// kerede gelir; yoksa gruplar sırayla çevrilip hazırlandıkça bildirilir.
-    public static func translate(_ reading: Reading, using translator: TextTranslator,
+    /// kerede gelir; yoksa gruplar sırayla çevrilip hazırlandıkça bildirilir. `frame`: bkz. yukarıdaki `translate`.
+    public static func translate(_ reading: Reading, using translator: TextTranslator, frame: CGImage? = nil,
                                  progress: ([Item]) -> Void = { _ in }) async throws -> [Item] {
         guard translator.translatesTogether else {
-            return try await translate(reading, using: { try await translator.translate($0) }, progress: progress)
+            return try await translate(reading, using: { try await translator.translate($0) }, frame: frame, progress: progress)
         }
-        let groups = groups(reading)
-        let paragraphs = groups.flatMap(\.paragraphs)
+        let groups = withImages(groups(reading), from: frame)
+        let prepared = groups.map { group in group.paragraphs.map(IconText.protect) }
+        let paragraphs = prepared.flatMap { list in list.map { $0.text } }
         guard !paragraphs.isEmpty else { return [] }
         let translations = try await translator.translateAll(paragraphs)
         try Task.checkCancellation()
         var items: [Item] = []
         var next = 0
-        for group in groups {
+        for (index, group) in groups.enumerated() {
             let count = group.paragraphs.count
-            let translated = (next..<next + count).map { $0 < translations.count ? translations[$0] : paragraphs[$0] }
+            let translated = (next..<next + count).map { $0 < translations.count ? translations[$0] : "" }
             next += count
-            if let item = item(group, translated) { items.append(item) }
+            if let item = item(group, prepared[index], translated) { items.append(item) }
         }
         if !items.isEmpty { progress(items) }
         return items
     }
 
-    /// Grubun gösterilecek çevirisi; çevirisi aslıyla aynıysa (ad, sayı, zaten Türkçe yazı) nil.
-    private static func item(_ group: Group, _ translations: [String]) -> Item? {
-        var changed = false
-        let texts = zip(group.paragraphs, translations).map { paragraph, translation in
-            var text = translation.trimmingCharacters(in: .whitespacesAndNewlines)
-            if text.isEmpty { text = paragraph }
-            changed = changed || !TextMatch.isSimilar(TextMatch.normalize(paragraph), TextMatch.normalize(text), threshold: 0.90)
-            return text
+    /// Simgelerin resimleri kareden kesilir; kare yoksa gruplar olduğu gibi kalır (simge okunan haliyle yazılır).
+    private static func withImages(_ groups: [Group], from frame: CGImage?) -> [Group] {
+        guard let frame else { return groups }
+        return groups.map { group in
+            guard let icons = group.icons else { return group }
+            var cut = group
+            cut.icons = icons.map { ButtonIcons.withImages($0, frame: frame) }
+            return cut
         }
-        guard changed else { return nil }
-        return Item(source: group.paragraphs.joined(separator: "\n"), translation: texts.joined(separator: "\n"),
-                    box: group.box, lineHeight: group.lineHeight)
     }
 
-    /// Satırları gruplara toplar. Kumanda ipuçları ve yazı tanıma çöpleri atılır; harfi olmayan ya da tek harfli satırlar
-    /// ("23m", "9", "+") göstergedir, çevrilmez. Bir satır, üstündeki satırın hemen altındaysa, yatayda onunla üst üste
-    /// biniyorsa ve yazı boyu benziyorsa o gruba katılır. Gruplar yukarıdan aşağı, en çok `maxGroups`.
+    /// Grubun gösterilecek çevirisi; çevirisi aslıyla aynıysa (ad, sayı, zaten Türkçe yazı) nil. Boş çeviride parçanın
+    /// aslı gösterilir; simgeler TV'de çevirinin içindeki yerlerine konur.
+    private static func item(_ group: Group, _ prepared: [IconText.Protected], _ translations: [String]) -> Item? {
+        var changed = false
+        var texts: [String] = []
+        var slots: [IconSlot] = []
+        for (index, paragraph) in group.paragraphs.enumerated() {
+            let translated = (index < translations.count ? translations[index] : "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = translated.isEmpty ? IconText.indexed(paragraph, offset: slots.count)
+                : IconText.restore(translated, names: index < prepared.count ? prepared[index].names : [], offset: slots.count)
+            changed = changed || !TextMatch.isSimilar(TextMatch.normalize(IconText.plain(paragraph)),
+                                                      TextMatch.normalize(IconText.plain(text)), threshold: 0.90)
+            texts.append(text)
+            if let all = group.icons, index < all.count { slots += all[index] }
+        }
+        guard changed else { return nil }
+        let rendered = IconText.render(texts.joined(separator: "\n"), slots: slots)
+        return Item(source: group.paragraphs.map(IconText.plain).joined(separator: "\n"), translation: rendered.text,
+                    box: group.box, lineHeight: group.lineHeight, icons: rendered.icons.isEmpty ? nil : rendered.icons)
+    }
+
+    /// Satırları gruplara toplar. Yazının içindeki kumanda simgeleri işaretlenir (`ButtonIcons`); kumanda ipuçları ve
+    /// yazı tanıma çöpleri atılır; harfi olmayan ya da tek harfli satırlar ("23m", "9", "+") göstergedir, çevrilmez. Bir
+    /// satır, üstündeki satırın hemen altındaysa, yatayda onunla üst üste biniyorsa ve yazı boyu benziyorsa o gruba
+    /// katılır. Gruplar yukarıdan aşağı, en çok `maxGroups`.
     public static func groups(_ reading: Reading) -> [Group] {
-        let lines = reading.withoutButtonPrompts().withoutOcrNoise().lines
+        let lines = reading.withButtonIcons().withoutButtonPrompts().withoutOcrNoise().lines
             .filter { $0.box != nil && isWords($0.text) }
             .sorted { $0.box!.top < $1.box!.top }
         var groups: [[TextLine]] = []
@@ -111,7 +139,9 @@ public enum ScreenTranslation {
         return groups.prefix(maxGroups).map { group in
             let heights = group.map { $0.box!.bottom - $0.box!.top }.sorted()
             let box = group.dropFirst().reduce(group[0].box!) { $0.union($1.box!) }
-            return Group(paragraphs: paragraphs(group), box: box, lineHeight: heights[heights.count / 2])
+            let icons = paragraphIcons(group)
+            return Group(paragraphs: paragraphs(group), box: box, lineHeight: heights[heights.count / 2],
+                         icons: icons.contains(where: { !$0.isEmpty }) ? icons : nil)
         }
     }
 
@@ -146,6 +176,24 @@ public enum ScreenTranslation {
                 result[result.count - 1] += " " + line
             } else {
                 result.append(line)
+            }
+        }
+        return result
+    }
+
+    /// `paragraphs` ile aynı bölmede her parçanın kumanda simgeleri, metindeki sırasıyla.
+    static func paragraphIcons(_ lines: [TextLine]) -> [[IconSlot]] {
+        var texts: [String] = []
+        var result: [[IconSlot]] = []
+        for line in lines {
+            let text = line.text.trimmingCharacters(in: .whitespaces)
+            let icons = line.icons ?? []
+            if let previous = texts.last, !startsNew(after: previous, text) {
+                texts[texts.count - 1] += " " + text
+                result[result.count - 1] += icons
+            } else {
+                texts.append(text)
+                result.append(icons)
             }
         }
         return result

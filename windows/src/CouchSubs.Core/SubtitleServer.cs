@@ -260,6 +260,7 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
                 ["text"] = item.Translation,
             };
             if (item.Paragraphs) json["paragraphs"] = true;
+            if (item.Icons is { Count: > 0 } icons) json["icons"] = IconsJson(icons);
             return json;
         }).ToList();
         Broadcast(Frame("screen", new SortedDictionary<string, object> { ["duration"] = durationMs, ["items"] = list }), subtitle: true);
@@ -274,9 +275,17 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
     /// yazının karedeki yerini (<c>box</c>) ve satır yüksekliğini (<c>line</c>) taşır. TV çeviriyi o yerde küçük bir kutuda
     /// gösterir; ana altyazıya dokunmaz. Olayı tanımayan eski TV uygulamaları yok sayar (Mac ile aynı).
     /// </summary>
-    public void SendRegion(string id, string text, TextBox? box, double? lineHeight = null)
+    public void SendRegion(string id, string text, TextBox? box, double? lineHeight = null) =>
+        SendRegion(id, text, box, lineHeight, null);
+
+    /// <summary>
+    /// <paramref name="icons"/>: çevirinin içindeki kumanda simgeleri; <c>icons</c> alanı her simgenin düz metindeki
+    /// yerini (<c>at</c>) ve PNG'sini (<c>src</c>) taşır. Eski TV uygulamaları alanı yok sayıp düz metni gösterir.
+    /// </summary>
+    public void SendRegion(string id, string text, TextBox? box, double? lineHeight, IReadOnlyList<IconPlacement>? icons)
     {
         var json = new SortedDictionary<string, object> { ["id"] = id, ["text"] = text };
+        if (icons is { Count: > 0 }) json["icons"] = IconsJson(icons);
         if (box is { } b) json["box"] = BoxJson(b);
         if (lineHeight is { } line) json["line"] = Round(line);
         Broadcast(Frame("region", json), subtitle: true);
@@ -296,6 +305,9 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
         Broadcast(Frame("screen-clear", new SortedDictionary<string, object>()), subtitle: true);
         EventSent?.Invoke(new SubtitleEvent(SubtitleEventKind.ScreenClear));
     }
+
+    private static List<SortedDictionary<string, object>> IconsJson(IReadOnlyList<IconPlacement> icons) =>
+        [.. icons.Select(icon => new SortedDictionary<string, object> { ["at"] = icon.At, ["src"] = icon.Image })];
 
     private static SortedDictionary<string, object> BoxJson(TextBox b) => new()
     {

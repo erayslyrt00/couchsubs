@@ -44,11 +44,46 @@ public struct TextLine: Equatable, Sendable {
     public var box: TextBox?
     /// Yazı tanımanın bu satırdan ne kadar emin olduğu (0–1); okuyucu vermiyorsa nil.
     public var confidence: Double?
+    /// Okuyucu sözcüklerin yerini de veriyorsa (Vision) sözcükler, satırla aynı oranlarda; kumanda simgesini bulmak
+    /// için (`ButtonIcons`).
+    public var words: [TextWord]?
+    /// Metindeki her `ButtonIcons.marker` için, sırasıyla, simgenin yeri ve okunan hali.
+    public var icons: [IconSlot]?
 
-    public init(_ text: String, box: TextBox? = nil, confidence: Double? = nil) {
+    public init(_ text: String, box: TextBox? = nil, confidence: Double? = nil, words: [TextWord]? = nil, icons: [IconSlot]? = nil) {
         self.text = text
         self.box = box
         self.confidence = confidence
+        self.words = words
+        self.icons = icons
+    }
+}
+
+/// Yazı tanımanın bulduğu bir sözcük ve yeri (okunan alanın kenarlarına oranla).
+public struct TextWord: Equatable, Sendable {
+    public var text: String
+    public var box: TextBox
+
+    public init(_ text: String, box: TextBox) {
+        self.text = text
+        self.box = box
+    }
+}
+
+/// Yazının içindeki kumanda simgesi ("Hold △ to sprint"). Yazı tanıma simgeyi harf sanar ("A", "Ä") ya da hiç okumaz
+/// (Windows: Reading.cs, IconSlot).
+public struct IconSlot: Equatable, Sendable {
+    /// Karedeki yeri (okunan alanın kenarlarına oranla).
+    public var box: TextBox
+    /// Okunan hali (boş olabilir); simge kesilemezse TV'de bu yazılır.
+    public var text: String
+    /// Kareden kesilen simgenin PNG'si (data: adresi); kesilemediyse nil.
+    public var image: String?
+
+    public init(box: TextBox, text: String, image: String? = nil) {
+        self.box = box
+        self.text = text
+        self.image = image
     }
 }
 
@@ -80,15 +115,22 @@ public struct Reading: Equatable, Sendable {
         return values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
     }
 
-    /// Oyunun düğme ipuçları ("R2 Swing", "△ Pick up") çıkarılmış hali; bunlar altyazı değildir.
+    /// Oyunun düğme ipuçları ("R2 Swing", "△ Pick up", "Press @ to open the map") çıkarılmış hali; bunlar altyazı
+    /// değildir. Simgesi bulunmuş satır (`withButtonIcons`; "Ekranı çevir" ve ek alanlar) kalır: simgesiyle çevrilir,
+    /// düğme görünür. Simgesi bulunamayan ipucu atılır; çevrilmediği için üstü örtülmez (Windows: WithoutButtonPrompts).
     public func withoutButtonPrompts() -> Reading {
-        Reading(lines: lines.filter { !ButtonPrompts.isPrompt($0.text) })
+        Reading(lines: lines.filter { !($0.icons ?? []).isEmpty || !ButtonPrompts.isPrompt($0.text) })
     }
 
     /// Yazı tanımanın uydurduğu sözcük çöpleri ("ou$3e", "waters2aljd") ayıklanmış hali; çevirmen bunları olduğu
     /// gibi taşıyıp TV'de anlamsız harfler gösteriyordu.
     public func withoutOcrNoise() -> Reading {
-        Reading(lines: lines.map { TextLine(OcrNoise.clean($0.text), box: $0.box, confidence: $0.confidence) })
+        // Sözcük ve simge yerleri korunur (simgenin imi çöp sayılmaz, bkz. `OcrNoise.clean`).
+        Reading(lines: lines.map { line in
+            var cleaned = line
+            cleaned.text = OcrNoise.clean(line.text)
+            return cleaned
+        })
     }
 
     /// Aynı satırda yan yana okunan parçalar soldan sağa tek satır olur. Renkli konuşan adını ("Arthur:", RDR2) yazı
@@ -171,7 +213,18 @@ public struct Reading: Equatable, Sendable {
 
     /// Satır kutularını `area` içindeki oranlardan dış çerçevenin oranlarına taşır.
     public func placed(in area: TextBox) -> Reading {
-        Reading(lines: lines.map { TextLine($0.text, box: $0.box?.placed(in: area), confidence: $0.confidence) })
+        Reading(lines: lines.map { line in
+            var moved = line
+            moved.box = line.box?.placed(in: area)
+            moved.words = line.words?.map { TextWord($0.text, box: $0.box.placed(in: area)) }
+            moved.icons = line.icons?.map { IconSlot(box: $0.box.placed(in: area), text: $0.text, image: $0.image) }
+            return moved
+        })
+    }
+
+    /// Yazının içindeki kumanda simgeleri `ButtonIcons.marker` ile işaretlenmiş hali (bkz. `ButtonIcons.mark`).
+    public func withButtonIcons() -> Reading {
+        Reading(lines: ButtonIcons.joinHints(self).lines.map(ButtonIcons.mark))
     }
 }
 
@@ -252,6 +305,34 @@ public enum ButtonPrompts {
         guard let next = rest.first else { return false }
         return all.count - to - 1 <= 10 && !objects.contains(next.lowercased())
     }
+
+    /// `isIconPrompt` kalıbındaki satırın yazı tanıma sözcüklerinde fiilin ve "to"nun sırası; aralarında en az bir tuş
+    /// kalıntısı yoksa ya da kalıp tutmazsa nil. Aradaki kalıntılar ("I LI", "(9 0", "2 and R2") simgenin okunuşudur:
+    /// `ButtonIcons.mark` onları kareden kesilecek simge yapar (Windows: ButtonPrompts.IconRemnantSpan).
+    static func iconRemnantSpan(_ words: [String], line: String) -> (verb: Int, to: Int)? {
+        let separators = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "+/"))
+        let tokens = line.components(separatedBy: separators)
+            .map { $0.trimmingCharacters(in: brackets) }
+            .filter { !$0.isEmpty }
+        guard isIconPrompt(tokens, line: line),
+              let verb = words.firstIndex(where: { $0.trimmingCharacters(in: brackets).contains(where: \.isLetter) }),
+              verbs.contains(words[verb].trimmingCharacters(in: brackets).lowercased()) else { return nil }
+        var to = verb + 2
+        while to < words.count && to <= verb + 4 {
+            if words[to].trimmingCharacters(in: brackets).lowercased() == "to" {
+                let between = words[(verb + 1)..<to]
+                    .flatMap { $0.components(separatedBy: separators) }
+                    .map { $0.trimmingCharacters(in: brackets) }
+                    .filter { !$0.isEmpty }
+                return between.allSatisfy(isIconRemnant) ? (verb, to) : nil
+            }
+            to += 1
+        }
+        return nil
+    }
+
+    /// "and"/"or": iki tuş kalıntısının arasındaki bağlaç, simge değildir ("Release 2 and R2 to breathe out").
+    static func isConnector(_ token: String) -> Bool { connectors.contains(token.lowercased()) }
 
     /// Etkileşim/HUD etiketi: en çok üç sözcük, hiç küçük harf yok (en az bir büyük harf var), cümle sonu noktalaması
     /// yok. GTA 6'nın etkileşim yazıları ("TAKE AMMO PACK (0/3)", "• ADD TO TRUNK", "TURN ON") ve ekipman yazıları

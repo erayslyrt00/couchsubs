@@ -393,7 +393,7 @@ class TranslationService : Service() {
             // Ek alanlar saniyede bir, kendi iş parçacığında okunur; altyazı okumasını beklemez, onu bekletmez.
             regionWatcher?.offer(extraAreas, { r ->
                 SubtitleReader.copyRegion(frame, r)?.let {
-                    com.couchsubs.mobile.core.RegionWatcher.Crop(it, com.couchsubs.mobile.core.RegionSignature.of(it.nv21, it.width, it.height))
+                    com.couchsubs.mobile.core.RegionWatcher.Crop(it, com.couchsubs.mobile.core.RegionSignature.of(it.nv21, it.width, it.height), it.gray)
                 }
             }) { task -> runCatching { regionWork.execute(task) } }
             FramePreview.offer(frame, now)
@@ -523,7 +523,8 @@ class TranslationService : Service() {
                 val reading = reader.read(pixels)
                 // Yapay zekâda ekranın bütün yazıları tek istekte gider (bkz. AiTranslator.translateAll).
                 val translator = engineTranslator(free.separate())
-                val items = ScreenTranslation.translate(reading, translator, { screenGeneration.get() != generation }) { shown ->
+                // Yazıların içindeki kumanda simgeleri okunan kareden kesilir (ButtonIcons).
+                val items = ScreenTranslation.translate(reading, translator, { screenGeneration.get() != generation }, pixels.gray) { shown ->
                     if (screenGeneration.get() != generation) return@translate
                     val milliseconds = ScreenTranslation.displayMilliseconds(shown)
                     server.sendScreen(shown, milliseconds)

@@ -303,15 +303,18 @@ public sealed class WindowsOcrReader : ITextReader
                 continue;
             var part = words.GetRange(start, index - start);
             TextBox? box = null;
+            var partWords = new List<TextWord>(part.Count);
             foreach (var word in part)
             {
                 var r = word.BoundingRect;
                 var wordBox = new TextBox(r.X / width, r.Y / height, (r.X + r.Width) / width, (r.Y + r.Height) / height);
                 box = box?.Union(wordBox) ?? wordBox;
+                partWords.Add(new TextWord(word.Text, wordBox));
             }
             // Bölünmeyen satırın metni Windows'un verdiği gibi kalır (boşluksuz yazılan dillerde sözcükler birleşik).
             var text = start == 0 && end ? line.Text : string.Join(' ', part.Select(word => word.Text));
-            yield return new TextLine(text.Trim(), box);
+            // Sözcük yerleri yazının içindeki kumanda simgesini bulmaya yarar (ButtonIcons).
+            yield return new TextLine(text.Trim(), box, Words: partWords);
             start = index;
         }
     }
