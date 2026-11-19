@@ -122,8 +122,10 @@ public static class ScreenTranslation
     /// satırlar ("23m", "9", "+") göstergedir, çevrilmez. Bir satır, üstündeki satırın hemen altındaysa, yatayda onunla
     /// üst üste biniyorsa ve yazı boyu benziyorsa o gruba katılır; küçük harfle başlayan satır üstteki bitmemiş cümleye
     /// katılır (<see cref="Continues"/>). Gruplar yukarıdan aşağı; en çok <see cref="MaxGroups"/>, en çok yazısı olanlar.
+    /// <paramref name="menuRows"/> açıksa yalnız kısa büyük harfli etiketlerden oluşan grup (oyun menüsü) satır satır
+    /// ayrı gruplara bölünür (<see cref="IsMenuLabel"/>).
     /// </summary>
-    public static IReadOnlyList<Group> Groups(Reading reading)
+    public static IReadOnlyList<Group> Groups(Reading reading, bool menuRows = false)
     {
         var lines = reading.WithButtonIcons().WithoutButtonPrompts().WithoutOcrNoise().Lines
             .Where(line => line.Box is not null && IsWords(line.Text))
@@ -143,6 +145,14 @@ public static class ScreenTranslation
             if (index >= 0) groups[index].Add(line);
             else groups.Add([line]);
         }
+        // GTA 6'nın etkileşim menüsü ("HAIR △" / "GREET ✕" / "STYLIST L2"): her satırın sağında kendi tuş simgesi var.
+        // Satırlar tek kutuda çevrilince kutu satır aralığını tutmuyor, çeviriler simgelerinin yanından kayıyordu ("SAÇ"
+        // HAIR ile GREET arasına düşüyor, HAIR açıkta kalıyordu). Her satır ayrı grup olunca çevirisi kendi satırının
+        // üstüne, simgesinin yanına konur.
+        if (menuRows)
+            groups = [.. groups.SelectMany(group => group.Count > 1 && group.All(line => IsMenuLabel(line.Text))
+                ? group.Select(line => new List<TextLine> { line })
+                : [group])];
         return [.. Busiest(groups).Select(group =>
         {
             var heights = group.Select(line => line.Box!.Value.Bottom - line.Box!.Value.Top).OrderBy(value => value).ToList();
@@ -247,6 +257,15 @@ public static class ScreenTranslation
         (char.IsUpper(line[0]) && WordCount(previous) <= 3 && !previous.EndsWith(','));
 
     /// <summary>En az iki harfi ve iki harfli bir sözcüğü olan satır yazıdır; geri kalanı sayı ve simgedir.</summary>
+    /// <summary>
+    /// Oyun menüsünün bir satırı: en çok <see cref="MenuLabelWords"/> sözcük, küçük harf yok ("HAIR", "MAYBE LATER",
+    /// "NECKLACE ($475)"). Bilgi kutusu ve konuşma büyük-küçük harf karışıktır; onlar bölünmez.
+    /// </summary>
+    internal static bool IsMenuLabel(string text) =>
+        text.Any(char.IsLetter) && !text.Any(char.IsLower) && WordCount(text) <= MenuLabelWords;
+
+    internal const int MenuLabelWords = 5;
+
     internal static bool IsWords(string text) =>
         text.Count(char.IsLetter) >= 2 &&
         text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Any(word => word.Count(char.IsLetter) >= 2);

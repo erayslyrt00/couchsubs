@@ -85,6 +85,14 @@ public sealed class RegionWatcher
     public Func<string, PackMatch?>? PackLookup { get; set; }
     /// <summary>Hedef dil Türkçe: yüksek güvenle Türkçe olan parça çevrilmez, aslı sayılır (#289).</summary>
     public bool SkipsTurkish { get; set; } = true;
+    /// <summary>Oynanan oyunun adı (bilinmiyorsa null); oyuna özgü yerleşim kuralları için.</summary>
+    public Func<string?>? Game { get; set; }
+
+    /// <summary>
+    /// Menü satırları ayrı ayrı yerleştirilir (<see cref="ScreenTranslation.Groups"/>): yalnız GTA 6. Etkileşim
+    /// menüsünde her satırın sağında kendi tuş simgesi var; başka oyunlarda yerleşim değişmez.
+    /// </summary>
+    internal static bool SplitsMenuRows(string? game) => GameName.Key(game) == "gta 6";
     public Action<string>? Log { get; set; }
     /// <summary>Her okumanın süresi (ms; ölçüm için).</summary>
     public Action<long>? ReadMeasured { get; set; }
@@ -181,7 +189,7 @@ public sealed class RegionWatcher
         if (Volatile.Read(ref session) != started) return;
         Interlocked.Increment(ref reads);
         ReadMeasured?.Invoke(now() - clock);
-        var candidate = MakeCandidate(reading, area.Region, crop);
+        var candidate = MakeCandidate(reading, area.Region, crop, SplitsMenuRows(Game?.Invoke()));
         if (state.LastRead == candidate.Key)
         {
             state.Candidate = null;
@@ -199,7 +207,7 @@ public sealed class RegionWatcher
     /// yukarıdan aşağı parçalara toplanır. Yazının içindeki kumanda simgeleri <paramref name="frame"/>'den (okunan alan)
     /// kesilir; çeviride yerleri korunur.
     /// </summary>
-    internal static Candidate MakeCandidate(Reading reading, CropRegion region, Frame? frame = null)
+    internal static Candidate MakeCandidate(Reading reading, CropRegion region, Frame? frame = null, bool menuRows = false)
     {
         var lines = reading.WithButtonIcons().WithoutButtonPrompts().WithoutOcrNoise().Lines
             .Where(line => ScreenTranslation.IsWords(line.Text))
@@ -218,7 +226,7 @@ public sealed class RegionWatcher
         // eskisi gibi tek kutu. Anahtar grup yapısını da içerir: aynı yazı farklı gruplanırsa bloklar yeniden kurulur.
         IReadOnlyList<Block>? blocks = null;
         var key = TextMatch.Normalize(string.Join(' ', paragraphs));
-        var groups = lines.Count > 1 && boxes.Count == lines.Count ? ScreenTranslation.Groups(reading) : [];
+        var groups = lines.Count > 1 && boxes.Count == lines.Count ? ScreenTranslation.Groups(reading, menuRows) : [];
         if (groups.Count is > 1 and < ScreenTranslation.MaxGroups)
         {
             paragraphs = [.. groups.SelectMany(group => group.Paragraphs)];

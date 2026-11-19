@@ -2130,6 +2130,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         }
         regionWatcher.PackLookup = PacksActive ? services.FindInPacks : null;
         regionWatcher.SkipsTurkish = settings.TargetLanguage == "tr";
+        regionWatcher.Game = () => gameSense.Current?.Name;
     }
 
     // --- Geçmiş ---

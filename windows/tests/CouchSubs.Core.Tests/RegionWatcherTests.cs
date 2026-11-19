@@ -418,6 +418,57 @@ public class RegionWatcherTests
         Assert.Equal(2, server.Sent.Count);
     }
 
+    /// <summary>GTA 6'nın etkileşim menüsü: sağa yaslı, sıkışık satırlar; her birinin sağında kendi tuş simgesi var.</summary>
+    private static List<TextLine> Gta6Menu() =>
+        [At("HAIR", 0.80, 0.50, 0.92, 0.60), At("GREET", 0.76, 0.65, 0.92, 0.75), At("STYLIST", 0.70, 0.80, 0.92, 0.90)];
+
+    /// <summary>
+    /// GTA 6'da menünün her satırı kendi yerine çevrilir: tek kutuda satır aralığı tutmuyor, "SAÇ" HAIR ile GREET arasına
+    /// düşüyor, HAIR açıkta kalıyordu. Her blok kendi satırının üstünde, sağdaki simgesinin yanında durur.
+    /// </summary>
+    [Fact]
+    public async Task Gta6MenuRowsAreSentAsOneBlockPerRow()
+    {
+        var reader = new Reader { Lines = Gta6Menu() };
+        var translator = new Translator { Map = text => text switch { "HAIR" => "SAÇ", "GREET" => "SELAM", _ => text } };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server) { Game = () => "Grand Theft Auto VI" };
+        await watcher.PassAsync(Shade(10), [Quest]);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        Assert.Equal(["HAIR", "GREET", "STYLIST"], translator.Calls);
+        var blocks = Assert.Single(server.Blocks)!;
+        // STYLIST çevrilmedi (aynı kaldı): bloğu gönderilmez, İngilizcesi görünür kalır.
+        Assert.Equal(["SAÇ", "SELAM"], blocks.Select(b => b.Translation));
+        Assert.Equal(InQuest(new TextBox(0.80, 0.50, 0.92, 0.60)), blocks[0].Box);
+        Assert.Equal(InQuest(new TextBox(0.76, 0.65, 0.92, 0.75)), blocks[1].Box);
+    }
+
+    /// <summary>Menü satırlarını bölme yalnız GTA 6'da: başka oyunda (ya da oyun bilinmiyorsa) yerleşim değişmez.</summary>
+    [Theory]
+    [InlineData("Red Dead Redemption 2")]
+    [InlineData(null)]
+    public async Task MenuRowsStayInOneBoxOutsideGta6(string? game)
+    {
+        var reader = new Reader { Lines = Gta6Menu() };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, new Translator(), server) { Game = () => game };
+        await watcher.PassAsync(Shade(10), [Quest]);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        Assert.Equal([null], server.Blocks);
+    }
+
+    /// <summary>GTA 6'da da büyük-küçük harfli bilgi kutusu bölünmez: tek cümle, tek kutu.</summary>
+    [Fact]
+    public async Task Gta6InfoTextIsNotSplitIntoRows()
+    {
+        var reader = new Reader { Lines = [Line("Your actions will affect your criminal", 0.2), Line("profile and may have a lasting impact.", 0.3)] };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, new Translator(), server) { Game = () => "GTA 6" };
+        await watcher.PassAsync(Shade(10), [Quest]);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        Assert.Equal([null], server.Blocks);
+    }
+
     [Fact]
     public void NoAreasMeansNoWork()
     {
