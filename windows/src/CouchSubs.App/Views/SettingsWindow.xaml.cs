@@ -1039,6 +1039,7 @@ public partial class SettingsWindow : Window
             ExtraTargetPanel.Visibility = Visibility.Visible;
             ExtraLivePanel.Visibility = Visibility.Visible;
             ExtraLive.IsChecked = settings.ExtraLive(slot);
+            ShowExtraFullScreenHint(settings);
             (settings.ExtraTarget(slot) switch { ResultTarget.Pc => ExtraPc, ResultTarget.Both => ExtraBoth, _ => ExtraTv }).IsChecked = true;
             Region.IsEnabled = extra is not null;
             Region.DefaultRegion = ExtraDefaults[slot - 1];
@@ -1081,6 +1082,19 @@ public partial class SettingsWindow : Window
         var slot = area;
         var region = Region.Region;
         Update(s => s.WithExtraRegion(slot, on ? region : null));
+    }
+
+    /// <summary>
+    /// Altyazı alanı Tam ekranken sürekli okuma durur (bkz. <see cref="UserSettings.ExtraAreasPausedByFullScreen"/>);
+    /// "Sürekli oku" ayarı korunur, kullanıcıya nedeni yazılır.
+    /// </summary>
+    private void ShowExtraFullScreenHint(UserSettings settings)
+    {
+        var paused = settings.ExtraAreasPausedByFullScreen;
+        ExtraFullScreenHint.Text = paused
+            ? Localizer.Current["Extra areas aren't read while the subtitle area is Full screen, because the whole screen is already read. They're read again when you pick another area."]
+            : "";
+        ExtraFullScreenHint.Visibility = paused ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>Ek bölge tuşa basmadan da sürekli okunsun (görev, telefon mesajı, bildirim).</summary>

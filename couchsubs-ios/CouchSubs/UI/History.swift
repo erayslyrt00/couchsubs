@@ -189,8 +189,15 @@ struct ExtraAreasTile: View {
             Text("Besides the subtitle, CouchSubs can keep reading up to three small areas, like a quest, a phone message or a notification. Each area is read about once a second and translated again only when its text changes. The translation shows on the TV next to the original text.")
                 .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            // Tam ekranda ek alanlar okunmaz (bkz. activeExtraAreas); ayarları korunur, düzenlenebilir.
+            if model.settings.extraAreasPausedByFullScreen, !model.settings.extraAreas.isEmpty {
+                Text("Extra areas aren't read while the subtitle area is Full screen, because the whole screen is already read. They're read again when you pick another area.")
+                    .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             ForEach(model.settings.extraAreas) { area in
                 ExtraAreaEditor(id: area.id, settings: $model.settings, preview: model.framePreview)
+                    .opacity(model.settings.extraAreasPausedByFullScreen ? 0.5 : 1)
             }
             if model.settings.canAddExtraArea {
                 Menu {

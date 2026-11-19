@@ -48,6 +48,81 @@ public class ExtraRegionTests
         Assert.Equal(quest, watched.Region);
     }
 
+    /// <summary>
+    /// Altyazı alanı Tam ekranken sürekli okunan bölge yoktur (ekranın tamamı zaten okunuyor); ayarlar değişmez, başka
+    /// alana dönünce bölgeler eskisi gibi okunur.
+    /// </summary>
+    [Fact]
+    public void FullScreenAreaPausesWatchedRegionsWithoutChangingThem()
+    {
+        var quest = ExtraAreaPreset.Quest.Region();
+        var settings = new UserSettings().WithExtraRegion(1, quest).WithExtraLive(1, true);
+        var full = settings with { AreaPreset = AreaPreset.Full, Region = new CropRegion(0, 1, 0, 1) };
+        Assert.True(full.ExtraAreasPausedByFullScreen);
+        Assert.Empty(full.WatchedAreas());
+        Assert.True(full.ExtraLive(1));
+        Assert.Equal(quest, full.ExtraRegion(1));
+        var back = full with { AreaPreset = AreaPreset.Bottom, Region = new CropRegion() };
+        Assert.False(back.ExtraAreasPausedByFullScreen);
+        Assert.Equal("area1", Assert.Single(back.WatchedAreas()).Id);
+    }
+
+    /// <summary>Eski ayar dosyasında hazır seçim yoktur; tam kare bölge de Tam ekran sayılır.</summary>
+    [Fact]
+    public void FullFrameRegionWithoutPresetCountsAsFullScreen()
+    {
+        var settings = new UserSettings { Region = new CropRegion(0, 1, 0, 1) }.WithExtraRegion(1, ExtraAreaPreset.Quest.Region()).WithExtraLive(1, true);
+        Assert.Empty(settings.WatchedAreas());
+    }
+
+    /// <summary>Çeviri sürerken Tam ekran seçilince ek alan kutusu kalkar; başka alana dönünce yeniden okunup gelir.</summary>
+    [Fact]
+    public async Task SwitchingToFullScreenRemovesLiveRegionAndSwitchingBackBringsItBack()
+    {
+        var (controller, services) = Ready();
+        services.ReaderLines = new Reading([new TextLine("Find the blacksmith", new TextBox(0.1, 0.2, 0.9, 0.3))]);
+        controller.Settings = controller.Settings with { Output = SubtitleOutput.Computer };
+        controller.Settings = controller.Settings.WithExtraRegion(1, ExtraAreaPreset.Quest.Region()).WithExtraLive(1, true);
+        var received = new List<SubtitleEvent>();
+        controller.OverlayEvent += e => { lock (received) received.Add(e); };
+        await controller.StartAsync();
+
+        async Task<SubtitleEvent?> WaitForRegion()
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (DateTime.UtcNow < deadline)
+            {
+                services.Streams[0].Emit(Frame.Blank(64, 64));
+                await Task.Delay(100);
+                lock (received)
+                    if (received.FirstOrDefault(e => e.Kind == SubtitleEventKind.Region && e.Text != "") is { } found) return found;
+            }
+            return null;
+        }
+
+        Assert.NotNull(await WaitForRegion());
+        lock (received) received.Clear();
+        controller.Settings = controller.Settings with { AreaPreset = AreaPreset.Full, Region = new CropRegion(0, 1, 0, 1) };
+        for (var i = 0; i < 5; i++)
+        {
+            services.Streams[0].Emit(Frame.Blank(64, 64));
+            await Task.Delay(50);
+        }
+        lock (received)
+        {
+            Assert.Contains(received, e => e.Kind == SubtitleEventKind.RegionClear);
+            Assert.DoesNotContain(received, e => e.Kind == SubtitleEventKind.Region && e.Text != "");
+            received.Clear();
+        }
+        Assert.True(controller.Settings.ExtraLive(1));
+
+        controller.Settings = controller.Settings with { AreaPreset = AreaPreset.Bottom, Region = new CropRegion() };
+        var back = await WaitForRegion();
+        Assert.NotNull(back);
+        Assert.Equal("area1", back.Id);
+        controller.Stop();
+    }
+
     /// <summary>Sürekli okunan bölge tuşa basmadan okunur ve çevirisi "region" olayıyla pencereye (ve TV'ye) gider.</summary>
     [Fact]
     public async Task LiveRegionIsReadWithoutAKeyPress()

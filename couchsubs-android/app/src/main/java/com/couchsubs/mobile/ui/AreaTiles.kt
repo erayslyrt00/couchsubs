@@ -166,6 +166,12 @@ fun ExtraAreasTile() {
     val version = LiveState.status.collectAsState().value.areasVersion
     var areas by remember(version) { mutableStateOf(settings.extraAreas) }
     var menu by remember { mutableStateOf(false) }
+    // Altyazı alanı Tam ekranken ek alanlar okunmaz (bkz. watched); seçim değişince not ve soluk görünüm güncellenir.
+    var fullScreen by remember(version) { mutableStateOf(settings.areaPreset == AreaPreset.FULL) }
+    DisposableEffect(settings) {
+        val listener = settings.onAreasChanged { fullScreen = settings.areaPreset == AreaPreset.FULL }
+        onDispose { settings.removeListener(listener) }
+    }
     fun save(value: List<ExtraArea>) {
         areas = value
         settings.extraAreas = value
@@ -174,10 +180,13 @@ fun ExtraAreasTile() {
     Tile(Modifier.fillMaxWidth()) {
         TileLabel(stringResource(R.string.extra_title))
         Text(stringResource(R.string.extra_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        if (fullScreen && areas.isNotEmpty()) {
+            Text(stringResource(R.string.extra_full_screen_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        }
         areas.forEach { area ->
             // Karo içindeki kutu: inner köşe ve çerçeve, zemin karonunki; böylece içindeki ad alanı (surface2) kutudan ayrılır.
             val shape = RoundedCornerShape(Tokens.Radius.inner)
-            Column(Modifier.fillMaxWidth().border(1.dp, Tokens.Color.borderStrong, shape).padding(Tokens.Space.gap),
+            Column(Modifier.fillMaxWidth().alpha(if (fullScreen) 0.5f else 1f).border(1.dp, Tokens.Color.borderStrong, shape).padding(Tokens.Space.gap),
                 verticalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                     Box(Modifier.weight(1f)) {

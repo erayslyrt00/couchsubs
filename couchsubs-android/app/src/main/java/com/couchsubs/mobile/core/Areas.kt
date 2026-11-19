@@ -112,6 +112,13 @@ enum class ExtraAreaPreset(val region: CropRegion) {
 /** Açık ek alanlar (en çok [ExtraArea.MAX_COUNT]). */
 fun List<ExtraArea>.active(): List<ExtraArea> = filter { it.enabled }.take(ExtraArea.MAX_COUNT)
 
+/**
+ * Okunacak ek alanlar: altyazı alanı Tam ekranken hiçbiri (ekranın tamamı zaten okunuyor, ek alanlar aynı yazıyı ikinci
+ * kez çevirirdi). Alanların açık/kapalı ayarı değişmez; başka bir alan seçilince eskisi gibi okunurlar (Mac/iPhone
+ * activeExtraAreas, Windows WatchedAreas).
+ */
+fun List<ExtraArea>.watched(preset: AreaPreset): List<ExtraArea> = if (preset == AreaPreset.FULL) emptyList() else active()
+
 /** "Ekranı çevir" ve ek alanların satır kuralları (Mac/iPhone ScreenTranslation.swift). */
 object ScreenText {
     /** En az iki harfi ve iki harfli bir sözcüğü olan satır yazıdır; geri kalanı sayı ve simgedir. */

@@ -57,10 +57,16 @@ public enum ExtraAreaPreset: String, CaseIterable, Sendable {
 }
 
 extension UserSettings {
-    /// Okunacak ek alanlar (açık olanlar, en çok `ExtraArea.maxCount`).
+    /// Okunacak ek alanlar (açık olanlar, en çok `ExtraArea.maxCount`). Altyazı alanı Tam ekranken hiçbiri okunmaz:
+    /// ekranın tamamı zaten okunuyor, ek alanlar aynı yazıyı ikinci kez çevirirdi. Alanların açık/kapalı ayarı
+    /// değişmez; başka bir alan seçilince eskisi gibi okunurlar (Windows: UserSettings.WatchedAreas, Android: watched).
     public var activeExtraAreas: [ExtraArea] {
-        Array(extraAreas.filter(\.enabled).prefix(ExtraArea.maxCount))
+        guard !extraAreasPausedByFullScreen else { return [] }
+        return Array(extraAreas.filter(\.enabled).prefix(ExtraArea.maxCount))
     }
+
+    /// Altyazı alanı Tam ekran: ek alanlar okunmuyor (ayarları korunur).
+    public var extraAreasPausedByFullScreen: Bool { areaPreset == .full }
 
     /// Ek alan eklenebilir mi.
     public var canAddExtraArea: Bool { extraAreas.count < ExtraArea.maxCount }

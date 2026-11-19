@@ -308,4 +308,24 @@ final class RegionWatcherTests: XCTestCase {
         let old = try JSONDecoder().decode(UserSettings.self, from: Data(#"{"sourceLanguage":"en"}"#.utf8))
         XCTAssertTrue(old.extraAreas.isEmpty)
     }
+
+    /// Altyazı alanı Tam ekranken ek alan okunmaz (ekranın tamamı zaten okunuyor); ayarlar değişmez, başka alana dönünce
+    /// eskisi gibi okunur (Windows: FullScreenAreaPausesWatchedRegionsWithoutChangingThem).
+    func testFullScreenAreaPausesExtraAreasWithoutChangingThem() {
+        var settings = UserSettings()
+        settings.addExtraArea(.quest, name: "quest")
+        settings.addExtraArea(.phone, name: "phone")
+        settings.updateExtraArea(id: settings.extraAreas[1].id) { $0.enabled = false }
+        let saved = settings.extraAreas
+        settings.selectAreaPreset(.full)
+        XCTAssertTrue(settings.extraAreasPausedByFullScreen)
+        XCTAssertTrue(settings.activeExtraAreas.isEmpty)
+        XCTAssertEqual(settings.extraAreas, saved)
+        settings.selectAreaPreset(.top)
+        XCTAssertFalse(settings.extraAreasPausedByFullScreen)
+        XCTAssertEqual(settings.activeExtraAreas.map(\.name), ["quest"])
+        // Özel bölge tam kareyi kaplasa da Tam ekran seçili değildir; ek alanlar okunur.
+        settings.setCustomRegion(CropRegion(top: 0, bottom: 1, left: 0, right: 1))
+        XCTAssertEqual(settings.activeExtraAreas.map(\.name), ["quest"])
+    }
 }

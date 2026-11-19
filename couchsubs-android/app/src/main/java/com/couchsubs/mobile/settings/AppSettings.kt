@@ -295,10 +295,13 @@ class AppSettings(context: Context) : AreaStore {
         get() = AreaSet.fromJson(prefs.getString("generalAreas", null)?.let { runCatching { JSONObject(it) }.getOrNull() })
         set(value) = prefs.edit().apply { if (value == null) remove("generalAreas") else putString("generalAreas", value.toJson().toString()) }.apply()
 
-    /** Bölge ya da ek alanlar değişince (çeviri sürerken yeni bölge hemen okunur). */
+    /**
+     * Bölge, hazır seçimi ya da ek alanlar değişince (çeviri sürerken yeni bölge hemen okunur). Hazır seçim de dinlenir:
+     * Tam ekran seçilince ek alanlar okunmaz, başka seçime dönünce yeniden okunur.
+     */
     fun onAreasChanged(action: () -> Unit): SharedPreferences.OnSharedPreferenceChangeListener {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == "region" || key == "extraAreas") action()
+            if (key == "region" || key == "areaPreset" || key == "extraAreas") action()
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
         return listener

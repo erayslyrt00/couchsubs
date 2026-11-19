@@ -21,7 +21,7 @@ import com.couchsubs.mobile.account.Backend
 import com.couchsubs.mobile.account.Telemetry
 import com.couchsubs.mobile.core.CropRegion
 import com.couchsubs.mobile.core.DemoTranslator
-import com.couchsubs.mobile.core.active
+import com.couchsubs.mobile.core.watched
 import com.couchsubs.mobile.core.GamePackLibrary
 import com.couchsubs.mobile.core.GameSense
 import com.couchsubs.mobile.core.LinePool
@@ -281,10 +281,10 @@ class TranslationService : Service() {
         // Çeviri sürerken hedef TV'ye (ya da telefona) çevrilirse altyazı hemen oraya gider (iPhone ile aynı).
         targetListener = settings.onTargetChanged { server?.sendsToTv = settings.target == SubtitleTarget.TV }
         region = settings.region
-        extraAreas = settings.extraAreas.active()
+        extraAreas = settings.extraAreas.watched(settings.areaPreset)
         areasListener = settings.onAreasChanged {
             region = settings.region
-            extraAreas = settings.extraAreas.active()
+            extraAreas = settings.extraAreas.watched(settings.areaPreset)
         }
         try {
             subtitleServer.start()

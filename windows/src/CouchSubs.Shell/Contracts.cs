@@ -383,8 +383,15 @@ public sealed record UserSettings
         _ => this,
     };
 
-    /// <summary>Sürekli okunan ek bölgeler (açık ve "Sürekli oku" seçili olanlar).</summary>
-    public IReadOnlyList<WatchedArea> WatchedAreas() =>
+    /// <summary>
+    /// Altyazı alanı Tam ekran: sürekli okunan ek bölgeler okunmaz (ekranın tamamı zaten okunuyor, aynı yazı ikinci kez
+    /// çevrilirdi). Bölgelerin ayarı değişmez; başka bir alan seçilince eskisi gibi okunurlar. Tuşla tek seferlik okuma
+    /// etkilenmez.
+    /// </summary>
+    public bool ExtraAreasPausedByFullScreen => AreaPreset == AreaPreset.Full;
+
+    /// <summary>Sürekli okunan ek bölgeler (açık ve "Sürekli oku" seçili olanlar); Tam ekranda hiçbiri (Mac: activeExtraAreas).</summary>
+    public IReadOnlyList<WatchedArea> WatchedAreas() => ExtraAreasPausedByFullScreen ? [] :
         [.. Enumerable.Range(1, ExtraRegionCount)
             .Where(ExtraLive)
             .Select(slot => ExtraRegion(slot) is { } region ? new WatchedArea("area" + slot, "Area " + slot, region) : null)

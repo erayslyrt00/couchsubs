@@ -445,6 +445,7 @@
     <string name="area_drag_note_free">Drag the frame to move it, or drag an edge or corner to resize it.</string>
     <string name="area_preview_empty">The game picture appears here once translating starts.</string>
     <string name="extra_title">Extra areas</string>
+    <string name="extra_full_screen_note">Extra areas aren\'t read while the subtitle area is Full screen, because the whole screen is already read. They\'re read again when you pick another area.</string>
     <string name="extra_note">Besides the subtitle, CouchSubs can keep reading up to three small areas, like a quest, a phone message or a notification. Each area is read about once a second and translated again only when its text changes. The translation shows on the TV and on this phone\'s subtitle screen, where the original text is.</string>
     <string name="extra_add">Add extra area</string>
     <string name="extra_name">Area name</string>

@@ -41,6 +41,17 @@ class AreasTest {
         assertEquals(emptyList<ExtraArea>(), ExtraArea.listFromJson("bozuk"))
     }
 
+    /** Altyazı alanı Tam ekranken ek alan okunmaz; ayarlar değişmez, başka alana dönünce eskisi gibi okunur (Mac/iPhone ile aynı). */
+    @Test
+    fun fullScreenAreaPausesExtraAreasWithoutChangingThem() {
+        val areas = listOf(ExtraArea(name = "Görev", region = ExtraAreaPreset.QUEST.region),
+            ExtraArea(name = "Telefon", region = ExtraAreaPreset.PHONE.region, enabled = false))
+        assertEquals(emptyList<ExtraArea>(), areas.watched(AreaPreset.FULL))
+        assertEquals(listOf("Görev"), areas.watched(AreaPreset.BOTTOM).map { it.name })
+        assertEquals(listOf("Görev"), areas.watched(AreaPreset.TOP).map { it.name })
+        assertEquals(listOf("Görev"), areas.watched(AreaPreset.CUSTOM).map { it.name })
+    }
+
     @Test
     fun paragraphsJoinWrappedLines() {
         val lines = listOf(TextLine("NEW OBJECTIVE"), TextLine("Meet Lamar at the"), TextLine("garage."), TextLine("Bring the car."))
