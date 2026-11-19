@@ -297,9 +297,12 @@ internal sealed class FakeServices : IAppServices
     public Task<SamsungPreflight> CheckSamsungAsync(string host) => Task.FromResult(SamsungCheck);
     /// <summary>Samsung TV'de kurulu sürüm (sahte TV'nin vd_applist'i); null: uygulama yok.</summary>
     public string? SamsungOnTv { get; set; }
-    public Task<(string Version, bool Installed)> InstallSamsungAppAsync(string host, BundledTvApp app, Action<TvInstallEvent> onEvent)
+    /// <summary>Her Samsung denetiminde "güncelse de aç" istendi mi.</summary>
+    public List<bool> SamsungOpenRequests { get; } = [];
+    public Task<(string Version, bool Installed)> InstallSamsungAppAsync(string host, BundledTvApp app, bool openIfInstalled, Action<TvInstallEvent> onEvent)
     {
         TvCalls++;
+        SamsungOpenRequests.Add(openIfInstalled);
         if (SamsungOnTv is { } onTv && !DevModeInstaller.IsNewer(app.Version, onTv)) return Task.FromResult((onTv, false));
         Events.ForEach(onEvent);
         if (InstallError is { } error) throw new DevModeException(error, InstallDetail);
@@ -2089,6 +2092,27 @@ public class TvAppInstallTests
         // "Açılsın" isteği bir kerelik: sonraki denetim uygulamayı açmaz.
         await controller.RefreshTvAppAsync();
         Assert.Equal([false, true, false], services.AndroidOpenRequests);
+    }
+
+    [Fact]
+    public async Task SamsungReinstallOpensTheCurrentAppOnTheTv()
+    {
+        // Samsung'da düğme güncel uygulamayı açmıyordu: TV uygulaması kapalı kalıyor, altyazı gelmiyordu.
+        var services = new FakeServices { SamsungDevMode = true, SamsungOnTv = "0.7.0" };
+        services.Bundled[TvBrand.Samsung] = SamsungApp;
+        var store = new MemoryStore();
+        var controller = Make(services, store);
+        await controller.PairAsync(Samsung);
+        Assert.Equal([false], services.SamsungOpenRequests);
+
+        await controller.ReinstallTvAppAsync();
+        Assert.Equal([false, true], services.SamsungOpenRequests);
+        Assert.Empty(services.BrandInstalls);
+        Assert.Equal(new TvAppState(TvAppKind.UpToDate, "0.7.0"), controller.TvApp);
+
+        // "Açılsın" isteği bir kerelik.
+        await controller.RefreshTvAppAsync();
+        Assert.Equal([false, true, false], services.SamsungOpenRequests);
     }
 
     [Fact]

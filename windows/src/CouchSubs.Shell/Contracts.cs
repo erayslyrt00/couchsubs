@@ -592,8 +592,11 @@ public interface IAppServices
     /// vermezse Info null olur; kurulum yine denenir.
     /// </summary>
     Task<SamsungPreflight> CheckSamsungAsync(string host) => Task.FromResult(new SamsungPreflight(null, null));
-    /// <summary>TV'deki sürüme bakar, eksik ya da eskiyse kurar; TV'deki sürümü ve kurulup kurulmadığını döner.</summary>
-    Task<(string Version, bool Installed)> InstallSamsungAppAsync(string host, BundledTvApp app, Action<TvInstallEvent> onEvent);
+    /// <summary>
+    /// Eksikse ya da eskiyse imzalayıp kurar; TV'deki sürümü ve kurup kurmadığını döner. <paramref name="openIfInstalled"/>:
+    /// uygulama güncelse de TV'de açılır ("TV uygulamasını yeniden kur").
+    /// </summary>
+    Task<(string Version, bool Installed)> InstallSamsungAppAsync(string host, BundledTvApp app, bool openIfInstalled, Action<TvInstallEvent> onEvent);
     Task<bool> IsAndroidDebugOnAsync(string host);
     /// <summary>Ağda ADB'si açık cihazlar.</summary>
     Task<IReadOnlyList<string>> ScanAndroidTvsAsync();

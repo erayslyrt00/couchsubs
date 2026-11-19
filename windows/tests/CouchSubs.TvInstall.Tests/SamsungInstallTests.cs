@@ -74,6 +74,14 @@ public class SamsungInstallTests
         Assert.Null(SamsungTvInstaller.InstalledVersion(null));
     }
 
+    [Theory]
+    // Gerçek Samsung TV'nin (Tizen 9.0) yanıtı.
+    [InlineData("launch app CouchSubsT.CouchSubs\napp_id[CouchSubsT.CouchSubs] launch start\napp_id[CouchSubsT.CouchSubs] launched\nspend time for wascmd is [331]ms", true)]
+    [InlineData("launch app CouchSubsT.CouchSubs\napp_id[CouchSubsT.CouchSubs] launch start\napp_id[CouchSubsT.CouchSubs] launch failed", false)]
+    [InlineData("", false)]
+    public void LaunchReplyIsRead(string reply, bool launched) =>
+        Assert.Equal(launched, SamsungTvInstaller.Launched(reply));
+
     [Fact]
     public void UnrelatedFailedWordIsNotAFailure()
     {

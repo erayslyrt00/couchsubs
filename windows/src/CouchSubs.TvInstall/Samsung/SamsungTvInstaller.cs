@@ -89,6 +89,12 @@ public sealed partial class SamsungTvInstaller(string host, string profilesDirec
     public InstallLog Log { get; init; } = new(null);
 
     /// <summary>
+    /// TV'deki sürüm güncel olduğu için kurulum gerekmese de uygulama açılsın ("TV uygulamasını yeniden kur"). Önceden
+    /// yalnız kurulumdan sonra açılıyordu; düğmeye basmak Samsung'da kapalı uygulamayı geri getirmiyordu.
+    /// </summary>
+    public bool OpenIfInstalled { get; init; }
+
+    /// <summary>
     /// TV'de geliştirici modu açık ve bu bilgisayar kabul ediliyor mu? Samsung yalnız geliştirici modunda girilen IP'den
     /// gelen bağlantıyı kabul eder; başka bilgisayardan port açık görünse de bağlantı hemen kapanır.
     /// </summary>
@@ -106,6 +112,32 @@ public sealed partial class SamsungTvInstaller(string host, string profilesDirec
             return false;
         }
     }
+
+    /// <summary>
+    /// Kurulu TV uygulamasını geliştirici bağlantısıyla (sdb, <c>was_execute</c>) açar; arka plandaysa öne getirir.
+    /// Uzaktan kumanda bağlantısıyla (8002) açma bazı TV'lerde (Tizen 9.0) sessizce çalışmıyordu; sdb izin sormaz ve
+    /// TV'de bildirim çıkarmaz. Geliştirici modu kapalıysa ya da Host PC IP başka bilgisayarınsa false döner.
+    /// </summary>
+    public async Task<bool> OpenAsync(CancellationToken cancellationToken = default)
+    {
+        Log.Write($"--- Samsung: TV uygulaması bağlı değil, açılıyor (TV {host})");
+        try
+        {
+            await using var device = await ConnectAsync(cancellationToken);
+            var reply = await device.ShellCommandAsync($"0 was_execute {AppId}", cancellationToken);
+            Log.Write($"Uygulama açılıyor: {reply.Trim()}");
+            return Launched(reply);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            Log.Write($"Uygulama açılamadı: {error.Message}");
+            return false;
+        }
+    }
+
+    /// <summary><c>was_execute</c> yanıtı uygulamanın açıldığını söylüyor mu ("app_id[…] launched").</summary>
+    internal static bool Launched(string reply) =>
+        reply.Contains("] launched", StringComparison.Ordinal) && !reply.Contains("fail", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Bu TV için kayıtlı geçerli sertifika var mı (giriş gerekmeden kurulabilir mi)?</summary>
     public async Task<bool> HasCertificateAsync(CancellationToken cancellationToken = default)
@@ -169,7 +201,11 @@ public sealed partial class SamsungTvInstaller(string host, string profilesDirec
             Log.Write($"Tizen {platform}: 2017–2018 TV'si, destek deneysel.");
 
         var onTv = await ReadInstalledVersionAsync(device, cancellationToken);
-        if (version is not null && onTv is not null && !Versions.IsNewer(version, onTv)) return (onTv, false);
+        if (version is not null && onTv is not null && !Versions.IsNewer(version, onTv))
+        {
+            if (OpenIfInstalled) await LaunchAsync(device, cancellationToken);
+            return (onTv, false);
+        }
         Log.Write(onTv is null ? "TV'de CouchSubs görünmüyor; kuruluyor." : $"TV'de {onTv} var, {version ?? "yeni sürüm"} kuruluyor.");
 
         var duid = await ReadDuidAsync(device, cancellationToken);

@@ -44,7 +44,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private bool tvAppMissing;
     /// <summary>TV uygulaması denetimi sürüyor (bekleme ekranı ve çeviri başlangıcı aynı anda çağırabilir).</summary>
     private bool refreshingTvApp;
-    /// <summary>"TV uygulamasını yeniden kur"a basıldı: Android TV'de uygulama kuruluysa da TV'de açılır.</summary>
+    /// <summary>"TV uygulamasını yeniden kur"a basıldı: Samsung ve Android TV'de uygulama kuruluysa da TV'de açılır.</summary>
     private bool openTvAppAfterCheck;
     private int? devModeHoursLeft;
     private UserSettings settings;
@@ -808,6 +808,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private async Task RefreshSamsungAppAsync(LgTv target)
     {
         if (services.BundledApp(TvBrand.Samsung) is not { } bundled) return;
+        // "TV uygulamasını yeniden kur": güncel uygulama da TV'de açılır (Android'deki gibi). İstek bir kerelik.
+        var open = openTvAppAfterCheck;
+        openTvAppAfterCheck = false;
         var remembered = !NeedsInstall(bundled);
         // TV 8001'de geliştirici modunu ve Host PC IP'yi söyler (Android ve iPhone uygulaması da buna bakar). Host PC IP
         // bu bilgisayarınki değilse TV 26101'de sdb el sıkışmasında bağlantıyı keser ve önceden yalnız genel "TV bu
@@ -834,7 +837,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         samsungCheckRunning = true;
         try
         {
-            var (version, installed) = await services.InstallSamsungAppAsync(target.Host, bundled, e => post(() => InstallEvent(e)));
+            var (version, installed) = await services.InstallSamsungAppAsync(target.Host, bundled, open, e => post(() => InstallEvent(e)));
             version = string.IsNullOrWhiteSpace(version) ? bundled.Version : version;
             store.Save(StoreKeys.TvAppVersion, version);
             TvApp = new TvAppState(TvAppKind.UpToDate, version);
