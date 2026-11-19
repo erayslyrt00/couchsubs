@@ -61,7 +61,8 @@ function element() {
 // alive: CouchSubs'ın çalıştığı adresler ("http://ip:8787"). localIp: TV'nin söylediği kendi adresi (yoksa null).
 // consolePort: platform.findConsolePort'un yanıtı ([port, ad, bağlı HDMI sayısı]); savedHdmi: kayıtlı giriş.
 // resolution: verilirse platform videoResolution bildirir (Samsung gibi); her çağrıda bu değer callback'e gelir.
-function startTv({ saved, alive, localIp, hasLocalAddress, consolePort, savedHdmi, resolution }) {
+// closeWhenHidden: platform arka planda bağlantıyı bırakmak istiyor mu (Samsung gibi).
+function startTv({ saved, alive, localIp, hasLocalAddress, consolePort, savedHdmi, resolution, closeWhenHidden }) {
   const clock = makeClock();
   const storage = new Map();
   if (saved) storage.set('couchsubs.server', saved);
@@ -70,6 +71,7 @@ function startTv({ saved, alive, localIp, hasLocalAddress, consolePort, savedHdm
   const elements = new Map();
   const opened = [];
   const streams = [];
+  let relaunchCallback = null;
 
   class FakeEventSource {
     constructor(url) {
@@ -119,7 +121,7 @@ function startTv({ saved, alive, localIp, hasLocalAddress, consolePort, savedHdm
     backKey: 461,
     init() {},
     launchParams: () => null,
-    onRelaunch() {},
+    onRelaunch(cb) { relaunchCallback = cb; },
     // TV görüntüyü kısa süre sonra verir (Samsung TVWindow'un yanıtı gibi).
     showHdmi(port, host, onStatus) { clock.setTimeout(() => onStatus('playing'), 30); },
     findConsolePort(cb) { clock.setTimeout(() => cb.apply(null, consolePort || [1, 'PS5']), 20); }
@@ -129,6 +131,7 @@ function startTv({ saved, alive, localIp, hasLocalAddress, consolePort, savedHdm
     platform.videoResolution = (cb) => { resolutionCallback = cb; clock.setTimeout(() => cb(resolution), 5); };
   }
   if (hasLocalAddress) platform.localAddress = (cb) => clock.setTimeout(() => cb(localIp || null), 10);
+  if (closeWhenHidden) platform.closeWhenHidden = true;
 
   const document = {
     hidden: false,
@@ -185,6 +188,15 @@ function startTv({ saved, alive, localIp, hasLocalAddress, consolePort, savedHdm
     },
     server: () => elements.get('st-server') && elements.get('st-server').textContent,
     savedHdmi: () => storage.get('couchsubs.hdmi'),
+    // Bilgisayar açık uygulamayı yeniden açar (Samsung DEEP_LINK, parametreler PAYLOAD'da).
+    relaunch(params) { relaunchCallback(params); },
+    // Açık (kapatılmamış) bağlantılar.
+    openStreams: () => streams.filter((s) => !s.closed),
+    // TV uygulamayı arka plana atar ya da öne getirir.
+    setHidden(hidden) {
+      document.hidden = hidden;
+      for (const fn of documentListeners.visibilitychange || []) fn({});
+    },
     // TV çözünürlük değişikliği bildirir (Samsung addVideoResolutionChangeListener).
     changeResolution(info) { resolutionCallback(info); },
     // Kumanda tuşu.
@@ -359,6 +371,52 @@ test('çözünürlük bildirmeyen ya da hata veren platformda satır gizli kalı
     tv.clock.advance(1000);
     assert.notStrictEqual(tv.element('row-resolution').style.display, '');
   }
+});
+
+// Samsung arka plana attığı uygulamanın bağlantısını açık tutuyordu; bilgisayar TV uygulamasını bağlı sanıp yeniden
+// açmıyor, altyazı ekrana gelmiyordu.
+test('Samsung: arka plana düşen uygulama bağlantıyı kapatır, yeniden bağlanmaz; öne gelince bağlanır', () => {
+  const tv = startTv({ saved: 'http://192.168.1.109:8787', alive: new Set(['http://192.168.1.109:8787']),
+    hasLocalAddress: false, closeWhenHidden: true });
+  tv.clock.advance(1000);
+  assert.strictEqual(tv.openStreams().length, 1);
+  tv.emit('subtitle', { text: 'Merhaba', duration: 60000 });
+  assert.strictEqual(tv.element('subtitle').className, '');
+  tv.setHidden(true);
+  assert.strictEqual(tv.openStreams().length, 0);
+  assert.strictEqual(tv.element('subtitle').className, 'hidden');
+  // Bağlantı bekçisi ve tarama arka plandayken yeniden bağlanmaz.
+  tv.clock.advance(120000);
+  assert.strictEqual(tv.openStreams().length, 0);
+  tv.setHidden(false);
+  tv.clock.advance(1000);
+  assert.strictEqual(tv.openStreams().length, 1);
+  assert.strictEqual(tv.lastOpened(), 'http://192.168.1.109:8787/events');
+});
+
+test('arka plandayken yeni adres gelirse öne gelince o adrese bağlanılır', () => {
+  const tv = startTv({ saved: 'http://192.168.1.109:8787',
+    alive: new Set(['http://192.168.1.109:8787', 'http://192.168.1.39:8787']), hasLocalAddress: false, closeWhenHidden: true });
+  tv.clock.advance(1000);
+  tv.setHidden(true);
+  // Bilgisayar uygulamayı yeni adresle açar; açılış olayı öne gelmeden önce gelebilir.
+  tv.relaunch({ server: 'http://192.168.1.39:8787' });
+  assert.strictEqual(tv.openStreams().length, 0);
+  tv.setHidden(false);
+  tv.clock.advance(1000);
+  assert.strictEqual(tv.openStreams().length, 1);
+  assert.strictEqual(tv.lastOpened(), 'http://192.168.1.39:8787/events');
+  assert.strictEqual(tv.saved(), 'http://192.168.1.39:8787');
+});
+
+test('closeWhenHidden istemeyen platformda (LG, Android TV) arka plan bağlantıyı kapatmaz', () => {
+  const tv = startTv({ saved: 'http://192.168.1.109:8787', alive: new Set(['http://192.168.1.109:8787']), hasLocalAddress: false });
+  tv.clock.advance(1000);
+  tv.setHidden(true);
+  tv.clock.advance(60000);
+  assert.strictEqual(tv.openStreams().length, 1);
+  tv.setHidden(false);
+  assert.strictEqual(tv.openStreams().length, 1);
 });
 
 // tv-tizen/platform.js: TVWindow API'si sahte tizen nesnesiyle çalıştırılır.

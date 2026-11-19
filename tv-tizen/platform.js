@@ -51,6 +51,9 @@
     sourceSwitchTip: true,
     // HDMI girişi açılamazsa app.js nedenini ve giriş seçimini gösterir.
     noPictureHelp: true,
+    // Arka plana düşen uygulama bağlantıyı kapatır: Samsung önplandaki uygulamayı söylemediği için bilgisayar
+    // uygulamayı ancak bağlantı yoksa yeniden açar (TvKeeper).
+    closeWhenHidden: true,
 
     init: function () {
       // Renk ve sayı tuşları istenmezse TV kendisi kullanır.
