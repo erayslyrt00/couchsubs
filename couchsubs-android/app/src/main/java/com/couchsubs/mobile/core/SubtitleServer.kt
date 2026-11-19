@@ -102,9 +102,14 @@ class SubtitleServer(
          * Ek alanın çevirisi: alanın kimliği (`id`), çeviri (`text`; boşsa kutu kalkar), yazının karedeki yeri (`box`) ve
          * satır yüksekliği (`line`, ekrana oranla). TV çeviriyi o yerde küçük bir kutuda gösterir (Mac/iPhone ile aynı).
          */
-        fun regionFrame(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>? = null): String {
+        fun regionFrame(
+            id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>? = null,
+            blocks: List<ScreenTranslation.Item>? = null,
+        ): String {
             val json = mutableMapOf<String, Any?>("id" to id, "text" to text)
             if (!icons.isNullOrEmpty()) json["icons"] = iconsJson(icons)
+            // Alanda ayrı duran yazı gruplarının çevirileri kendi yerleriyle; eski TV uygulamaları birleşik `text`'i gösterir.
+            if (!blocks.isNullOrEmpty() && text.isNotEmpty()) json["blocks"] = blocks.map { itemJson(it) }
             if (box != null) json["box"] = boxJson(box)
             if (lineHeight != null) json["line"] = Json.Decimal(Math.round(lineHeight.coerceIn(0.0, 1.0) * 10000) / 10000.0)
             return frame("region", json)
@@ -115,16 +120,18 @@ class SubtitleServer(
          * çok parçalıysa `paragraphs` ile gider (Mac/iPhone `screen` olayı ile aynı). TV öncekinin yerine bunları koyar.
          */
         fun screenFrame(items: List<ScreenTranslation.Item>, durationMs: Int): String {
-            val list = items.map { item ->
-                val json = mutableMapOf<String, Any?>(
-                    "box" to boxJson(item.box), "line" to Json.Decimal(Math.round(item.lineHeight.coerceIn(0.0, 1.0) * 10000) / 10000.0),
-                    "text" to item.translation,
-                )
-                if (item.paragraphs) json["paragraphs"] = true
-                item.icons?.takeIf { it.isNotEmpty() }?.let { json["icons"] = iconsJson(it) }
-                json
-            }
-            return frame("screen", mapOf("duration" to durationMs, "items" to list))
+            return frame("screen", mapOf("duration" to durationMs, "items" to items.map { itemJson(it) }))
+        }
+
+        /** Yeriyle bir çeviri ("Ekranı çevir" öğesi ya da ek alan bloğu). */
+        private fun itemJson(item: ScreenTranslation.Item): Map<String, Any?> {
+            val json = mutableMapOf<String, Any?>(
+                "box" to boxJson(item.box), "line" to Json.Decimal(Math.round(item.lineHeight.coerceIn(0.0, 1.0) * 10000) / 10000.0),
+                "text" to item.translation,
+            )
+            if (item.paragraphs) json["paragraphs"] = true
+            item.icons?.takeIf { it.isNotEmpty() }?.let { json["icons"] = iconsJson(it) }
+            return json
         }
 
         /** Çevirinin içindeki kumanda simgeleri: düz metindeki yeri (`at`) ve PNG'si (`src`); eski TV uygulamaları yok sayar. */
@@ -204,8 +211,15 @@ class SubtitleServer(
     override fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?) = sendRegion(id, text, box, lineHeight, null)
 
     /** [icons]: çevirinin içindeki kumanda simgeleri ([ButtonIcons]); `icons` alanıyla gider. */
-    override fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>?) {
-        broadcast(regionFrame(id, text, box, lineHeight, icons), subtitle = true)
+    override fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>?) =
+        sendRegion(id, text, box, lineHeight, icons, null)
+
+    /** [blocks]: alanda ayrı duran yazı gruplarının çevirileri kendi yerleriyle (`blocks`). */
+    override fun sendRegion(
+        id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>?,
+        blocks: List<ScreenTranslation.Item>?,
+    ) {
+        broadcast(regionFrame(id, text, box, lineHeight, icons, blocks), subtitle = true)
         onEvent?.invoke(SubtitleEvent.Region(id, text, box))
     }
 

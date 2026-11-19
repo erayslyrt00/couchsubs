@@ -34,8 +34,9 @@ final class RegionWatcherTests: XCTestCase {
                 failuresRemaining -= 1
                 throw Failure.expected
             }
-            return "TR: " + text
+            return map(text)
         }
+        var map: (String) -> String = { "TR: " + $0 }
 
         private enum Failure: Error { case expected }
     }
@@ -44,9 +45,16 @@ final class RegionWatcherTests: XCTestCase {
         var sent: [(id: String, text: String, box: TextBox?)] = []
         var lineHeights: [Double?] = []
         var clears = 0
+        /// Her gönderimin blokları (`sent` ile aynı sırada; bloksuz gönderimde nil).
+        var blocks: [[ScreenTranslation.Item]?] = []
         func sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?) {
+            sendRegion(id: id, text: text, box: box, lineHeight: lineHeight, icons: nil, blocks: nil)
+        }
+        func sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: [IconPlacement]?,
+                        blocks: [ScreenTranslation.Item]?) {
             sent.append((id, text, box))
             lineHeights.append(lineHeight)
+            self.blocks.append(blocks)
         }
         func clearRegions() { clears += 1 }
     }
@@ -65,6 +73,80 @@ final class RegionWatcherTests: XCTestCase {
     private let quest = ExtraArea(id: "q", name: "Quest", region: ExtraAreaPreset.quest.region)
     private func line(_ text: String, top: Double = 0.2, height: Double = 0.1) -> TextLine {
         TextLine(text, box: TextBox(left: 0.1, top: top, right: 0.9, bottom: top + height))
+    }
+
+    private func at(_ text: String, _ left: Double, _ top: Double, _ right: Double, _ bottom: Double) -> TextLine {
+        TextLine(text, box: TextBox(left: left, top: top, right: right, bottom: bottom))
+    }
+
+    private func inQuest(_ box: TextBox) -> TextBox {
+        let region = quest.region
+        return box.placed(in: TextBox(left: region.left, top: region.top, right: region.right, bottom: region.bottom))
+    }
+
+    /// Alanda birbirinden ayrı duran yazılar alt alta tek kutuda değil, her biri kendi yeriyle gider; eski TV'ler için
+    /// birleşik metin de kalır (Windows ile aynı).
+    func testSeparateGroupsInAnAreaAreSentAsBlocksAtTheirOwnPlaces() async throws {
+        let reader = Reader(), translator = Translator(), server = Server()
+        let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
+        reader.lines = [at("Find the blacksmith", 0.5, 0.1, 0.95, 0.2), at("Go to the barn", 0.1, 0.6, 0.4, 0.7)]
+        await watcher.pass(frame(10), areas: [quest])
+        await watcher.pass(frame(10), areas: [quest])
+        XCTAssertEqual(server.sent.map(\.text), ["TR: Find the blacksmith\nTR: Go to the barn"])
+        XCTAssertEqual(server.blocks.count, 1)
+        let blocks = try XCTUnwrap(server.blocks[0])
+        XCTAssertEqual(blocks.map(\.translation), ["TR: Find the blacksmith", "TR: Go to the barn"])
+        XCTAssertEqual(blocks.map(\.source), ["Find the blacksmith", "Go to the barn"])
+        XCTAssertEqual(blocks[0].box, inQuest(TextBox(left: 0.5, top: 0.1, right: 0.95, bottom: 0.2)))
+        XCTAssertEqual(blocks[1].box, inQuest(TextBox(left: 0.1, top: 0.6, right: 0.4, bottom: 0.7)))
+        XCTAssertEqual(blocks[0].lineHeight, 0.1 * (quest.region.bottom - quest.region.top), accuracy: 1e-9)
+        XCTAssertEqual(server.sent[0].box, inQuest(TextBox(left: 0.1, top: 0.1, right: 0.95, bottom: 0.7)))
+    }
+
+    /// Tek grup (alt alta sarılmış tek yazı) eskisi gibi tek kutudur, blok gönderilmez.
+    func testOneGroupIsSentWithoutBlocks() async {
+        let reader = Reader(), translator = Translator(), server = Server()
+        translator.map = { _ in "Demirciyi bul ve kılıcını onarmasını iste." }
+        let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
+        reader.lines = [line("Find the blacksmith and ask him", top: 0.2), line("to repair your sword.", top: 0.3)]
+        await watcher.pass(frame(10), areas: [quest])
+        await watcher.pass(frame(10), areas: [quest])
+        XCTAssertEqual(translator.calls, ["Find the blacksmith and ask him to repair your sword."])
+        XCTAssertEqual(server.sent.map(\.text), ["Demirciyi bul ve kılıcını onarmasını iste."])
+        XCTAssertEqual(server.blocks.count, 1)
+        XCTAssertNil(server.blocks[0])
+    }
+
+    /// Çevirisi aslıyla aynı grup (ad) blok olarak gönderilmez; İngilizcesi görünür kalır.
+    func testUntranslatedGroupIsLeftOutOfTheBlocks() async throws {
+        let reader = Reader(), translator = Translator(), server = Server()
+        translator.map = { $0 == "Arthur" ? "Arthur" : "TR: " + $0 }
+        let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
+        reader.lines = [at("Arthur", 0.1, 0.1, 0.3, 0.2), at("Meet me at the barn", 0.1, 0.6, 0.6, 0.7)]
+        await watcher.pass(frame(10), areas: [quest])
+        await watcher.pass(frame(10), areas: [quest])
+        let blocks = try XCTUnwrap(server.blocks.first ?? nil)
+        XCTAssertEqual(blocks.map(\.translation), ["TR: Meet me at the barn"])
+        XCTAssertEqual(blocks[0].box, inQuest(TextBox(left: 0.1, top: 0.6, right: 0.6, bottom: 0.7)))
+    }
+
+    /// Aynı yazı kayınca yeniden çevrilmez; bloklar aynı çeviriyle yeni yerlerine gönderilir.
+    func testMovedBlocksKeepTheirTranslations() async throws {
+        let reader = Reader(), translator = Translator(), server = Server()
+        let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
+        reader.lines = [at("Find the blacksmith", 0.5, 0.1, 0.95, 0.2), at("Go to the barn", 0.1, 0.6, 0.4, 0.7)]
+        await watcher.pass(frame(10), areas: [quest])
+        await watcher.pass(frame(10), areas: [quest])
+        reader.lines = [at("Find the blacksmith", 0.5, 0.1, 0.95, 0.2), at("Go to the barn", 0.1, 0.7, 0.4, 0.8)]
+        await watcher.pass(frame(60), areas: [quest])
+        XCTAssertEqual(translator.calls, ["Find the blacksmith", "Go to the barn"])
+        XCTAssertEqual(server.sent.count, 2)
+        let moved = try XCTUnwrap(server.blocks[1])
+        XCTAssertEqual(moved.map(\.translation), ["TR: Find the blacksmith", "TR: Go to the barn"])
+        XCTAssertEqual(moved[1].box, inQuest(TextBox(left: 0.1, top: 0.7, right: 0.4, bottom: 0.8)))
+        // Yer değişmeden yeniden okunan aynı yazı bir şey göndermez.
+        await watcher.pass(frame(100), areas: [quest])
+        XCTAssertEqual(server.sent.count, 2)
     }
 
     func testFailedReadRetriesOnAnUnchangedFrameThenStopsReading() async {

@@ -251,18 +251,7 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
     /// </summary>
     public void SendScreen(IReadOnlyList<ScreenTranslation.Item> items, int durationMs)
     {
-        var list = items.Select(item =>
-        {
-            var json = new SortedDictionary<string, object>
-            {
-                ["box"] = BoxJson(item.Box),
-                ["line"] = Round(item.LineHeight),
-                ["text"] = item.Translation,
-            };
-            if (item.Paragraphs) json["paragraphs"] = true;
-            if (item.Icons is { Count: > 0 } icons) json["icons"] = IconsJson(icons);
-            return json;
-        }).ToList();
+        var list = items.Select(ItemJson).ToList();
         Broadcast(Frame("screen", new SortedDictionary<string, object> { ["duration"] = durationMs, ["items"] = list }), subtitle: true);
         // Altyazı yalnız bilgisayardaysa (TV yok) çeviriler başka hiçbir yere gitmiyordu: tuşa basınca yalnız
         // "Ekran çevriliyor…" görünüyordu.
@@ -282,10 +271,20 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
     /// <paramref name="icons"/>: çevirinin içindeki kumanda simgeleri; <c>icons</c> alanı her simgenin düz metindeki
     /// yerini (<c>at</c>) ve PNG'sini (<c>src</c>) taşır. Eski TV uygulamaları alanı yok sayıp düz metni gösterir.
     /// </summary>
-    public void SendRegion(string id, string text, TextBox? box, double? lineHeight, IReadOnlyList<IconPlacement>? icons)
+    public void SendRegion(string id, string text, TextBox? box, double? lineHeight, IReadOnlyList<IconPlacement>? icons) =>
+        SendRegion(id, text, box, lineHeight, icons, null);
+
+    /// <summary>
+    /// <paramref name="blocks"/>: alanda ayrı duran yazı gruplarının çevirileri kendi yerleriyle (<c>blocks</c>; her biri
+    /// <c>screen</c> olayındaki öğe gibi <c>box</c>, <c>line</c>, <c>text</c>). TV her birini kendi İngilizce yazısının
+    /// üstüne koyar. Alanı tanımayan eski TV uygulamaları birleşik <c>text</c>'i tek kutuda gösterir.
+    /// </summary>
+    public void SendRegion(string id, string text, TextBox? box, double? lineHeight, IReadOnlyList<IconPlacement>? icons,
+                           IReadOnlyList<ScreenTranslation.Item>? blocks)
     {
         var json = new SortedDictionary<string, object> { ["id"] = id, ["text"] = text };
         if (icons is { Count: > 0 }) json["icons"] = IconsJson(icons);
+        if (blocks is { Count: > 0 } && text.Length > 0) json["blocks"] = blocks.Select(ItemJson).ToList();
         if (box is { } b) json["box"] = BoxJson(b);
         if (lineHeight is { } line) json["line"] = Round(line);
         Broadcast(Frame("region", json), subtitle: true);
@@ -304,6 +303,20 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
     {
         Broadcast(Frame("screen-clear", new SortedDictionary<string, object>()), subtitle: true);
         EventSent?.Invoke(new SubtitleEvent(SubtitleEventKind.ScreenClear));
+    }
+
+    /// <summary>Yeriyle bir çeviri ("Ekranı çevir" öğesi ya da ek alan bloğu).</summary>
+    private static SortedDictionary<string, object> ItemJson(ScreenTranslation.Item item)
+    {
+        var json = new SortedDictionary<string, object>
+        {
+            ["box"] = BoxJson(item.Box),
+            ["line"] = Round(item.LineHeight),
+            ["text"] = item.Translation,
+        };
+        if (item.Paragraphs) json["paragraphs"] = true;
+        if (item.Icons is { Count: > 0 } icons) json["icons"] = IconsJson(icons);
+        return json;
     }
 
     private static List<SortedDictionary<string, object>> IconsJson(IReadOnlyList<IconPlacement> icons) =>

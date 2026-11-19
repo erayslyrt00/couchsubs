@@ -9,12 +9,22 @@ public protocol RegionSending: AnyObject {
     func sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?)
     /// Çevirinin içinde kumanda simgeleri varsa (`ButtonIcons`); simgeyi bilmeyen gönderici düz metni yollar.
     func sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: [IconPlacement]?)
+    /// Alanda birbirinden ayrı duran yazı grupları varsa (görev başlığı ve ayrı sütundaki hedef) `blocks` her grubun
+    /// çevirisini kendi yeriyle taşır; TV her birini kendi İngilizce yazısının üstüne koyar. Blokları bilmeyen gönderici
+    /// birleşik metni yollar.
+    func sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: [IconPlacement]?,
+                    blocks: [ScreenTranslation.Item]?)
     func clearRegions()
 }
 
 extension RegionSending {
     public func sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: [IconPlacement]?) {
         sendRegion(id: id, text: text, box: box, lineHeight: lineHeight)
+    }
+
+    public func sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: [IconPlacement]?,
+                           blocks: [ScreenTranslation.Item]?) {
+        sendRegion(id: id, text: text, box: box, lineHeight: lineHeight, icons: icons)
     }
 }
 
@@ -50,6 +60,18 @@ public final class RegionWatcher {
         var renderedIcons: [IconPlacement]?
         var renderedBox: TextBox?
         var renderedLineHeight: Double?
+        var renderedLayout: [Block]?
+        /// Gönderilen bloklar ve her birinin `Candidate.blocks` içindeki sırası.
+        var renderedBlocks: [(group: Int, item: ScreenTranslation.Item)]?
+    }
+
+    /// Alanda ayrı duran bir yazı grubu: `Candidate.paragraphs` içinde `start`'tan başlayan `count` parça, karedeki yeri
+    /// ve satır yüksekliği (kareye oranla).
+    struct Block: Equatable {
+        var start: Int
+        var count: Int
+        var box: TextBox
+        var lineHeight: Double
     }
 
     struct Candidate {
@@ -59,6 +81,8 @@ public final class RegionWatcher {
         var key: String
         /// Her parçadaki kumanda simgeleri (kareden kesilmiş), parçadaki sırasıyla; simge yoksa nil.
         var icons: [[IconSlot]]? = nil
+        /// Alanda birden çok ayrı yazı grubu varsa grupları; tek grupta nil (tek kutu).
+        var blocks: [Block]? = nil
     }
 
     private let reader: TextReader
@@ -182,19 +206,38 @@ public final class RegionWatcher {
         let lines = reading.withButtonIcons().withoutButtonPrompts().withoutOcrNoise().lines
             .filter { ScreenTranslation.isWords($0.text) }
             .sorted { ($0.box?.top ?? 0) < ($1.box?.top ?? 0) }
-        let paragraphs = ScreenTranslation.paragraphs(lines)
+        var paragraphs = ScreenTranslation.paragraphs(lines)
         let place = TextBox(left: region.left, top: region.top, right: region.right, bottom: region.bottom)
         let boxes = lines.compactMap(\.box)
         let box = boxes.dropFirst().reduce(boxes.first) { $0?.union($1) }?.placed(in: place)
-        let heights = boxes.map { ($0.bottom - $0.top) * (region.bottom - region.top) }.sorted()
+        let height = region.bottom - region.top
+        let heights = boxes.map { ($0.bottom - $0.top) * height }.sorted()
         let lineHeight = heights.isEmpty ? nil : heights[heights.count / 2]
-        let key = TextMatch.normalize(paragraphs.joined(separator: " "))
-        let icons = ScreenTranslation.paragraphIcons(lines)
+        var key = TextMatch.normalize(paragraphs.joined(separator: " "))
+        var icons = ScreenTranslation.paragraphIcons(lines)
+        // Alanda birbirinden ayrı duran yazılar (başlık ile ayrı sütundaki hedef, alt alta iki bildirim) "Ekranı çevir"deki
+        // gibi gruplanır; her grubun çevirisi TV'de kendi yerine konur. Tek grupta (ya da yeri bilinmeyen satır varsa)
+        // eskisi gibi tek kutu. Anahtar grup yapısını da içerir: aynı yazı farklı gruplanırsa bloklar yeniden kurulur.
+        var blocks: [Block]?
+        let groups = lines.count > 1 && boxes.count == lines.count ? ScreenTranslation.groups(reading) : []
+        if groups.count > 1, groups.count < ScreenTranslation.maxGroups {
+            paragraphs = groups.flatMap(\.paragraphs)
+            icons = groups.flatMap { $0.icons ?? $0.paragraphs.map { _ in [IconSlot]() } }
+            var list: [Block] = []
+            var start = 0
+            for group in groups {
+                list.append(Block(start: start, count: group.paragraphs.count, box: group.box.placed(in: place),
+                                  lineHeight: group.lineHeight * height))
+                start += group.paragraphs.count
+            }
+            blocks = list
+            key = TextMatch.normalize(paragraphs.joined(separator: " ")) + "|" + list.map { String($0.count) }.joined(separator: ",")
+        }
         var cut: [[IconSlot]]?
         if let frame, icons.contains(where: { !$0.isEmpty }) {
             cut = icons.map { ButtonIcons.withImages($0, frame: frame) }
         }
-        return Candidate(paragraphs: paragraphs, box: box, lineHeight: lineHeight, key: key, icons: cut)
+        return Candidate(paragraphs: paragraphs, box: box, lineHeight: lineHeight, key: key, icons: cut, blocks: blocks)
     }
 
     /// Kararlı yazı: öncekinden farklıysa çevrilip gönderilir, boşsa kutu kalkar.
@@ -203,11 +246,24 @@ public final class RegionWatcher {
         if state.shown == candidate.key {
             guard state.renderedKey == candidate.key,
                   let renderedText = state.renderedText, !renderedText.isEmpty else { return }
-            guard state.renderedBox != candidate.box || state.renderedLineHeight != candidate.lineHeight else { return }
+            guard state.renderedBox != candidate.box || state.renderedLineHeight != candidate.lineHeight
+                    || state.renderedLayout != candidate.blocks else { return }
+            // Aynı yazı kaydı: çeviriler korunur, bloklar yeni yerlerine taşınır (anahtar aynıysa grup sayısı da aynıdır).
+            var moved: [(group: Int, item: ScreenTranslation.Item)]?
+            if let rendered = state.renderedBlocks, let current = candidate.blocks {
+                moved = rendered.map { block -> (group: Int, item: ScreenTranslation.Item) in
+                    var item = block.item
+                    item.box = current[block.group].box
+                    item.lineHeight = current[block.group].lineHeight
+                    return (block.group, item)
+                }
+            }
             server.sendRegion(id: area.id, text: renderedText, box: candidate.box, lineHeight: candidate.lineHeight,
-                              icons: state.renderedIcons)
+                              icons: state.renderedIcons, blocks: moved?.map(\.item))
             state.renderedBox = candidate.box
             state.renderedLineHeight = candidate.lineHeight
+            state.renderedLayout = candidate.blocks
+            state.renderedBlocks = moved
             states[area.id] = state
             return
         }
@@ -249,28 +305,51 @@ public final class RegionWatcher {
             if let all = candidate.icons, index < all.count { slots += all[index] }
         }
         // Çevirisi aslıyla aynı (ad, sayı, zaten hedef dilde): kutu gösterilmez.
-        let same = zip(candidate.paragraphs, text).allSatisfy {
+        let similar = zip(candidate.paragraphs, text).map {
             TextMatch.isSimilar(TextMatch.normalize(IconText.plain($0)), TextMatch.normalize(IconText.plain($1)), threshold: 0.90)
         }
-        if same {
+        if similar.allSatisfy({ $0 }) {
             server.sendRegion(id: area.id, text: "", box: nil, lineHeight: nil)
             states[area.id]?.renderedKey = candidate.key
             states[area.id]?.renderedText = ""
             states[area.id]?.renderedIcons = nil
             states[area.id]?.renderedBox = nil
             states[area.id]?.renderedLineHeight = nil
+            states[area.id]?.renderedLayout = nil
+            states[area.id]?.renderedBlocks = nil
             return
         }
         let origin = fromPack == candidate.paragraphs.count ? "paket" : fromPack > 0 ? "paket+motor" : "motor"
         onLog?("ek alan \(area.name): \(SubtitleLog.excerpt(IconText.plain(candidate.paragraphs.joined(separator: " ")))) → \(origin)")
         let rendered = IconText.render(text.joined(separator: "\n"), slots: slots)
         let icons = rendered.icons.isEmpty ? nil : rendered.icons
-        server.sendRegion(id: area.id, text: rendered.text, box: candidate.box, lineHeight: candidate.lineHeight, icons: icons)
+        let blocks = candidate.blocks.map { Self.renderBlocks(candidate, layout: $0, text: text, similar: similar, slots: slots) }
+        server.sendRegion(id: area.id, text: rendered.text, box: candidate.box, lineHeight: candidate.lineHeight, icons: icons,
+                          blocks: blocks?.map(\.item))
         states[area.id]?.renderedKey = candidate.key
         states[area.id]?.renderedText = rendered.text
         states[area.id]?.renderedIcons = icons
         states[area.id]?.renderedBox = candidate.box
         states[area.id]?.renderedLineHeight = candidate.lineHeight
+        states[area.id]?.renderedLayout = candidate.blocks
+        states[area.id]?.renderedBlocks = blocks
+    }
+
+    /// Her grubun çevirisi kendi yeriyle. Çevirisi aslıyla aynı grup (ad, sayı) atlanır; İngilizcesi görünür kalır.
+    /// `text` simge imlerini bütün alanın sırasıyla taşır; `slots` o sıradaki simgeler.
+    static func renderBlocks(_ candidate: Candidate, layout: [Block], text: [String], similar: [Bool],
+                             slots: [IconSlot]) -> [(group: Int, item: ScreenTranslation.Item)] {
+        var result: [(group: Int, item: ScreenTranslation.Item)] = []
+        for (index, block) in layout.enumerated() {
+            let range = block.start..<(block.start + block.count)
+            if range.allSatisfy({ similar[$0] }) { continue }
+            let rendered = IconText.render(range.map { text[$0] }.joined(separator: "\n"), slots: slots)
+            let source = range.map { IconText.plain(candidate.paragraphs[$0]) }.joined(separator: "\n")
+            result.append((index, ScreenTranslation.Item(source: source, translation: rendered.text, box: block.box,
+                                                          lineHeight: block.lineHeight,
+                                                          icons: rendered.icons.isEmpty ? nil : rendered.icons)))
+        }
+        return result
     }
 
     /// Parçalar önce pakette aranır; kalanlar çeviri motoruna gider (yapay zekâda tek istekte). Motora simgeleri adlarla

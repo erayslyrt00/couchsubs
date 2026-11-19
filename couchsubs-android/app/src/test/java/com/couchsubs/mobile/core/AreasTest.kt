@@ -64,13 +64,107 @@ class AreasTest {
         val sent = mutableListOf<Pair<String, String>>()
         val placements = mutableListOf<Pair<TextBox?, Double?>>()
         var cleared = 0
-        override fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?) {
+        /** Her gönderimin blokları ([sent] ile aynı sırada; bloksuz gönderimde null). */
+        val blocks = mutableListOf<List<ScreenTranslation.Item>?>()
+        override fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?) =
+            sendRegion(id, text, box, lineHeight, null, null)
+        override fun sendRegion(
+            id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>?,
+            blocks: List<ScreenTranslation.Item>?,
+        ) {
             sent.add(id to text)
             placements.add(box to lineHeight)
+            this.blocks.add(blocks)
         }
         override fun clearRegions() {
             cleared++
         }
+    }
+
+    private val quest = ExtraArea(id = "q", name = "Quest", region = ExtraAreaPreset.QUEST.region)
+
+    private fun at(text: String, left: Double, top: Double, right: Double, bottom: Double) =
+        TextLine(text, TextBox(left, top, right, bottom))
+
+    private fun inQuest(box: TextBox) = box.placedIn(quest.region.box)
+
+    /**
+     * Alanda birbirinden ayrı duran yazılar alt alta tek kutuda değil, her biri kendi yeriyle gider; eski TV'ler için
+     * birleşik metin de kalır (Windows ve Mac/iPhone ile aynı).
+     */
+    @Test
+    fun separateGroupsInAnAreaAreSentAsBlocksAtTheirOwnPlaces() {
+        val recorder = Recorder()
+        val lines = listOf(at("Find the blacksmith", 0.5, 0.1, 0.95, 0.2), at("Go to the barn", 0.1, 0.6, 0.4, 0.7))
+        val watcher = RegionWatcher({ Reading(lines) }, { "TR: $it" }, recorder)
+        repeat(2) { watcher.pass(setOf(quest.id), listOf(quest to RegionWatcher.Crop(Unit, signature(10)))) }
+        assertEquals(listOf("q" to "TR: Find the blacksmith\nTR: Go to the barn"), recorder.sent)
+        val blocks = recorder.blocks.single()!!
+        assertEquals(listOf("TR: Find the blacksmith", "TR: Go to the barn"), blocks.map { it.translation })
+        assertEquals(listOf("Find the blacksmith", "Go to the barn"), blocks.map { it.source })
+        assertEquals(inQuest(TextBox(0.5, 0.1, 0.95, 0.2)), blocks[0].box)
+        assertEquals(inQuest(TextBox(0.1, 0.6, 0.4, 0.7)), blocks[1].box)
+        assertEquals(0.1 * (quest.region.bottom - quest.region.top), blocks[0].lineHeight, 1e-9)
+        assertEquals(inQuest(TextBox(0.1, 0.1, 0.95, 0.7)), recorder.placements[0].first)
+    }
+
+    /** Tek grup (alt alta sarılmış tek yazı) eskisi gibi tek kutudur, blok gönderilmez. */
+    @Test
+    fun oneGroupIsSentWithoutBlocks() {
+        val recorder = Recorder()
+        val calls = mutableListOf<String>()
+        val lines = listOf(at("Find the blacksmith and ask him", 0.1, 0.2, 0.9, 0.3), at("to repair your sword.", 0.1, 0.3, 0.9, 0.4))
+        val watcher = RegionWatcher({ Reading(lines) }, { calls.add(it); "Demirciyi bul ve kılıcını onarmasını iste." }, recorder)
+        repeat(2) { watcher.pass(setOf(quest.id), listOf(quest to RegionWatcher.Crop(Unit, signature(10)))) }
+        assertEquals(listOf("Find the blacksmith and ask him to repair your sword."), calls)
+        assertEquals(listOf("q" to "Demirciyi bul ve kılıcını onarmasını iste."), recorder.sent)
+        assertEquals(listOf<List<ScreenTranslation.Item>?>(null), recorder.blocks)
+    }
+
+    /** Çevirisi aslıyla aynı grup (ad) blok olarak gönderilmez; İngilizcesi görünür kalır. */
+    @Test
+    fun untranslatedGroupIsLeftOutOfTheBlocks() {
+        val recorder = Recorder()
+        val lines = listOf(at("Arthur", 0.1, 0.1, 0.3, 0.2), at("Meet me at the barn", 0.1, 0.6, 0.6, 0.7))
+        val watcher = RegionWatcher({ Reading(lines) }, { if (it == "Arthur") it else "TR: $it" }, recorder)
+        repeat(2) { watcher.pass(setOf(quest.id), listOf(quest to RegionWatcher.Crop(Unit, signature(10)))) }
+        val blocks = recorder.blocks.single()!!
+        assertEquals(listOf("TR: Meet me at the barn"), blocks.map { it.translation })
+        assertEquals(inQuest(TextBox(0.1, 0.6, 0.6, 0.7)), blocks[0].box)
+    }
+
+    /** Aynı yazı kayınca yeniden çevrilmez; bloklar aynı çeviriyle yeni yerlerine gönderilir. */
+    @Test
+    fun movedBlocksKeepTheirTranslations() {
+        val recorder = Recorder()
+        val calls = mutableListOf<String>()
+        var lines = listOf(at("Find the blacksmith", 0.5, 0.1, 0.95, 0.2), at("Go to the barn", 0.1, 0.6, 0.4, 0.7))
+        val watcher = RegionWatcher({ Reading(lines) }, { calls.add(it); "TR: $it" }, recorder)
+        fun pass(value: Int) = watcher.pass(setOf(quest.id), listOf(quest to RegionWatcher.Crop(Unit, signature(value))))
+        pass(10)
+        pass(10)
+        lines = listOf(at("Find the blacksmith", 0.5, 0.1, 0.95, 0.2), at("Go to the barn", 0.1, 0.7, 0.4, 0.8))
+        pass(60)
+        assertEquals(listOf("Find the blacksmith", "Go to the barn"), calls)
+        assertEquals(2, recorder.sent.size)
+        val moved = recorder.blocks[1]!!
+        assertEquals(listOf("TR: Find the blacksmith", "TR: Go to the barn"), moved.map { it.translation })
+        assertEquals(inQuest(TextBox(0.1, 0.7, 0.4, 0.8)), moved[1].box)
+        // Yer değişmeden yeniden okunan aynı yazı bir şey göndermez.
+        pass(100)
+        assertEquals(2, recorder.sent.size)
+    }
+
+    @Test
+    fun regionFrameCarriesBlocksBesideTheJoinedText() {
+        val blocks = listOf(ScreenTranslation.Item("Find", "Bul", TextBox(0.7, 0.05, 0.95, 0.08), 0.03),
+            ScreenTranslation.Item("Go", "Git", TextBox(0.6, 0.15, 0.7, 0.2), 0.04))
+        val frame = SubtitleServer.regionFrame("q", "Bul\nGit", TextBox(0.6, 0.05, 0.95, 0.2), 0.03, null, blocks)
+        assertTrue(frame, frame.contains("\"blocks\":["))
+        assertTrue(frame, frame.contains("\"text\":\"Bul\"") && frame.contains("\"text\":\"Git\"") && frame.contains("\"line\":0.04"))
+        // Boşalan alanda blok gönderilmez.
+        val empty = SubtitleServer.regionFrame("q", "", null, null, null, blocks)
+        assertFalse(empty, empty.contains("blocks"))
     }
 
     private fun signature(value: Int) = ByteArray(RegionSignature.WIDTH * RegionSignature.HEIGHT) { value.toByte() }

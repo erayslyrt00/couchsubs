@@ -216,6 +216,16 @@ interface RegionSender {
     fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>?) =
         sendRegion(id, text, box, lineHeight)
 
+    /**
+     * Alanda birbirinden ayrı duran yazı grupları varsa (görev başlığı ve ayrı sütundaki hedef) [blocks] her grubun
+     * çevirisini kendi yeriyle taşır; TV her birini kendi İngilizce yazısının üstüne koyar. Blokları bilmeyen gönderici
+     * birleşik metni yollar.
+     */
+    fun sendRegion(
+        id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>?,
+        blocks: List<ScreenTranslation.Item>?,
+    ) = sendRegion(id, text, box, lineHeight, icons)
+
     fun clearRegions()
 }
 
@@ -245,24 +255,66 @@ class RegionWatcher(
             val lines = reading.withButtonIcons().withoutButtonPrompts().withoutOcrNoise().lines
                 .filter { ScreenText.isWords(it.text) }
                 .sortedBy { it.box?.top ?: 0.0 }
-            val paragraphs = ScreenText.paragraphs(lines)
+            var paragraphs = ScreenText.paragraphs(lines)
             val boxes = lines.mapNotNull { it.box }
             val box = boxes.reduceOrNull { a, b -> a.union(b) }?.placedIn(region.box)
-            val heights = boxes.map { (it.bottom - it.top) * (region.bottom - region.top) }.sorted()
+            val height = region.bottom - region.top
+            val heights = boxes.map { (it.bottom - it.top) * height }.sorted()
             val lineHeight = if (heights.isEmpty()) null else heights[heights.size / 2]
-            val icons = ScreenText.paragraphIcons(lines)
+            var icons = ScreenText.paragraphIcons(lines)
+            var key = TextMatch.normalize(paragraphs.joinToString(" "))
+            // Alanda birbirinden ayrı duran yazılar (başlık ile ayrı sütundaki hedef, alt alta iki bildirim) "Ekranı
+            // çevir"deki gibi gruplanır; her grubun çevirisi TV'de kendi yerine konur. Tek grupta (ya da yeri bilinmeyen
+            // satır varsa) eskisi gibi tek kutu. Anahtar grup yapısını da içerir: aynı yazı farklı gruplanırsa bloklar
+            // yeniden kurulur.
+            var blocks: List<Block>? = null
+            val groups = if (lines.size > 1 && boxes.size == lines.size) ScreenTranslation.groups(reading) else emptyList()
+            if (groups.size > 1 && groups.size < ScreenTranslation.MAX_GROUPS) {
+                paragraphs = groups.flatMap { it.paragraphs }
+                icons = groups.flatMap { group -> group.icons ?: group.paragraphs.map { emptyList<IconSlot>() } }
+                var start = 0
+                val list = groups.map { group ->
+                    Block(start, group.paragraphs.size, group.box.placedIn(region.box), group.lineHeight * height)
+                        .also { start += group.paragraphs.size }
+                }
+                blocks = list
+                key = TextMatch.normalize(paragraphs.joinToString(" ")) + "|" + list.joinToString(",") { it.count.toString() }
+            }
             val cut = if (frame == null || icons.all { it.isEmpty() }) null else icons.map { ButtonIcons.withImages(it, frame) }
-            return Candidate(paragraphs, box, lineHeight, TextMatch.normalize(paragraphs.joinToString(" ")), cut)
+            return Candidate(paragraphs, box, lineHeight, key, cut, blocks)
+        }
+
+        /**
+         * Her grubun çevirisi kendi yeriyle. Çevirisi aslıyla aynı grup (ad, sayı) atlanır; İngilizcesi görünür kalır.
+         * [text] simge imlerini bütün alanın sırasıyla taşır; [slots] o sıradaki simgeler.
+         */
+        internal fun renderBlocks(
+            candidate: Candidate, layout: List<Block>, text: List<String>, similar: List<Boolean>, slots: List<IconSlot>,
+        ): List<Pair<Int, ScreenTranslation.Item>> = layout.mapIndexedNotNull { index, block ->
+            val range = block.start until block.start + block.count
+            if (range.all { similar[it] }) return@mapIndexedNotNull null
+            val rendered = IconText.render(range.joinToString("\n") { text[it] }, slots)
+            val source = range.joinToString("\n") { IconText.plain(candidate.paragraphs[it]) }
+            index to ScreenTranslation.Item(source, rendered.text, block.box, block.lineHeight, rendered.icons.takeIf { it.isNotEmpty() })
         }
     }
 
     /** Bir alanın karesi: okunacak gri görüntü ve izi; [frame] kumanda simgelerinin kesileceği aynı görüntü. */
     class Crop(val pixels: Any, val signature: ByteArray, val frame: GrayFrame? = null)
 
-    /** [icons]: her parçadaki kumanda simgeleri (kareden kesilmiş), parçadaki sırasıyla. */
+    /**
+     * Alanda ayrı duran bir yazı grubu: [Candidate.paragraphs] içinde [start]'tan başlayan [count] parça, karedeki yeri ve
+     * satır yüksekliği (kareye oranla).
+     */
+    data class Block(val start: Int, val count: Int, val box: TextBox, val lineHeight: Double)
+
+    /**
+     * [icons]: her parçadaki kumanda simgeleri (kareden kesilmiş), parçadaki sırasıyla. [blocks]: alanda birden çok ayrı
+     * yazı grubu varsa grupları; tek grupta null (tek kutu).
+     */
     data class Candidate(
         val paragraphs: List<String>, val box: TextBox?, val lineHeight: Double?, val key: String,
-        val icons: List<List<IconSlot>>? = null,
+        val icons: List<List<IconSlot>>? = null, val blocks: List<Block>? = null,
     )
 
     private class State {
@@ -275,6 +327,9 @@ class RegionWatcher(
         var renderedIcons: List<IconPlacement>? = null
         var renderedBox: TextBox? = null
         var renderedLineHeight: Double? = null
+        var renderedLayout: List<Block>? = null
+        /** Gönderilen bloklar ve her birinin [Candidate.blocks] içindeki sırası. */
+        var renderedBlocks: List<Pair<Int, ScreenTranslation.Item>>? = null
     }
 
     private val lock = Any()
@@ -369,10 +424,18 @@ class RegionWatcher(
         if (state.shown == candidate.key) {
             val text = state.renderedText
             if (state.renderedKey != candidate.key || text.isNullOrEmpty()) return
-            if (state.renderedBox == candidate.box && state.renderedLineHeight == candidate.lineHeight) return
-            sender.sendRegion(area.id, text, candidate.box, candidate.lineHeight, state.renderedIcons)
+            if (state.renderedBox == candidate.box && state.renderedLineHeight == candidate.lineHeight &&
+                state.renderedLayout == candidate.blocks) return
+            // Aynı yazı kaydı: çeviriler korunur, bloklar yeni yerlerine taşınır (anahtar aynıysa grup sayısı da aynıdır).
+            val current = candidate.blocks
+            val moved = if (current == null) null else state.renderedBlocks?.map { (group, item) ->
+                group to item.copy(box = current[group].box, lineHeight = current[group].lineHeight)
+            }
+            sender.sendRegion(area.id, text, candidate.box, candidate.lineHeight, state.renderedIcons, moved?.map { it.second })
             state.renderedBox = candidate.box
             state.renderedLineHeight = candidate.lineHeight
+            state.renderedLayout = candidate.blocks
+            state.renderedBlocks = moved
             return
         }
         val previousShown = state.shown
@@ -411,23 +474,28 @@ class RegionWatcher(
             candidate.icons?.getOrNull(i)?.let { slots.addAll(it) }
         }
         // Çevirisi aslıyla aynı (ad, sayı, zaten hedef dilde): kutu gösterilmez.
-        val same = candidate.paragraphs.zip(text).all { (a, b) ->
+        val similar = candidate.paragraphs.zip(text).map { (a, b) ->
             TextMatch.isSimilar(TextMatch.normalize(IconText.plain(a)), TextMatch.normalize(IconText.plain(b)), 0.90)
         }
-        if (same) {
+        if (similar.all { it }) {
             sender.sendRegion(area.id, "", null, null)
             state.renderedText = ""
             state.renderedIcons = null
             state.renderedBox = null
             state.renderedLineHeight = null
+            state.renderedLayout = null
+            state.renderedBlocks = null
         } else {
             val rendered = IconText.render(text.joinToString("\n"), slots)
             val icons = rendered.icons.takeIf { it.isNotEmpty() }
-            sender.sendRegion(area.id, rendered.text, candidate.box, candidate.lineHeight, icons)
+            val blocks = candidate.blocks?.let { renderBlocks(candidate, it, text, similar, slots) }
+            sender.sendRegion(area.id, rendered.text, candidate.box, candidate.lineHeight, icons, blocks?.map { it.second })
             state.renderedText = rendered.text
             state.renderedIcons = icons
             state.renderedBox = candidate.box
             state.renderedLineHeight = candidate.lineHeight
+            state.renderedLayout = candidate.blocks
+            state.renderedBlocks = blocks
         }
         state.renderedKey = candidate.key
     }

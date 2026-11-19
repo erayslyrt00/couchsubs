@@ -231,6 +231,15 @@ public final class SubtitleServer: @unchecked Sendable {
         return ["left": round(box.left), "top": round(box.top), "right": round(box.right), "bottom": round(box.bottom)]
     }
 
+    /// Yeriyle bir çeviri ("Ekranı çevir" öğesi ya da ek alan bloğu).
+    static func json(_ item: ScreenTranslation.Item) -> [String: Any] {
+        let line = Decimal(Int((max(0, min(1, item.lineHeight)) * 10000).rounded())) / 10000
+        var result: [String: Any] = ["box": Self.json(item.box), "line": line, "text": item.translation]
+        if item.paragraphs { result["paragraphs"] = true }
+        if let icons = item.icons, !icons.isEmpty { result["icons"] = Self.json(icons) }
+        return result
+    }
+
     static func json(_ icons: [IconPlacement]) -> [[String: Any]] {
         icons.map { icon -> [String: Any] in ["at": icon.at, "src": icon.image] }
     }
@@ -266,14 +275,7 @@ public final class SubtitleServer: @unchecked Sendable {
     /// kumanda simgeleri varsa `icons` her simgenin düz metindeki yerini (`at`) ve PNG'sini (`src`) taşır; eski TV
     /// uygulamaları alanı yok sayıp düz metni gösterir (Windows ile aynı).
     public func sendScreen(_ items: [ScreenTranslation.Item], durationMs: Int) {
-        let round = { (value: Double) in Decimal(Int((max(0, min(1, value)) * 10000).rounded())) / 10000 }
-        let list: [[String: Any]] = items.map { item in
-            var json: [String: Any] = ["box": Self.json(item.box), "line": round(item.lineHeight), "text": item.translation]
-            if item.paragraphs { json["paragraphs"] = true }
-            if let icons = item.icons, !icons.isEmpty { json["icons"] = Self.json(icons) }
-            return json
-        }
-        broadcast(event: "screen", json: ["duration": durationMs, "items": list])
+        broadcast(event: "screen", json: ["duration": durationMs, "items": items.map { Self.json($0) }])
         // Altyazı yalnız bilgisayardaysa (TV yok) çeviriler başka hiçbir yere gitmiyordu: tuşa basınca yalnız
         // "Ekran çevriliyor…" görünüyordu.
         onEvent?(.screen(text: items.map(\.translation).joined(separator: "\n"), durationMs: durationMs))
@@ -289,8 +291,17 @@ public final class SubtitleServer: @unchecked Sendable {
     /// `icons`: çevirinin içindeki kumanda simgeleri; `icons` alanı her simgenin düz metindeki yerini (`at`) ve PNG'sini
     /// (`src`) taşır. Eski TV uygulamaları alanı yok sayıp düz metni gösterir.
     public func sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: [IconPlacement]?) {
+        sendRegion(id: id, text: text, box: box, lineHeight: lineHeight, icons: icons, blocks: nil)
+    }
+
+    /// `blocks`: alanda ayrı duran yazı gruplarının çevirileri kendi yerleriyle (`blocks`; her biri `screen` olayındaki
+    /// öğe gibi `box`, `line`, `text`). TV her birini kendi İngilizce yazısının üstüne koyar. Alanı tanımayan eski TV
+    /// uygulamaları birleşik `text`'i tek kutuda gösterir (Windows ile aynı).
+    public func sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: [IconPlacement]?,
+                           blocks: [ScreenTranslation.Item]?) {
         var json: [String: Any] = ["id": id, "text": text]
         if let icons, !icons.isEmpty { json["icons"] = Self.json(icons) }
+        if let blocks, !blocks.isEmpty, !text.isEmpty { json["blocks"] = blocks.map { Self.json($0) } }
         if let box { json["box"] = Self.json(box) }
         if let lineHeight { json["line"] = Decimal(Int((max(0, min(1, lineHeight)) * 10000).rounded())) / 10000 }
         broadcast(event: "region", json: json)

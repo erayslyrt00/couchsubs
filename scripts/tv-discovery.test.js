@@ -300,6 +300,40 @@ test('ek alanın çevirisi kendi yerinde küçük kutuda görünür, boş metin 
   assert.strictEqual(host.className, 'hidden');
 });
 
+// Alanda ayrı duran yazı grupları (başlık, ayrı sütundaki hedef) "blocks" ile kendi yerleriyle gelir; alt alta tek
+// kutuda değil, her biri kendi İngilizce yazısının üstünde gösterilir.
+test('ek alanın blokları kendi yerlerinde gösterilir, bloksuz olaya dönünce tek kutu kalır', () => {
+  const tv = startTv({ saved: 'http://192.168.1.109:8787', alive: new Set(['http://192.168.1.109:8787']), hasLocalAddress: false });
+  tv.clock.advance(1000);
+  const host = tv.element('regions');
+  const blocks = [
+    { text: 'Demirciyi bul', box: { left: 0.7, top: 0.05, right: 0.95, bottom: 0.08 }, line: 0.03 },
+    { text: 'Ahıra git', box: { left: 0.55, top: 0.2, right: 0.65, bottom: 0.23 }, line: 0.03 }
+  ];
+  tv.emit('region', { id: 'q', text: 'Demirciyi bul\nAhıra git', box: { left: 0.55, top: 0.05, right: 0.95, bottom: 0.23 }, blocks });
+  assert.strictEqual(host.children.length, 1);
+  assert.strictEqual(host.className, '');
+  const group = host.children[0];
+  assert.strictEqual(group.className, 'region-blocks');
+  assert.deepStrictEqual(group.children.map((c) => c.textContent), ['Demirciyi bul', 'Ahıra git']);
+  // Her blok kendi yazısının sol üstünde (pay 0.004), birleşik kutunun köşesinde değil.
+  assert.strictEqual(group.children[0].style.left, (0.696 * 100) + '%');
+  assert.strictEqual(group.children[1].style.left, (0.546 * 100) + '%');
+  assert.strictEqual(group.children[1].style.top, (0.196 * 100) + '%');
+  // Aynı alanın yeni blokları eskilerin yerine geçer, birikmez.
+  tv.emit('region', { id: 'q', text: 'Ahıra git', box: blocks[1].box, blocks: [blocks[1]] });
+  assert.strictEqual(host.children.length, 1);
+  assert.deepStrictEqual(host.children[0].children.map((c) => c.textContent), ['Ahıra git']);
+  // Bloksuz olay (tek grup ya da eski bilgisayar) eski tek kutuya döner.
+  tv.emit('region', { id: 'q', text: 'Köprüyü geç', box: { left: 0.7, top: 0.05, right: 0.95, bottom: 0.1 } });
+  assert.strictEqual(host.children.length, 1);
+  assert.strictEqual(host.children[0].className, 'region');
+  assert.strictEqual(host.children[0].textContent, 'Köprüyü geç');
+  tv.emit('region', { id: 'q', text: 'Demirciyi bul\nAhıra git', box: blocks[0].box, blocks });
+  tv.emit('region', { id: 'q', text: '' });
+  assert.strictEqual(host.children.length, 0);
+});
+
 test('yeri bilinmeyen ya da bozuk ek alan olayı bir şey göstermez', () => {
   const tv = startTv({ saved: 'http://192.168.1.109:8787', alive: new Set(['http://192.168.1.109:8787']), hasLocalAddress: false });
   tv.clock.advance(1000);

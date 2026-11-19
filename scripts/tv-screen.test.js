@@ -37,23 +37,43 @@ const scenarios = {
   icons: [Object.assign(item('Koşmak için basılı tutun.', .1, .2, .28, .23), {icons: [{at: 12, src: PNG}]}),
     Object.assign(item('Kaydet', .1, .5, .28, .53), {icons: [{at: 0, src: 'javascript:alert(1)'}]})],
 };
+// Ek alanda ayrı duran iki yazı grubu (sağ üstte görev başlığı, altında sola kaymış ayrı hedef satırı).
+const regionBlocks = [item('Demirciyi bul ve kılıcını onarmasını iste', .72, .05, .95, .08),
+  item('Ahıra git', .62, .12, .70, .15)];
 
 function render(width, height) {
   const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
   const start = app.indexOf('  var screenTimer = null;');
   const end = app.indexOf('\n  //', app.indexOf('  function hideScreen()', start));
+  const regionStart = app.indexOf('  var regionBoxes = {};');
+  const regionEnd = app.indexOf('\n  //', app.indexOf('  function hideRegions()', regionStart));
   const validStart = app.indexOf('  function validBox(box)');
   const validEnd = app.indexOf('\n  //', validStart);
-  assert.ok(start > 0 && end > start && validStart > 0 && validEnd > validStart, 'TV işlevleri bulunamadı');
+  assert.ok(start > 0 && end > start && validStart > 0 && validEnd > validStart && regionStart > 0 && regionEnd > regionStart,
+    'TV işlevleri bulunamadı');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'couchsubs-screen-test-'));
   try {
     const html = `<!doctype html><meta charset="utf-8"><style>${fs.readFileSync(path.join(root, 'style.css'), 'utf8')}</style>
-      <div id="screen"></div><pre id="result"></pre><script>
+      <div id="regions" class="hidden"></div><div id="screen"></div><pre id="result"></pre><script>
       function $(id) { return document.getElementById(id); }
       var hidden = []; function hideSubtitle(reason) { hidden.push(reason); }
       ${app.slice(validStart, validEnd)}
       ${app.slice(start, end)}
+      ${app.slice(regionStart, regionEnd)}
       var result = {};
+      function measure(el) {
+        var b = el.getBoundingClientRect();
+        return {text: el.textContent, left:b.left, right:b.right, top:b.top, bottom:b.bottom,
+          width:b.width, height:b.height, font:parseFloat(getComputedStyle(el).fontSize),
+          clientHeight:el.clientHeight, scrollHeight:el.scrollHeight, align:getComputedStyle(el).textAlign,
+          position:getComputedStyle(el).position, background:getComputedStyle(el).backgroundColor};
+      }
+      var regionBlocks = ${JSON.stringify(regionBlocks)};
+      showRegion({id:'q', text:'Demirciyi bul\\nAhıra git', box:{left:.62, top:.05, right:.95, bottom:.15}, blocks:regionBlocks});
+      result.regionKind = $('regions').children[0].className;
+      result.regionBlocks = Array.from($('regions').children[0].children).map(measure);
+      showRegion({id:'q', text:'Ahıra git', box:regionBlocks[1].box});
+      result.regionSingle = Array.from($('regions').children).map(function(el) { return el.className; });
       var scenarios = ${JSON.stringify(scenarios)};
       for (var key in scenarios) {
         showScreen(scenarios[key], 10000);
@@ -149,6 +169,23 @@ test('TV ekran çevirisi: ' + width + '×' + height, {skip: !browser && 'Chrome/
     assert.equal(r.icons[0].lead, 'Koşmak için ');
     assert.equal(r.icons[1].images, 0);
     assert.equal(r.icons[1].text, 'Kaydet');
+  });
+  await t.test('ek alanın ayrı yazıları alt alta değil, kendi yerlerinde', () => {
+    assert.equal(r.regionKind, 'region-blocks');
+    assert.equal(r.regionBlocks.length, 2);
+    const [title, goal] = r.regionBlocks;
+    assert.equal(title.text, regionBlocks[0].text);
+    assert.equal(goal.text, regionBlocks[1].text);
+    assert.equal(title.position, 'absolute');
+    assert.notEqual(title.background, 'rgba(0, 0, 0, 0)');
+    // Her blok kendi İngilizce yazısının sol üstünde (pay 0.004).
+    assert.ok(Math.abs(title.left - .716 * width) < 1, JSON.stringify(title));
+    assert.ok(Math.abs(goal.left - .616 * width) < 1, JSON.stringify(goal));
+    assert.ok(Math.abs(goal.top - .116 * height) < 1, JSON.stringify(goal));
+    // Uzun başlık alttaki bağımsız hedefin üstüne taşmaz ya da yazı kesilmez.
+    assert.ok(title.bottom <= goal.top + 1 || title.right <= goal.left || title.left >= goal.right, JSON.stringify(r.regionBlocks));
+    assert.ok(title.scrollHeight <= title.clientHeight + 1 || title.font === 14);
+    assert.deepEqual(r.regionSingle, ['region']);
   });
   await t.test('kapatma ve normal altyazıdan geçiş korunur', () => {
     assert.equal(r.hidden, 'hidden'); assert.equal(r.count, 0);

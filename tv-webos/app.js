@@ -738,12 +738,8 @@
     return bottom;
   }
 
-  function showScreen(items, duration) {
-    var host = $('screen');
-    // "Ekran çevriliyor…" yazısı sonuçların üstünde kalmasın.
-    hideSubtitle('screen');
-    host.innerHTML = '';
-    host.className = '';
+  // Yeriyle gelen çevirileri (ekranı çevir öğeleri, ek alan blokları) kendi İngilizce yazılarının üstüne koyar.
+  function placeItems(host, items) {
     var width = window.innerWidth || 1920;
     var height = window.innerHeight || 1080;
     for (var i = 0; i < (items || []).length; i++) {
@@ -776,6 +772,15 @@
       // En küçük okunabilir boyutta da sığmayan metni kesmeyiz/gizlemeyiz.
       // Bu uç durumda eski doğal büyüme davranışı korunur.
     }
+  }
+
+  function showScreen(items, duration) {
+    var host = $('screen');
+    // "Ekran çevriliyor…" yazısı sonuçların üstünde kalmasın.
+    hideSubtitle('screen');
+    host.innerHTML = '';
+    host.className = '';
+    placeItems(host, items);
     clearTimeout(screenTimer);
     screenTimer = setTimeout(hideScreen, duration || 20000);
   }
@@ -790,7 +795,9 @@
   // Bilgisayar altyazının yanında ekranın köşelerindeki yazıları da (görev, telefon mesajı, bildirim) sürekli okur ve
   // her alanın çevirisini "region" olayıyla gönderir: {id, text, box, line}. Çeviri İngilizce yazının yerinde küçük bir
   // kutuda durur; ekranın sağ yarısındaki kutu sağa, alt yarısındaki alta yaslanır, Türkçe uzun gelirse kutu ekranın
-  // içine doğru büyür. Boş "text" o alanın kutusunu, "region-clear" hepsini kaldırır. Ana altyazıya dokunulmaz.
+  // içine doğru büyür. Alanda birbirinden ayrı duran yazılar varsa "blocks" her grubun çevirisini kendi yeriyle taşır
+  // ve her biri "ekranı çevir"deki gibi kendi yazısının üstüne konur. Boş "text" o alanın kutusunu, "region-clear"
+  // hepsini kaldırır. Ana altyazıya dokunulmaz.
 
   var regionBoxes = {};
   var REGION_PAD = 0.004;
@@ -802,14 +809,27 @@
     if (!id) return;
     var box = validBox(data.box);
     if (!data.text || !box) return hideRegion(id);
+    // Alanda ayrı duran yazı grupları (görev başlığı ve ayrı sütundaki hedef) kendi yerleriyle gelir: her biri "ekranı
+    // çevir"deki gibi kendi İngilizce yazısının üstüne konur. Bloksuz olayda alanın çevirisi tek kutuda kalır.
+    var blocks = Array.isArray(data.blocks) ? data.blocks : null;
+    var kind = blocks && blocks.length ? 'region-blocks' : 'region';
     var el = regionBoxes[id];
+    // Bloklar her olayda baştan dizilir; tek kutudan bloklara (ya da tersine) geçen alanın eski kutusu kalkar.
+    if (el && (el.className !== kind || kind === 'region-blocks')) {
+      hideRegion(id);
+      el = null;
+    }
     if (!el) {
       el = document.createElement('div');
-      el.className = 'region';
+      el.className = kind;
       $('regions').appendChild(el);
       regionBoxes[id] = el;
     }
     $('regions').className = '';
+    if (kind === 'region-blocks') {
+      placeItems(el, blocks);
+      return;
+    }
     var width = window.innerWidth || 1920;
     var height = window.innerHeight || 1080;
     fillText(el, data.text, data.icons);

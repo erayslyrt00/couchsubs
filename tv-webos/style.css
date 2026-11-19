@@ -53,7 +53,7 @@ html, body {
   z-index: 8;
 }
 #screen.hidden { display: none; }
-#screen .item {
+#screen .item, #regions .region-blocks .item {
   position: absolute;
   box-sizing: border-box;
   padding: 2px 6px;
@@ -68,7 +68,7 @@ html, body {
   word-wrap: break-word;
   overflow: hidden;
 }
-#screen .item.paragraphs { text-align: left; white-space: pre-line; }
+#screen .item.paragraphs, #regions .region-blocks .item.paragraphs { text-align: left; white-space: pre-line; }
 /* Çevirinin içindeki kumanda simgesi (oyun karesinden kesilmiş): yazı boyunda, satırın ortasında. */
 #screen .icon, #regions .icon {
   height: 1.15em;
@@ -89,6 +89,14 @@ html, body {
   pointer-events: none;
 }
 #regions.hidden { display: none; }
+/* Ek alanda ayrı duran yazı grupları: her biri "ekranı çevir"deki gibi kendi İngilizce yazısının üstünde. */
+#regions .region-blocks {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
 #regions .region {
   position: absolute;
   box-sizing: border-box;

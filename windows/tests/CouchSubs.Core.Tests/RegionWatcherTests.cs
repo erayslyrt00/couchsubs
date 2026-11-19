@@ -40,17 +40,27 @@ public class RegionWatcherTests
                     return Task.FromException<string>(new InvalidOperationException("Expected test failure"));
                 }
             }
-            return Task.FromResult("TR: " + text);
+            return Task.FromResult(Map(text));
         }
+        public Func<string, string> Map { get; set; } = text => "TR: " + text;
     }
 
     private sealed class Server : IRegionSender
     {
         public List<(string Id, string Text, TextBox? Box, double? LineHeight)> Sent { get; } = [];
+        /// <summary>Her gönderimin blokları (<see cref="Sent"/> ile aynı sırada; bloksuz gönderimde null).</summary>
+        public List<IReadOnlyList<ScreenTranslation.Item>?> Blocks { get; } = [];
         public int Clears;
-        public void SendRegion(string id, string text, TextBox? box, double? lineHeight = null)
+        public void SendRegion(string id, string text, TextBox? box, double? lineHeight = null) =>
+            SendRegion(id, text, box, lineHeight, null, null);
+        public void SendRegion(string id, string text, TextBox? box, double? lineHeight, IReadOnlyList<IconPlacement>? icons,
+                               IReadOnlyList<ScreenTranslation.Item>? blocks)
         {
-            lock (Sent) Sent.Add((id, text, box, lineHeight));
+            lock (Sent)
+            {
+                Sent.Add((id, text, box, lineHeight));
+                Blocks.Add(blocks);
+            }
         }
         public void ClearRegions() => Interlocked.Increment(ref Clears);
     }
@@ -319,6 +329,93 @@ public class RegionWatcherTests
         await OfferAndWait();
         Assert.Equal(2, watcher.Passes);
         Assert.Equal(["TR: Find the blacksmith"], server.Sent.Select(s => s.Text));
+    }
+
+    private static TextLine At(string text, double left, double top, double right, double bottom) =>
+        new(text, new TextBox(left, top, right, bottom));
+
+    private static TextBox InQuest(TextBox box)
+    {
+        var region = Quest.Region;
+        return box.PlacedIn(new TextBox(region.Left, region.Top, region.Right, region.Bottom));
+    }
+
+    /// <summary>
+    /// Alanda birbirinden ayrı duran yazılar (görev başlığı ve sola kaymış ayrı hedef) alt alta tek kutuda değil, her biri
+    /// kendi yeriyle gider; eski TV'ler için birleşik metin de kalır.
+    /// </summary>
+    [Fact]
+    public async Task SeparateGroupsInAnAreaAreSentAsBlocksAtTheirOwnPlaces()
+    {
+        var reader = new Reader { Lines = [At("Find the blacksmith", 0.5, 0.1, 0.95, 0.2), At("Go to the barn", 0.1, 0.6, 0.4, 0.7)] };
+        var translator = new Translator();
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        Assert.Equal(["TR: Find the blacksmith\nTR: Go to the barn"], server.Sent.Select(s => s.Text));
+        var blocks = Assert.Single(server.Blocks)!;
+        Assert.Equal(["TR: Find the blacksmith", "TR: Go to the barn"], blocks.Select(b => b.Translation));
+        Assert.Equal(["Find the blacksmith", "Go to the barn"], blocks.Select(b => b.Source));
+        Assert.Equal(InQuest(new TextBox(0.5, 0.1, 0.95, 0.2)), blocks[0].Box);
+        Assert.Equal(InQuest(new TextBox(0.1, 0.6, 0.4, 0.7)), blocks[1].Box);
+        var height = Quest.Region.Bottom - Quest.Region.Top;
+        Assert.Equal(0.1 * height, blocks[0].LineHeight, 9);
+        // Birleşik kutu iki yazıyı da kapsar (bloksuz eski TV uygulamaları için).
+        Assert.Equal(InQuest(new TextBox(0.1, 0.1, 0.95, 0.7)), server.Sent[0].Box);
+    }
+
+    /// <summary>Tek grup (alt alta sarılmış tek yazı) eskisi gibi tek kutudur, blok gönderilmez.</summary>
+    [Fact]
+    public async Task OneGroupIsSentWithoutBlocks()
+    {
+        var reader = new Reader { Lines = [Line("Find the blacksmith and ask him", 0.2), Line("to repair your sword.", 0.3)] };
+        var translator = new Translator { Map = _ => "Demirciyi bul ve kılıcını onarmasını iste." };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        Assert.Equal(["Find the blacksmith and ask him to repair your sword."], translator.Calls);
+        Assert.Equal(["Demirciyi bul ve kılıcını onarmasını iste."], server.Sent.Select(s => s.Text));
+        Assert.Equal([null], server.Blocks);
+    }
+
+    /// <summary>Çevirisi aslıyla aynı grup (ad) blok olarak gönderilmez; İngilizcesi görünür kalır.</summary>
+    [Fact]
+    public async Task UntranslatedGroupIsLeftOutOfTheBlocks()
+    {
+        var reader = new Reader { Lines = [At("Arthur", 0.1, 0.1, 0.3, 0.2), At("Meet me at the barn", 0.1, 0.6, 0.6, 0.7)] };
+        var translator = new Translator { Map = text => text == "Arthur" ? "Arthur" : "TR: " + text };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        var blocks = Assert.Single(server.Blocks)!;
+        var block = Assert.Single(blocks);
+        Assert.Equal("TR: Meet me at the barn", block.Translation);
+        Assert.Equal(InQuest(new TextBox(0.1, 0.6, 0.6, 0.7)), block.Box);
+    }
+
+    /// <summary>Aynı yazı kayınca yeniden çevrilmez; bloklar aynı çeviriyle yeni yerlerine gönderilir.</summary>
+    [Fact]
+    public async Task MovedBlocksKeepTheirTranslations()
+    {
+        var reader = new Reader { Lines = [At("Find the blacksmith", 0.5, 0.1, 0.95, 0.2), At("Go to the barn", 0.1, 0.6, 0.4, 0.7)] };
+        var translator = new Translator();
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        reader.Lines = [At("Find the blacksmith", 0.5, 0.1, 0.95, 0.2), At("Go to the barn", 0.1, 0.7, 0.4, 0.8)];
+        await watcher.PassAsync(Shade(60), [Quest]);
+        Assert.Equal(["Find the blacksmith", "Go to the barn"], translator.Calls);
+        Assert.Equal(2, server.Sent.Count);
+        var moved = server.Blocks[1]!;
+        Assert.Equal(["TR: Find the blacksmith", "TR: Go to the barn"], moved.Select(b => b.Translation));
+        Assert.Equal(InQuest(new TextBox(0.1, 0.7, 0.4, 0.8)), moved[1].Box);
+        // Yer değişmeden yeniden okunan aynı yazı bir şey göndermez.
+        await watcher.PassAsync(Shade(100), [Quest]);
+        Assert.Equal(2, server.Sent.Count);
     }
 
     [Fact]
