@@ -382,7 +382,8 @@ class TranslationService : Service() {
         // Telefonda tur seyrektir (pil ve ısı); kararlılık beklenirken çeviri önceden istenir (Windows ile aynı).
         regionWatcher = com.couchsubs.mobile.core.RegionWatcher({ crop -> areaReader.read(crop.pixels as RegionPixels) },
             engineTranslator(free.separate()), subtitleServer,
-            intervalMs = com.couchsubs.mobile.core.RegionWatcher.PHONE_INTERVAL_MS, prefetchWork = regionPrefetch).apply {
+            intervalMs = com.couchsubs.mobile.core.RegionWatcher.PHONE_INTERVAL_MS, prefetchWork = regionPrefetch,
+            prefetchTranslator = engineTranslator(free.separate())).apply {
             prefetchesTranslations = true
             packLookup = { text ->
                 if (packTitles != null && settings.packsEnabled) {
@@ -430,7 +431,7 @@ class TranslationService : Service() {
                 SubtitleReader.copyRegion(frame, r)?.let {
                     com.couchsubs.mobile.core.RegionWatcher.Crop(it, com.couchsubs.mobile.core.RegionSignature.of(it.nv21, it.width, it.height), it.gray)
                 }
-            }) { task -> runCatching { regionWork.execute(task) } }
+            }) { task -> regionWork.execute(task) }
             FramePreview.offer(frame, now)
         }
         val onState: (SessionState) -> Unit = { state ->
@@ -448,6 +449,7 @@ class TranslationService : Service() {
             // Elle seçilen oyunda satırlar yalnız o oyunun paketinde aranır, paketi yoksa hiç aranmaz (#218).
             PlayedGame.packs = library
             PlayedGame.onChange = { game ->
+                regionWatcher?.reset()
                 linePool.setGame(game)
                 // Yeni oyun: o oyunun (havuzdan otomatik) paketi sunucuda yeni çıkmış olabilir; inerse bu oturumun
                 // paketleri hemen yeniden okunur (iPhone'daki gibi).

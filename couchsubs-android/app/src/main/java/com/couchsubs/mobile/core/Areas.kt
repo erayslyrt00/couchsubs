@@ -5,6 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.Callable
+import java.util.concurrent.CancellationException
 import java.util.concurrent.Executor
 import java.util.concurrent.FutureTask
 import java.util.concurrent.RejectedExecutionException
@@ -252,6 +253,7 @@ class RegionWatcher(
      * Henüz başlamamış önceden çeviri, yazı gösterilirken turun iş parçacığında çalıştırılır; beklemede kalmaz.
      */
     private val prefetchWork: Executor = Executor { it.run() },
+    private val prefetchTranslator: TextTranslator = translator,
 ) {
     companion object {
         /**
@@ -303,7 +305,7 @@ class RegionWatcher(
                 }
                 at = found + 1
             }
-            return true
+            return at > 0
         }
 
         /**
@@ -417,7 +419,7 @@ class RegionWatcher(
     private val lock = Any()
     private val states = mutableMapOf<String, State>()
     private var lastPass: Long? = null
-    @Volatile private var busy = false
+    private var busy = false
     @Volatile private var session = 0
 
     @Volatile var packLookup: ((String) -> PackMatch?)? = null
@@ -441,28 +443,39 @@ class RegionWatcher(
      * [run] ile (çağıranın iş parçacığında) başlatılır; true döner. Yoksa hemen false.
      */
     fun offer(areas: List<ExtraArea>, crop: (CropRegion) -> Crop?, run: (Runnable) -> Unit): Boolean {
-        val anyShown = synchronized(lock) { states.values.any { it.shown.isNotEmpty() } }
-        if (busy || (areas.isEmpty() && !anyShown)) return false
-        val time = clock()
-        lastPass?.let { if (time - it < intervalMs) return false }
-        lastPass = time
-        val crops = areas.mapNotNull { area -> crop(area.region)?.let { area to it } }
-        busy = true
-        val started = session
-        run(Runnable {
-            try {
-                pass(areas.map { it.id }.toSet(), crops, started)
-            } finally {
-                if (started == session) busy = false
-            }
-        })
+        val started = synchronized(lock) {
+            if (busy || (areas.isEmpty() && states.values.none { it.shown.isNotEmpty() })) return false
+            val time = clock()
+            lastPass?.let { if (time - it < intervalMs) return false }
+            lastPass = time
+            busy = true
+            session
+        }
+        fun finish(): Unit = synchronized(lock) { if (started == session) busy = false }
+        try {
+            val crops = areas.mapNotNull { area -> crop(area.region)?.let { area to it } }
+            run(Runnable {
+                try {
+                    pass(areas.map { it.id }.toSet(), crops, started)
+                } finally {
+                    finish()
+                }
+            })
+        } catch (error: RejectedExecutionException) {
+            finish()
+            return false
+        } catch (error: Exception) {
+            finish()
+            throw error
+        }
         return true
     }
 
     /** Bir tur: kaldırılan alanların kutusu kalkar, her açık alan gerekirse okunur ve kararlı yazısı çevrilir. */
     fun pass(ids: Set<String>, crops: List<Pair<ExtraArea, Crop>>, started: Int = session) {
-        passes++
         synchronized(lock) {
+            if (started != session) return
+            passes++
             for (id in states.keys.toList()) if (id !in ids) {
                 if (states[id]!!.shown.isNotEmpty()) sender.sendRegion(id, "", null, null)
                 states.remove(id)
@@ -475,7 +488,10 @@ class RegionWatcher(
     }
 
     private fun visit(area: ExtraArea, crop: Crop, started: Int) {
-        val state = synchronized(lock) { states.getOrPut(area.id) { State() } }
+        val state = synchronized(lock) {
+            if (started != session) return
+            states.getOrPut(area.id) { State() }
+        }
         val changed = state.signature?.let { RegionSignature.changed(it, crop.signature) } ?: true
         state.signature = crop.signature
         if (!changed) {
@@ -504,9 +520,11 @@ class RegionWatcher(
             commit(candidate, area, state, started)
         } else {
             state.lastRead = candidate.key
+            state.held = null
+            state.holds = 0
             state.candidate = candidate
             // Yazı kararlı mı diye bir tur beklenirken çevirisi şimdiden istenir: doğrulanınca çoğu zaman hazırdır.
-            prefetch(candidate, state)
+            prefetch(candidate, state, started)
         }
     }
 
@@ -514,14 +532,14 @@ class RegionWatcher(
      * Kararlılık beklenirken çeviriyi başlatır. Ekrandaki yazı ve bekletilecek okuma (yarım ya da ekrandakine çok benzer)
      * için istenmez.
      */
-    private fun prefetch(candidate: Candidate, state: State) {
+    private fun prefetch(candidate: Candidate, state: State, started: Int) {
         if (!prefetchesTranslations || candidate.key.isEmpty() || candidate.key == state.shown || shouldHold(candidate, state)) return
-        val (task, created) = translation(candidate)
-        if (!created) return
+        val task = translation(candidate, started, speculative = true) ?: return
         try {
             prefetchWork.execute(task)
         } catch (error: RejectedExecutionException) {
-            // Hizmet kapanıyor: iş saklı kalır, yazı gösterilirken turun iş parçacığında çalışır.
+            // Hizmet kapanıyor. Kararlı okuma hâlâ gerekirse kendi işini başlatabilir.
+            task.cancel(false)
         }
     }
 
@@ -538,6 +556,7 @@ class RegionWatcher(
         if (text.isEmpty()) return false
         if (state.remembered.length > text.length && state.remembered.startsWith("$text ")) return true
         if (state.shownText.isEmpty() || state.shownText == text) return false
+        if (TextMatch.addsMeaning(text, state.shownText)) return false
         return if (iconCount(candidate) <= state.shownIcons) {
             TextMatch.isSimilar(state.shownText, text, 0.85) || isPartOf(text, state.shownText)
         } else {
@@ -546,6 +565,8 @@ class RegionWatcher(
     }
 
     private fun commit(candidate: Candidate, area: ExtraArea, state: State, started: Int) {
+        // reset() ve TV'ye gönderim sıralı kalmalı: eski tur yeni oyunun üstüne yazmasın.
+        fun send(action: () -> Unit): Unit = synchronized(lock) { if (started == session) action() }
         if (state.shown == candidate.key) {
             val text = state.renderedText
             if (state.renderedKey != candidate.key || text.isNullOrEmpty()) return
@@ -556,7 +577,7 @@ class RegionWatcher(
             val moved = if (current == null) null else state.renderedBlocks?.map { (group, item) ->
                 group to item.copy(box = current[group].box, lineHeight = current[group].lineHeight)
             }
-            sender.sendRegion(area.id, text, candidate.box, candidate.lineHeight, state.renderedIcons, moved?.map { it.second })
+            send { sender.sendRegion(area.id, text, candidate.box, candidate.lineHeight, state.renderedIcons, moved?.map { it.second }) }
             state.renderedBox = candidate.box
             state.renderedLineHeight = candidate.lineHeight
             state.renderedLayout = candidate.blocks
@@ -583,7 +604,7 @@ class RegionWatcher(
         state.shownText = candidate.text
         state.shownIcons = iconCount(candidate)
         if (candidate.key.isEmpty()) {
-            sender.sendRegion(area.id, "", null, null)
+            send { sender.sendRegion(area.id, "", null, null) }
             state.renderedKey = candidate.key
             state.renderedText = ""
             state.renderedIcons = null
@@ -591,15 +612,12 @@ class RegionWatcher(
             state.renderedLineHeight = null
             return
         }
-        state.remembered = candidate.text
         val translated = try {
             // Önceden istenmiş ya da daha önce gösterilmiş yazı: çevirmene yeniden gidilmez. Önceden istenen çeviri
             // henüz başlamadıysa burada çalışır (run), sürüyorsa beklenir (get).
-            val (task, _) = translation(candidate)
+            val task = translation(candidate, started) ?: return
             task.run()
-            val result = task.get()
-            // Aynı anahtar başka parça bölmesiyle okunmuş olabilir (satır kırılması): sayı tutmazsa bu bölmeyle çevrilir.
-            if (result.size == candidate.paragraphs.size) result else translateNow(candidate.paragraphs)
+            task.get()
         } catch (error: Exception) {
             // Çevrilemedi: önceki yazı kutuda kalır, aynı yazı sonraki turda yeniden denenir.
             if (started == session && state.shown == candidate.key) {
@@ -611,6 +629,7 @@ class RegionWatcher(
             return
         }
         if (started != session || state.shown != candidate.key) return
+        state.remembered = candidate.text
         val prepared = candidate.paragraphs.map { IconText.protect(it) }
         val slots = mutableListOf<IconSlot>()
         val text = mutableListOf<String>()
@@ -624,7 +643,7 @@ class RegionWatcher(
             TextMatch.isSimilar(TextMatch.normalize(IconText.plain(a)), TextMatch.normalize(IconText.plain(b)), 0.90)
         }
         if (similar.all { it }) {
-            sender.sendRegion(area.id, "", null, null)
+            send { sender.sendRegion(area.id, "", null, null) }
             state.renderedText = ""
             state.renderedIcons = null
             state.renderedBox = null
@@ -635,7 +654,7 @@ class RegionWatcher(
             val rendered = IconText.render(text.joinToString("\n"), slots)
             val icons = rendered.icons.takeIf { it.isNotEmpty() }
             val blocks = candidate.blocks?.let { renderBlocks(candidate, it, text, similar, slots) }
-            sender.sendRegion(area.id, rendered.text, candidate.box, candidate.lineHeight, icons, blocks?.map { it.second })
+            send { sender.sendRegion(area.id, rendered.text, candidate.box, candidate.lineHeight, icons, blocks?.map { it.second }) }
             state.renderedText = rendered.text
             state.renderedIcons = icons
             state.renderedBox = candidate.box
@@ -657,45 +676,51 @@ class RegionWatcher(
      * Süren ya da bitmiş çeviriler (anahtar → parçaların çevirisi). Oyun görev yazısını arada silip yeniden gösteriyor;
      * aynı yazı gelince çevirmene yeniden gidilmez, anında gösterilir. Önceden istenen çeviri de buradan alınır.
      */
-    private val translations = HashMap<String, Pending>()
+    private val translations = HashMap<List<String>, Pending>()
 
     /**
-     * Yazının çeviri işini verir: saklanan (süren ya da bitmiş) ya da yeni kurulan (çalıştırılmamış; ikincisi true).
-     * Başarısız çeviri saklanmaz, sonra yeniden denenir.
+     * Aynı paragraflar aynı işi paylaşır. Doğrulanmamış okumalar için en çok bir iş başlatılır.
      */
-    private fun translation(candidate: Candidate): Pair<Pending, Boolean> = synchronized(translations) {
-        translations[candidate.key]?.let { return it to false }
+    private fun translation(candidate: Candidate, started: Int, speculative: Boolean = false): Pending? = synchronized(translations) {
+        if (started != session) return null
+        val key = candidate.paragraphs
+        translations[key]?.let { return if (speculative) null else it }
+        if (speculative && translations.values.any { !it.isDone }) return null
         if (translations.size >= TRANSLATION_LIMIT) translations.values.removeAll { it.isDone }
-        val key = candidate.key
-        val paragraphs = candidate.paragraphs
-        val task = Pending(Callable { translateNow(paragraphs) }) { failed ->
+        // Aynı çevirmen örneğinin bağlamına iki iş parçacığı birden yazmasın.
+        val engine = if (speculative) prefetchTranslator else translator
+        val task = Pending(Callable {
+            synchronized(engine) { translateNow(key, engine, started) }
+        }) { failed ->
             synchronized(translations) { if (translations[key] === failed) translations.remove(key) }
         }
         translations[key] = task
-        task to true
+        task
     }
 
-    private fun translateNow(paragraphs: List<String>): List<String> {
+    private fun translateNow(paragraphs: List<String>, engine: TextTranslator, started: Int): List<String> {
         // Simgeler paket aramasında yok sayılır, çeviride uydurma adlarla korunur (IconText).
         val prepared = paragraphs.map { IconText.protect(it) }
         // Zaten Türkçe olan parça çevrilmez: aslı kalır, tümü öyleyse kutu gösterilmez.
         return paragraphs.mapIndexed { i, paragraph ->
+            if (started != session) throw CancellationException()
             packLookup?.invoke(IconText.plain(paragraph))?.text
-                ?: if (skipsTurkish && TurkishText.isSure(paragraph)) paragraph else translator.translate(prepared[i].text)
+                ?: if (skipsTurkish && TurkishText.isSure(paragraph)) paragraph else engine.translate(prepared[i].text)
         }
     }
 
     /** Çeviri durdu: süren tur bırakılır, TV'deki ek alan kutuları kalkar. */
-    fun reset() {
+    fun reset(): Unit = synchronized(lock) {
         session++
         busy = false
         lastPass = null
-        synchronized(translations) { translations.clear() }
-        val anyShown = synchronized(lock) {
-            val shown = states.values.any { it.shown.isNotEmpty() }
-            states.clear()
-            shown
+        synchronized(translations) {
+            val pending = translations.values.toList()
+            translations.clear()
+            pending.forEach { it.cancel(false) }
         }
+        val anyShown = states.values.any { it.shown.isNotEmpty() || !it.renderedText.isNullOrEmpty() }
+        states.clear()
         if (anyShown) sender.clearRegions()
     }
 }

@@ -180,9 +180,10 @@ public final class RegionWatcher {
         lastPass = time
         let session = self.session
         running = Task { [weak self] in
-            await self?.pass(frame, areas: areas)
+            guard let self, self.session == session else { return }
+            await self.pass(frame, areas: areas)
             // Bu arada sıfırlandıysa yeni oturumun turuna dokunulmaz.
-            if self?.session == session { self?.running = nil }
+            if self.session == session { self.running = nil }
         }
     }
 
@@ -197,17 +198,18 @@ public final class RegionWatcher {
             states[id] = nil
         }
         for area in areas {
-            await visit(area, frame: frame)
             guard session == started else { return }
+            await visit(area, frame: frame, session: started)
         }
     }
 
-    private func visit(_ area: ExtraArea, frame: CGImage) async {
+    private func visit(_ area: ExtraArea, frame: CGImage, session: Int) async {
         let region = area.region
         let (crop, signature) = await Task.detached(priority: .utility) {
             let crop = RegionCropper.crop(frame, to: region)
             return (crop, RegionCropper.signature(of: crop))
         }.value
+        guard session == self.session else { return }
         var state = states[area.id] ?? State()
         let changed = state.signature.map {
             ReadScheduler.changed($0, signature, threshold: ReadScheduler.defaultChangeThreshold)
@@ -225,7 +227,6 @@ public final class RegionWatcher {
             return
         }
         let started = now()
-        let session = self.session
         let reader = self.reader
         let reading = try? await ReadQueue.shared.run { try reader.readLines(crop, deep: false) }
         guard session == self.session else { return }
@@ -247,6 +248,8 @@ public final class RegionWatcher {
             await commit(candidate, area: area)
         } else {
             state.lastRead = candidate.key
+            state.held = nil
+            state.holds = 0
             state.candidate = candidate
             states[area.id] = state
             // Yazı kararlı mı diye bir tur beklenirken çevirisi şimdiden istenir: doğrulanınca çoğu zaman hazırdır.
@@ -258,7 +261,8 @@ public final class RegionWatcher {
     /// ve boş yazı için istenmez. Hata asıl gösterimde görülür; orada yeniden denenir.
     private func prefetch(_ candidate: Candidate, state: State) {
         guard prefetchesTranslations, !candidate.key.isEmpty, candidate.key != state.shown,
-              !Self.shouldHold(candidate, state) else { return }
+              !Self.shouldHold(candidate, state),
+              !translations.values.contains(where: { !$0.finished }) else { return }
         translation(for: candidate)
     }
 
@@ -276,6 +280,7 @@ public final class RegionWatcher {
         guard !candidate.text.isEmpty else { return false }
         if state.remembered.count > candidate.text.count, state.remembered.hasPrefix(candidate.text + " ") { return true }
         if state.shownText.isEmpty || state.shownText == candidate.text { return false }
+        if TextMatch.addsMeaning(candidate.text, to: state.shownText) { return false }
         return iconCount(candidate) <= state.shownIcons
             ? TextMatch.isSimilar(state.shownText, candidate.text, threshold: 0.85) || isPartOf(candidate.text, state.shownText)
             : losesWords(candidate.text, state.shownText)
@@ -301,7 +306,7 @@ public final class RegionWatcher {
             }
             at = found + 1
         }
-        return true
+        return at > 0
     }
 
     /// Okumanın bütün sözcükleri ekrandakinde geçiyor ama ekrandakinin bir sözcüğü kayıp (simge onun yerine okunmuş).
@@ -401,7 +406,6 @@ public final class RegionWatcher {
         state.shown = candidate.key
         state.shownText = candidate.text
         state.shownIcons = Self.iconCount(candidate)
-        if !candidate.key.isEmpty { state.remembered = candidate.text }
         states[area.id] = state
         guard !candidate.key.isEmpty else {
             server.sendRegion(id: area.id, text: "", box: nil, lineHeight: nil)
@@ -431,6 +435,7 @@ public final class RegionWatcher {
             return
         }
         guard session == self.session, states[area.id]?.shown == candidate.key else { return }
+        states[area.id]?.remembered = candidate.text
         let translated = translation.result
         let fromPack = translation.fromPack
         // Simgeler çeviride uydurma adlarla korunmuştu (`IconText`); adlar yerlerine konur.
@@ -507,6 +512,7 @@ public final class RegionWatcher {
         let task = Task<Translation, Error> { [weak self] in
             guard let self else { throw CancellationError() }
             do {
+                try Task.checkCancellation()
                 let translation = try await self.translate(paragraphs)
                 if self.translations[key]?.token == token { self.translations[key]?.finished = true }
                 return translation
@@ -541,7 +547,10 @@ public final class RegionWatcher {
 
     private func sequential(_ texts: [String]) async throws -> [String] {
         var result: [String] = []
-        for text in texts { result.append(try await translator.translate(text)) }
+        for text in texts {
+            try Task.checkCancellation()
+            result.append(try await translator.translate(text))
+        }
         return result
     }
 
@@ -551,6 +560,7 @@ public final class RegionWatcher {
         running?.cancel()
         running = nil
         lastPass = nil
+        for entry in translations.values where !entry.finished { entry.task.cancel() }
         translations.removeAll()
         let anyShown = states.values.contains { !$0.shown.isEmpty }
         states.removeAll()

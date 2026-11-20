@@ -253,6 +253,7 @@ final class PhoneModel: ObservableObject {
         reloadPackList()
         let pool = self.pool
         gameChoice.onChange = { [weak self] game in
+            self?.regionWatcher?.reset()
             Task { await pool.setGame(game) }
             // Bu oyunun (havuzdan otomatik) paketi sunucuda yeni çıkmış olabilir.
             if game != nil { self?.onGameStarted() }

@@ -27,9 +27,11 @@ final class RegionWatcherTests: XCTestCase {
 
     private final class Translator: TextTranslator {
         var calls: [String] = []
+        var beforeTranslation: ((String) async -> Void)?
         var failuresRemaining = 0
         func translate(_ text: String) async throws -> String {
             calls.append(text)
+            await beforeTranslation?(text)
             if failuresRemaining > 0 {
                 failuresRemaining -= 1
                 throw Failure.expected
@@ -441,10 +443,79 @@ final class RegionWatcherTests: XCTestCase {
     }
 
     func testPartialAndWordLosingReadingsAreRecognised() {
+        XCTAssertFalse(RegionWatcher.isPartOf("run", "find the blacksmith"))
         XCTAssertTrue(RegionWatcher.isPartOf("add marker set destination", "add marker set destination exit"))
         XCTAssertFalse(RegionWatcher.isPartOf("talk to arthur", "meet arthur at the barn"))
         XCTAssertTrue(RegionWatcher.losesWords("find \u{FFFC}", "find donnie"))
         XCTAssertFalse(RegionWatcher.losesWords("hold \u{FFFC} to climb", "hold to climb"))
+    }
+
+    func testNewNumberNegationAndUnrelatedWordAreShownAfterConfirmation() async {
+        let reader = Reader(), translator = Translator(), server = Server()
+        let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
+        let sources = ["Take gate 5", "Take gate 6", "You can leave the base", "You can't leave the base", "Run"]
+        for (index, source) in sources.enumerated() {
+            await show(watcher, reader, source, UInt8(index * 40))
+        }
+        XCTAssertEqual(translator.calls, sources)
+    }
+
+    func testAlternatingRereadsDoNotAccumulateHolds() async {
+        let reader = Reader(), translator = Translator(), server = Server()
+        let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
+        await show(watcher, reader, "Go to the barn", 10)
+        for _ in 0...RegionWatcher.holdLimit {
+            await show(watcher, reader, "Go to the bank", 90)
+            await show(watcher, reader, "Go to the barn", 10)
+        }
+        XCTAssertEqual(translator.calls, ["Go to the barn"])
+    }
+
+    func testFirstConfirmedTextAfterResetUsesTheNewGameTranslation() async {
+        let reader = Reader(), translator = Translator(), server = Server()
+        let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
+        translator.map = { _ in "İlk oyun" }
+        await show(watcher, reader, "Board the train", 10)
+        watcher.reset()
+        translator.map = { _ in "İkinci oyun" }
+        await show(watcher, reader, "Board the train", 10)
+        XCTAssertEqual(server.sent.map(\.text), ["İlk oyun", "İkinci oyun"])
+        XCTAssertEqual(server.clears, 1)
+    }
+
+    func testUnconfirmedChangesDoNotQueueBehindASlowPrefetch() async {
+        let reader = Reader(), translator = Translator(), server = Server()
+        let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
+        watcher.prefetchesTranslations = true
+        let started = expectation(description: "first translation started")
+        var resume: CheckedContinuation<Void, Never>?
+        translator.beforeTranslation = { text in
+            if text == "Find the blacksmith" {
+                await withCheckedContinuation { continuation in
+                    resume = continuation
+                    started.fulfill()
+                }
+            }
+        }
+        defer { resume?.resume() }
+        reader.lines = [line("Find the blacksmith")]
+        await watcher.pass(frame(10), areas: [quest])
+        await fulfillment(of: [started], timeout: 3)
+        reader.lines = [line("Call the pilot")]
+        await watcher.pass(frame(90), areas: [quest])
+        await show(watcher, reader, "Board the train", 170)
+        XCTAssertEqual(translator.calls, ["Find the blacksmith", "Board the train"])
+    }
+
+    func testResetDropsOfferedPassBeforeItStarts() async {
+        let reader = Reader(), translator = Translator(), server = Server()
+        let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
+        watcher.offer(frame(90), areas: [quest])
+        watcher.reset()
+        await show(watcher, reader, "Board the train", 170)
+        XCTAssertEqual(watcher.passes, 2)
+        XCTAssertEqual(watcher.reads, 1)
+        XCTAssertEqual(translator.calls, ["Board the train"])
     }
 
     func testTextKeyKeepsButtonIcons() {
