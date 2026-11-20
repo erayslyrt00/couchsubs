@@ -379,12 +379,14 @@ class TranslationService : Service() {
         // Ek alanlar aynı paketlerle ve aynı motorla (ayrı bir örnekle; altyazının bağlamına karışmasın) çevrilir; satırları
         // ortak havuza önerilmez (arayüz yazıları havuzu kirletmesin). Mac ve iPhone ile aynı.
         val areaReader = SubtitleReader().also { regionReader = it }
-        // Telefonda tur seyrektir (pil ve ısı); kararlılık beklenirken çeviri önceden istenir (Windows ile aynı).
+        // Ön okuma, bulut kotasını tüketmemeli veya paketin son eşleşmesini (oyun tanıma) değiştirmemeli.
+        val areaTranslator = engineTranslator(free.separate())
+        val earlyTranslator = if (settings.engine == EngineChoice.FREE && packTitles == null) engineTranslator(free.separate()) else null
         regionWatcher = com.couchsubs.mobile.core.RegionWatcher({ crop -> areaReader.read(crop.pixels as RegionPixels) },
-            engineTranslator(free.separate()), subtitleServer,
+            areaTranslator, subtitleServer,
             intervalMs = com.couchsubs.mobile.core.RegionWatcher.PHONE_INTERVAL_MS, prefetchWork = regionPrefetch,
-            prefetchTranslator = engineTranslator(free.separate())).apply {
-            prefetchesTranslations = true
+            prefetchTranslator = earlyTranslator ?: areaTranslator).apply {
+            prefetchesTranslations = earlyTranslator != null
             packLookup = { text ->
                 if (packTitles != null && settings.packsEnabled) {
                     library.setDisabled(settings.disabledPacks)

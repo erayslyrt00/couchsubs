@@ -127,11 +127,6 @@ public sealed class RegionWatcher
     public Func<string, PackMatch?>? PackLookup { get; set; }
     /// <summary>Hedef dil Türkçe: yüksek güvenle Türkçe olan parça çevrilmez, aslı sayılır (#289).</summary>
     public bool SkipsTurkish { get; set; } = true;
-    /// <summary>
-    /// Yazı kararlı mı diye bir tur beklenirken çevirisi şimdiden istensin: doğrulanınca çoğu zaman hazırdır (gecikme
-    /// çevirmenin süresi kadar kısalır; yazı belirirken okunan ara hâller de çevrilebildiği için biraz fazla karakter harcar).
-    /// </summary>
-    public bool PrefetchesTranslations { get; set; }
     /// <summary>Hedef dil Türkçe: tuş çubuğundaki büyük harfli komutlar hazır sözlükten çevrilir (<see cref="UiCommands"/>).</summary>
     public bool TranslatesUiCommands { get; set; }
     /// <summary>Oynanan oyunun adı (bilinmiyorsa null); oyuna özgü yerleşim kuralları için.</summary>
@@ -254,20 +249,7 @@ public sealed class RegionWatcher
             state.LastRead = candidate.Key;
             (state.Held, state.Holds) = (null, 0);
             state.Candidate = candidate;
-            // Yazı kararlı mı diye bir tur beklenirken çevirisi şimdiden istenir: doğrulanınca çoğu zaman hazırdır.
-            Prefetch(candidate, state);
         }
-    }
-
-    /// <summary>
-    /// Kararlılık beklenirken çeviriyi başlatır. Ekrandaki yazı, bekletilecek okuma (yarım ya da ekrandakine çok benzer)
-    /// ve zaten Türkçe ya da paketten gelecek yazı için istenmez.
-    /// </summary>
-    private void Prefetch(Candidate candidate, State state)
-    {
-        if (!PrefetchesTranslations || candidate.Key.Length == 0 || candidate.Key == state.Shown || ShouldHold(candidate, state)) return;
-        // Geçici okumalar çevirmende birikmesin. Kararlı yazı bu sınırı beklemeden çevrilir.
-        if (prefetch is not { IsCompleted: false }) prefetch = Translate(candidate);
     }
 
     private static int IconCount(Candidate candidate) =>
@@ -419,12 +401,11 @@ public sealed class RegionWatcher
             Log?.Invoke($"ek alan {area.Name}: boşaldı");
             return;
         }
-        // Önceden istenmiş ya da daha önce gösterilmiş yazı: çevirmene yeniden gidilmez.
-        bool ready;
-        lock (translations) ready = translations.ContainsKey(TranslationKey(candidate));
-        var task = Translate(candidate);
+        var key = TranslationKey(candidate);
+        Translation? cached;
+        lock (translations) translations.TryGetValue(key, out cached);
         Translation translation;
-        try { translation = await task.ConfigureAwait(false); }
+        try { translation = cached ?? await TranslateAsync(candidate.Paragraphs).ConfigureAwait(false); }
         catch (Exception error)
         {
             if (Volatile.Read(ref session) == started)
@@ -438,7 +419,15 @@ public sealed class RegionWatcher
             }
             return;
         }
-        if (Volatile.Read(ref session) != started || state.Shown != candidate.Key) return;
+        lock (translations)
+        {
+            if (Volatile.Read(ref session) != started || state.Shown != candidate.Key) return;
+            if (cached is null)
+            {
+                if (translations.Count >= RenderedLimit) translations.Clear();
+                translations[key] = translation;
+            }
+        }
         state.Remembered = candidate.Text;
         var (result, fromPack) = (translation.Result, translation.FromPack);
         var prepared = candidate.Paragraphs.Select(IconText.Protect).ToList();
@@ -468,7 +457,7 @@ public sealed class RegionWatcher
             state.RenderedBlocks = null;
             return;
         }
-        var origin = ready ? "hazır çeviri" : fromPack == candidate.Paragraphs.Count ? "paket" : fromPack > 0 ? "paket+motor" : "motor";
+        var origin = cached is not null ? "hazır çeviri" : fromPack == candidate.Paragraphs.Count ? "paket" : fromPack > 0 ? "paket+motor" : "motor";
         Log?.Invoke($"ek alan {area.Name}: {SubtitleLog.Excerpt(IconText.Plain(string.Join(' ', candidate.Paragraphs)))} → {origin}");
         var (shown, icons) = IconText.Render(string.Join('\n', text), slots);
         var blocks = candidate.Blocks is { } layout ? RenderBlocks(candidate, layout, text, similar, slots) : null;
@@ -508,40 +497,14 @@ public sealed class RegionWatcher
     /// <summary>Paragrafların çevirisi (çevrilmeyen parça null) ve kaçının paketten geldiği.</summary>
     private sealed record Translation(string?[] Result, int FromPack);
 
-    /// <summary>
-    /// Süren ya da bitmiş çeviriler (anahtar → çeviri). Oyun görev yazısını arada silip yeniden gösteriyor; aynı yazı
-    /// gelince çevirmene yeniden gidilmez, anında gösterilir. Önceden istenen çeviri de buradan alınır.
-    /// </summary>
-    private readonly Dictionary<string, Task<Translation>> translations = [];
-    private Task<Translation>? prefetch;
+    // Yalnız kararlı okumaların başarılı çevirileri saklanır.
+    private readonly Dictionary<string, Translation> translations = [];
 
     /// <summary>
     /// Saklanan çevirinin anahtarı: paragraflar ayrı ayrı. Aynı yazı başka satırlardan bölünürse paragraf sayısı değişir;
     /// <see cref="Candidate.Key"/> aynı kalsa da eski çeviri kullanılmaz (dizinin dışına taşardı).
     /// </summary>
     private static string TranslationKey(Candidate candidate) => string.Join('\n', candidate.Paragraphs);
-
-    /// <summary>Çevirinin görevini başlatır ya da süreni / bitmişi verir. Başarısız çeviri saklanmaz, sonra yeniden denenir.</summary>
-    private Task<Translation> Translate(Candidate candidate)
-    {
-        var key = TranslationKey(candidate);
-        lock (translations)
-        {
-            if (translations.TryGetValue(key, out var known)) return known;
-            if (translations.Count >= RenderedLimit)
-                foreach (var done in translations.Where(pair => pair.Value.IsCompleted).Select(pair => pair.Key).ToList())
-                    translations.Remove(done);
-            var task = TranslateAsync(candidate.Paragraphs);
-            translations[key] = task;
-            _ = task.ContinueWith(failed =>
-            {
-                _ = failed.Exception;
-                lock (translations)
-                    if (translations.TryGetValue(key, out var current) && current == task) translations.Remove(key);
-            }, CancellationToken.None, TaskContinuationOptions.NotOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-            return task;
-        }
-    }
 
     private async Task<Translation> TranslateAsync(IReadOnlyList<string> paragraphs)
     {

@@ -314,7 +314,7 @@ public static class ButtonIcons
     /// <item>Satırın başındaki simge ("△ Pick up", "B Pick up"): satırın hemen solu ya da başta tek harf/işaret.</item>
     /// </list>
     /// Sıradan cümlenin ortasındaki boşluk aranmaz: orada harita işareti ya da renkli ad durur (GTA 6: "your personal
-    /// vehicle ◆ for easy access"). GameTranslator'ın (AGPL-3.0) IconWords kurallarından uyarlandı.
+    /// vehicle ◆ for easy access"). GameTranslator.IconWords (AGPL-3.0-only) üzerinden Nino Game Translator'ın VisionReader.withIcons / withEdgeIcons kurallarından uyarlandı.
     /// </summary>
     public static TextLine MarkFree(TextLine line, Frame frame)
     {

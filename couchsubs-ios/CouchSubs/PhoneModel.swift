@@ -778,7 +778,6 @@ final class PhoneModel: ObservableObject {
     private func makeRegionWatcher(packLookup: ((String) -> PackMatch?)?) -> RegionWatcher {
         let watcher = RegionWatcher(reader: VisionReader(language: settings.sourceLanguage), translator: makeTranslator(), server: server,
                                     intervalMs: RegionWatcher.phoneIntervalMs)
-        watcher.prefetchesTranslations = true
         watcher.packLookup = packLookup
         watcher.skipsTurkish = settings.targetLanguage == "tr"
         watcher.onLog = { SubtitleLog.write($0) }

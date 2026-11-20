@@ -124,13 +124,6 @@ public final class RegionWatcher {
         var fromPack: Int
     }
 
-    /// Süren ya da bitmiş bir çeviri; `token` sonradan biten eski görevin yeni kaydı silmesini önler.
-    struct StoredTranslation {
-        var token: Int
-        var task: Task<Translation, Error>
-        var finished = false
-    }
-
     private let reader: TextReader
     private let translator: TextTranslator
     private let server: RegionSending
@@ -140,18 +133,13 @@ public final class RegionWatcher {
     private var lastPass: Int?
     private var running: Task<Void, Never>?
     private var session = 0
-    /// Süren ya da bitmiş çeviriler (anahtar → çeviri). Oyun görev yazısını arada silip yeniden gösteriyor; aynı yazı
-    /// gelince çevirmene yeniden gidilmez, anında gösterilir. Önceden istenen çeviri de buradan alınır.
-    private var translations: [String: StoredTranslation] = [:]
-    private var translationTokens = 0
+    /// Yalnız kararlı okumaların başarılı çevirileri saklanır.
+    private var translations: [String: Translation] = [:]
 
     /// Oyun paketi: satırın hazır Türkçesi (ana altyazıyla aynı arama).
     public var packLookup: ((String) -> PackMatch?)?
     /// Hedef dil Türkçe: yüksek güvenle Türkçe olan parça çevrilmez, aslı sayılır (#289).
     public var skipsTurkish = true
-    /// Yazı kararlı mı diye bir tur beklenirken çevirisi şimdiden istensin: doğrulanınca çoğu zaman hazırdır (gecikme
-    /// çevirmenin süresi kadar kısalır; yazı belirirken okunan ara hâller de çevrilebildiği için biraz fazla karakter harcar).
-    public var prefetchesTranslations = false
     public var onLog: ((String) -> Void)?
     /// Her okumanın süresi (ms; ölçüm için).
     public var onReadMs: ((Int) -> Void)?
@@ -252,18 +240,7 @@ public final class RegionWatcher {
             state.holds = 0
             state.candidate = candidate
             states[area.id] = state
-            // Yazı kararlı mı diye bir tur beklenirken çevirisi şimdiden istenir: doğrulanınca çoğu zaman hazırdır.
-            prefetch(candidate, state: state)
         }
-    }
-
-    /// Kararlılık beklenirken çeviriyi başlatır. Ekrandaki yazı, bekletilecek okuma (yarım ya da ekrandakine çok benzer)
-    /// ve boş yazı için istenmez. Hata asıl gösterimde görülür; orada yeniden denenir.
-    private func prefetch(_ candidate: Candidate, state: State) {
-        guard prefetchesTranslations, !candidate.key.isEmpty, candidate.key != state.shown,
-              !Self.shouldHold(candidate, state),
-              !translations.values.contains(where: { !$0.finished }) else { return }
-        translation(for: candidate)
     }
 
     private static func iconCount(_ candidate: Candidate) -> Int {
@@ -418,11 +395,12 @@ public final class RegionWatcher {
             return
         }
         let session = self.session
-        // Önceden istenmiş ya da daha önce gösterilmiş yazı: çevirmene yeniden gidilmez.
-        let ready = translations[Self.translationKey(candidate)] != nil
+        let key = Self.translationKey(candidate)
+        let cached = translations[key]
         let translation: Translation
         do {
-            translation = try await self.translation(for: candidate).value
+            if let cached { translation = cached }
+            else { translation = try await translate(candidate.paragraphs) }
         } catch {
             guard session == self.session else { return }
             if states[area.id]?.shown == candidate.key {
@@ -435,6 +413,10 @@ public final class RegionWatcher {
             return
         }
         guard session == self.session, states[area.id]?.shown == candidate.key else { return }
+        if cached == nil {
+            if translations.count >= Self.translationLimit { translations.removeAll(keepingCapacity: true) }
+            translations[key] = translation
+        }
         states[area.id]?.remembered = candidate.text
         let translated = translation.result
         let fromPack = translation.fromPack
@@ -463,7 +445,7 @@ public final class RegionWatcher {
             states[area.id]?.renderedBlocks = nil
             return
         }
-        let origin = ready ? "hazır çeviri" : fromPack == candidate.paragraphs.count ? "paket" : fromPack > 0 ? "paket+motor" : "motor"
+        let origin = cached != nil ? "hazır çeviri" : fromPack == candidate.paragraphs.count ? "paket" : fromPack > 0 ? "paket+motor" : "motor"
         onLog?("ek alan \(area.name): \(SubtitleLog.excerpt(IconText.plain(candidate.paragraphs.joined(separator: " ")))) → \(origin)")
         let rendered = IconText.render(text.joined(separator: "\n"), slots: slots)
         let icons = rendered.icons.isEmpty ? nil : rendered.icons
@@ -500,31 +482,6 @@ public final class RegionWatcher {
     /// `candidate.key` aynı kalsa da eski çeviri kullanılmaz (dizinin dışına taşardı).
     static func translationKey(_ candidate: Candidate) -> String { candidate.paragraphs.joined(separator: "\n") }
 
-    /// Çevirinin görevini başlatır ya da süreni / bitmişi verir. Başarısız çeviri saklanmaz, sonra yeniden denenir.
-    @discardableResult
-    private func translation(for candidate: Candidate) -> Task<Translation, Error> {
-        let key = Self.translationKey(candidate)
-        if let known = translations[key] { return known.task }
-        if translations.count >= Self.translationLimit { translations = translations.filter { !$0.value.finished } }
-        translationTokens += 1
-        let token = translationTokens
-        let paragraphs = candidate.paragraphs
-        let task = Task<Translation, Error> { [weak self] in
-            guard let self else { throw CancellationError() }
-            do {
-                try Task.checkCancellation()
-                let translation = try await self.translate(paragraphs)
-                if self.translations[key]?.token == token { self.translations[key]?.finished = true }
-                return translation
-            } catch {
-                if self.translations[key]?.token == token { self.translations[key] = nil }
-                throw error
-            }
-        }
-        translations[key] = StoredTranslation(token: token, task: task)
-        return task
-    }
-
     /// Parçalar önce pakette aranır; kalanlar çeviri motoruna gider (yapay zekâda tek istekte). Motora simgeleri adlarla
     /// korunmuş metin gider (`IconText`; simgeler paket aramasında yok sayılır). Çevrilemeyen parça nil kalır.
     private func translate(_ paragraphs: [String]) async throws -> Translation {
@@ -560,7 +517,6 @@ public final class RegionWatcher {
         running?.cancel()
         running = nil
         lastPass = nil
-        for entry in translations.values where !entry.finished { entry.task.cancel() }
         translations.removeAll()
         let anyShown = states.values.contains { !$0.shown.isEmpty }
         states.removeAll()

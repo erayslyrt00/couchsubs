@@ -27,11 +27,9 @@ final class RegionWatcherTests: XCTestCase {
 
     private final class Translator: TextTranslator {
         var calls: [String] = []
-        var beforeTranslation: ((String) async -> Void)?
         var failuresRemaining = 0
         func translate(_ text: String) async throws -> String {
             calls.append(text)
-            await beforeTranslation?(text)
             if failuresRemaining > 0 {
                 failuresRemaining -= 1
                 throw Failure.expected
@@ -236,6 +234,7 @@ final class RegionWatcherTests: XCTestCase {
         let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
         reader.lines = [line("Find the blacksmith")]
         await watcher.pass(frame(10), areas: [quest])
+        XCTAssertTrue(translator.calls.isEmpty, "geçici metin çeviri bağlamına girmemeli")
         XCTAssertTrue(server.sent.isEmpty, "ilk okuma kararlı sayılmaz")
         await watcher.pass(frame(10), areas: [quest])
         XCTAssertEqual(server.sent.map(\.text), ["TR: Find the blacksmith"])
@@ -389,22 +388,6 @@ final class RegionWatcherTests: XCTestCase {
         XCTAssertEqual(server.sent.map(\.text), ["TR: Find the blacksmith", "", "TR: Find the blacksmith"])
     }
 
-    /// Önceden çeviri açıkken çeviri yazı kararlı mı diye beklenirken istenir; gösterimde yeniden istenmez.
-    func testPrefetchedTranslationIsReusedWhenTheTextIsConfirmed() async {
-        let reader = Reader(), translator = Translator(), server = Server()
-        let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
-        watcher.prefetchesTranslations = true
-        reader.lines = [line("Find the blacksmith")]
-        await watcher.pass(frame(10), areas: [quest])
-        // Önceden istenen çeviri ayrı bir görevde başlar.
-        for _ in 0..<1000 where translator.calls.isEmpty { await Task.yield() }
-        XCTAssertEqual(translator.calls, ["Find the blacksmith"])
-        XCTAssertTrue(server.sent.isEmpty)
-        await watcher.pass(frame(10), areas: [quest])
-        XCTAssertEqual(translator.calls, ["Find the blacksmith"])
-        XCTAssertEqual(server.sent.map(\.text), ["TR: Find the blacksmith"])
-    }
-
     /// Yazı belirirken renkli sözcük geç geliyor: az önce gösterilen yazının başı okunursa tamamı beklenir; görev iki kez
     /// çevrilip değişmez.
     func testPartialReadingOfTheLastTextWaitsForTheWholeText() async {
@@ -481,30 +464,6 @@ final class RegionWatcherTests: XCTestCase {
         await show(watcher, reader, "Board the train", 10)
         XCTAssertEqual(server.sent.map(\.text), ["İlk oyun", "İkinci oyun"])
         XCTAssertEqual(server.clears, 1)
-    }
-
-    func testUnconfirmedChangesDoNotQueueBehindASlowPrefetch() async {
-        let reader = Reader(), translator = Translator(), server = Server()
-        let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
-        watcher.prefetchesTranslations = true
-        let started = expectation(description: "first translation started")
-        var resume: CheckedContinuation<Void, Never>?
-        translator.beforeTranslation = { text in
-            if text == "Find the blacksmith" {
-                await withCheckedContinuation { continuation in
-                    resume = continuation
-                    started.fulfill()
-                }
-            }
-        }
-        defer { resume?.resume() }
-        reader.lines = [line("Find the blacksmith")]
-        await watcher.pass(frame(10), areas: [quest])
-        await fulfillment(of: [started], timeout: 3)
-        reader.lines = [line("Call the pilot")]
-        await watcher.pass(frame(90), areas: [quest])
-        await show(watcher, reader, "Board the train", 170)
-        XCTAssertEqual(translator.calls, ["Find the blacksmith", "Board the train"])
     }
 
     func testResetDropsOfferedPassBeforeItStarts() async {

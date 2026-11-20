@@ -2213,11 +2213,12 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (regionWatcher is null)
         {
             if (services.MakeReader(settings.SourceLanguage, settings.OcrEngine) is not { } reader) return;
-            regionWatcher = new RegionWatcher(reader, MakeTranslator(), server) { Log = SubtitleLog.Write, PrefetchesTranslations = true };
+            // Yerel çevirmen altyazıyla aynı bağlamı ve modeli kullanır. Yalnız doğrulanmış yazıyı gönder.
+            regionWatcher = new RegionWatcher(reader, MakeTranslator(), server) { Log = SubtitleLog.Write };
         }
         regionWatcher.PackLookup = PacksActive ? services.FindInPacks : null;
         regionWatcher.SkipsTurkish = settings.TargetLanguage == "tr";
-        regionWatcher.TranslatesUiCommands = settings.TargetLanguage == "tr";
+        regionWatcher.TranslatesUiCommands = settings.SourceLanguage == "en" && settings.TargetLanguage == "tr";
         regionWatcher.Game = () => gameSense.Current?.Name;
     }
 

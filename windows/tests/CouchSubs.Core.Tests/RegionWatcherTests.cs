@@ -492,21 +492,6 @@ public class RegionWatcherTests
         Assert.Equal(["TR: Find the blacksmith", "", "TR: Find the blacksmith"], server.Sent.Select(s => s.Text));
     }
 
-    /// <summary>Önceden çeviri açıkken çeviri yazı kararlı mı diye beklenirken istenir; gösterimde yeniden istenmez.</summary>
-    [Fact]
-    public async Task PrefetchedTranslationIsReusedWhenTheTextIsConfirmed()
-    {
-        var (reader, translator, server) = (new Reader(), new Translator(), new Server());
-        var watcher = new RegionWatcher(reader, translator, server) { PrefetchesTranslations = true };
-        reader.Lines = [Line("Find the blacksmith")];
-        await watcher.PassAsync(Shade(10), [Quest]);
-        Assert.Equal(["Find the blacksmith"], translator.Calls);
-        Assert.Empty(server.Sent);
-        await watcher.PassAsync(Shade(10), [Quest]);
-        Assert.Equal(["Find the blacksmith"], translator.Calls);
-        Assert.Equal(["TR: Find the blacksmith"], server.Sent.Select(s => s.Text));
-    }
-
     /// <summary>
     /// Yazı belirirken renkli sözcük geç geliyor: az önce gösterilen yazının başı okunursa tamamı beklenir; görev iki kez
     /// çevrilip değişmez.
@@ -583,32 +568,14 @@ public class RegionWatcherTests
     }
 
     [Fact]
-    public async Task PendingPrefetchSkipsSpeculativeChangesButAllowsConfirmedText()
-    {
-        var pending = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var translator = new Translator { Respond = text => text == "Find the blacksmith" ? pending.Task : Task.FromResult("TR: " + text) };
-        var reader = new Reader { Lines = [Line("Find the blacksmith")] };
-        var server = new Server();
-        var watcher = new RegionWatcher(reader, translator, server) { PrefetchesTranslations = true };
-        try
-        {
-            await watcher.PassAsync(Shade(10), [Quest]);
-            reader.Lines = [Line("Open the door")];
-            await watcher.PassAsync(Shade(90), [Quest]);
-            await Show(watcher, reader, "Take cover", 170);
-            Assert.Equal(["Find the blacksmith", "Take cover"], translator.Calls);
-            Assert.Equal(["TR: Take cover"], server.Sent.Select(s => s.Text));
-        }
-        finally { pending.TrySetResult("TR: Find the blacksmith"); }
-    }
-
-    [Fact]
-    public async Task CancelledPrefetchCanBeRetriedWhenConfirmed()
+    public async Task CancelledConfirmedTranslationCanBeRetriedOnTheSameFrame()
     {
         var reader = new Reader { Lines = [Line("Find the blacksmith")] };
         var translator = new Translator { Respond = _ => Task.FromCanceled<string>(new CancellationToken(true)) };
         var server = new Server();
-        var watcher = new RegionWatcher(reader, translator, server) { PrefetchesTranslations = true };
+        var watcher = new RegionWatcher(reader, translator, server);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        Assert.Empty(translator.Calls);
         await watcher.PassAsync(Shade(10), [Quest]);
         translator.Respond = null;
         await watcher.PassAsync(Shade(10), [Quest]);
