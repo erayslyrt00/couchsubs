@@ -42,14 +42,11 @@ public sealed record WatchedArea(string Id, string Name, CropRegion Region);
 /// </summary>
 public sealed class RegionWatcher
 {
-    /// <summary>
-    /// İki tur arasındaki en kısa süre. 1 saniyeyken yazı ancak 2–3 saniyede çevriliyordu (bir tur bekleme, bir tur
-    /// kararlılık); görüntüsü değişmeyen alan yeniden okunmadığı için sık tur işlemciyi yormaz.
-    /// </summary>
-    public const int DefaultIntervalMs = 250;
+    /// <summary>Hareketli ek alanlar en fazla saniyede bir normal OCR turuna girer.</summary>
+    public const int DefaultIntervalMs = 1000;
 
-    /// <summary>Telefonda pil ve ısı için daha seyrek tur.</summary>
-    public const int PhoneIntervalMs = 450;
+    // Okunmuş bir aday aynı görüntüde kalıyorsa ikinci OCR turunu beklemeden gösterilebilir.
+    private const int ConfirmationMs = 250;
 
     /// <summary>
     /// Ekrandakinden yalnız biraz farklı (ya da eksik) kararlı okuma en çok bu kadar tur bekletilir; o hâlde kalırsa
@@ -121,6 +118,7 @@ public sealed class RegionWatcher
     private readonly Func<long> now;
     private Dictionary<string, State> states = [];
     private long? lastPass;
+    private long? confirmAt;
     private readonly object captureGate = new();
     private (Frame Frame, IReadOnlyList<WatchedArea> Areas)? latest;
     private int busy;
@@ -161,6 +159,8 @@ public sealed class RegionWatcher
     public void Offer(Frame frame, IReadOnlyList<WatchedArea> areas)
     {
         var time = now();
+        bool confirmOnly;
+        int started;
         lock (captureGate)
         {
             if (IsBusy)
@@ -169,13 +169,25 @@ public sealed class RegionWatcher
                 return;
             }
             if (areas.Count == 0 && !AnyShown()) return;
-            if (lastPass is { } last && time - last < intervalMs) return;
+            confirmOnly = lastPass is { } last && time - last < intervalMs;
+            if (confirmOnly)
+            {
+                if (confirmAt is not { } due || time < due) return;
+                confirmAt = null;
+                var map = states;
+                lock (map) if (!map.Values.Any(state => state.Candidate is not null)) return;
+            }
+            else
+            {
+                lastPass = time;
+                confirmAt = time + ConfirmationMs;
+            }
+            started = Volatile.Read(ref session);
             Volatile.Write(ref busy, 1);
-            lastPass = time;
         }
         _ = Task.Run(async () =>
         {
-            try { await PassAsync(frame, areas).ConfigureAwait(false); }
+            try { await PassAsync(frame, areas, started, confirmOnly).ConfigureAwait(false); }
             catch (Exception error) { Log?.Invoke($"ek alan turu hata verdi: {error.Message}"); }
             finally
             {
@@ -200,11 +212,14 @@ public sealed class RegionWatcher
     }
 
     /// <summary>Bir tur: kaldırılan alanların kutusu kalkar, her alan gerekirse okunur ve kararlı yazısı çevrilir. Testler doğrudan çağırır.</summary>
-    public async Task PassAsync(Frame frame, IReadOnlyList<WatchedArea> areas)
+    public Task PassAsync(Frame frame, IReadOnlyList<WatchedArea> areas) =>
+        PassAsync(frame, areas, Volatile.Read(ref session), confirmOnly: false);
+
+    private async Task PassAsync(Frame frame, IReadOnlyList<WatchedArea> areas, int started, bool confirmOnly)
     {
-        var started = Volatile.Read(ref session);
+        if (Volatile.Read(ref session) != started) return;
         var map = states;
-        Interlocked.Increment(ref passes);
+        if (!confirmOnly) Interlocked.Increment(ref passes);
         var ids = areas.Select(area => area.Id).ToHashSet();
         List<string> removed;
         lock (map)
@@ -217,20 +232,35 @@ public sealed class RegionWatcher
         {
             var current = Latest();
             if (current is null || current.Value.Areas.Contains(area))
-                await VisitAsync(area, current?.Frame ?? frame, map, started).ConfigureAwait(false);
+                await VisitAsync(area, current?.Frame ?? frame, map, started, confirmOnly).ConfigureAwait(false);
             if (Volatile.Read(ref session) != started) return;
         }
     }
 
-    private async Task VisitAsync(WatchedArea area, Frame frame, Dictionary<string, State> map, int started)
+    private async Task VisitAsync(WatchedArea area, Frame frame, Dictionary<string, State> map, int started, bool confirmOnly)
     {
-        var crop = RegionCropper.Crop(frame, area.Region);
-        var signature = RegionCropper.Signature(crop);
         State state;
         lock (map)
         {
-            if (!map.TryGetValue(area.Id, out state!)) map[area.Id] = state = new State();
+            if (!map.TryGetValue(area.Id, out state!))
+            {
+                if (confirmOnly) return;
+                map[area.Id] = state = new State();
+            }
         }
+        if (confirmOnly && state.Candidate is null) return;
+        var crop = RegionCropper.Crop(frame, area.Region);
+        if (confirmOnly)
+        {
+            if (state.LastReadCrop is { } before && before.Width == crop.Width && before.Height == crop.Height
+                && before.Pixels.AsSpan().SequenceEqual(crop.Pixels) && state.Candidate is { } ready)
+            {
+                state.Candidate = null;
+                await CommitAsync(ready, area, state, started).ConfigureAwait(false);
+            }
+            return;
+        }
+        var signature = RegionCropper.Signature(crop);
         var changed = PixelsChanged(state, crop, signature);
         // Örneklerin arasına düşen ya da eski satır kutusunun dışında beliren bir yazıyı da yakala.
         // Birebir aynı görüntüde süre dolsa bile OCR çalışmaz.
@@ -660,7 +690,12 @@ public sealed class RegionWatcher
         Interlocked.Increment(ref session);
         var anyShown = AnyShown();
         states = [];
-        lastPass = null;
+        lock (captureGate)
+        {
+            lastPass = null;
+            confirmAt = null;
+            latest = null;
+        }
         lock (translations) translations.Clear();
         if (anyShown) server.ClearRegions();
     }

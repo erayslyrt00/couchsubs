@@ -483,6 +483,42 @@ public class RegionWatcherTests
         Assert.Equal(["TR: Find the blacksmith"], server.Sent.Select(s => s.Text));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EarlyConfirmationOnlyPublishesAnUnchangedCandidateWithoutOcr(bool changed)
+    {
+        long clock = 0;
+        var reader = new Reader { Lines = [Line("Find the blacksmith")] };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, new Translator(), server, clock: () => clock);
+        async Task Offer(Frame frame)
+        {
+            watcher.Offer(frame, [Quest]);
+            while (watcher.IsBusy) await Task.Delay(1);
+        }
+        await Offer(Shade(10));
+        clock = 249;
+        await Offer(Shade(10));
+        Assert.Empty(server.Sent);
+        var next = Shade(changed ? (byte)100 : (byte)10);
+        clock = 250;
+        await Offer(next);
+        Assert.Equal(1, reader.Count);
+        Assert.Equal(changed ? 0 : 1, server.Sent.Count);
+
+        reader.Lines = [Line("Talk to Arthur")];
+        clock = 750;
+        await Offer(Shade(100));
+        Assert.Equal(1, reader.Count);
+        clock = 1000;
+        await Offer(Shade(100));
+        Assert.Equal(2, reader.Count);
+        clock = 1250;
+        await Offer(Shade(100));
+        Assert.Equal("TR: Talk to Arthur", server.Sent.Last().Text);
+    }
+
     private static TextLine At(string text, double left, double top, double right, double bottom) =>
         new(text, new TextBox(left, top, right, bottom));
 
