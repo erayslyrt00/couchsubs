@@ -117,7 +117,7 @@ public final class RegionWatcher {
     /// Paragrafların çevirisi (çevrilmeyen parça nil) ve kaçının paketten geldiği.
     struct Translation: Sendable {
         var result: [String?]
-        var fromPack: Int
+        var readyCount: Int
     }
 
     private let reader: TextReader
@@ -136,6 +136,8 @@ public final class RegionWatcher {
     public var packLookup: ((String) -> PackMatch?)?
     /// Hedef dil Türkçe: yüksek güvenle Türkçe olan parça çevrilmez, aslı sayılır (#289).
     public var skipsTurkish = true
+    /// Kısa İngilizce tuş komutlarını Türkçeye çevirir. Yalnız en → tr için açılır.
+    public var translatesUiCommands = false
     public var onLog: ((String) -> Void)?
     /// Her okumanın süresi (ms; ölçüm için).
     public var onReadMs: ((Int) -> Void)?
@@ -295,7 +297,7 @@ public final class RegionWatcher {
     /// satırlar yukarıdan aşağı parçalara toplanır (başlık, cümle, madde). Yazının içindeki kumanda simgeleri `frame`'den
     /// (okunan alan) kesilir; çeviride yerleri korunur.
     static func candidate(_ reading: Reading, in region: CropRegion, frame: CGImage? = nil) -> Candidate {
-        let lines = reading.withButtonIcons().withoutButtonPrompts().withoutOcrNoise().lines
+        let lines = reading.withButtonIcons(frame: frame).withoutButtonPrompts().withoutOcrNoise().lines
             .filter { ScreenTranslation.isWords($0.text) }
             .sorted { ($0.box?.top ?? 0) < ($1.box?.top ?? 0) }
         var paragraphs = ScreenTranslation.paragraphs(lines)
@@ -311,7 +313,7 @@ public final class RegionWatcher {
         // gibi gruplanır; her grubun çevirisi TV'de kendi yerine konur. Tek grupta (ya da yeri bilinmeyen satır varsa)
         // eskisi gibi tek kutu. Anahtar grup yapısını da içerir: aynı yazı farklı gruplanırsa bloklar yeniden kurulur.
         var blocks: [Block]?
-        let groups = lines.count > 1 && boxes.count == lines.count ? ScreenTranslation.groups(reading) : []
+        let groups = lines.count > 1 && boxes.count == lines.count ? ScreenTranslation.groups(from: lines) : []
         if groups.count > 1, groups.count < ScreenTranslation.maxGroups {
             paragraphs = groups.flatMap(\.paragraphs)
             icons = groups.flatMap { $0.icons ?? $0.paragraphs.map { _ in [IconSlot]() } }
@@ -415,15 +417,18 @@ public final class RegionWatcher {
         }
         states[area.id]?.remembered = candidate.text
         let translated = translation.result
-        let fromPack = translation.fromPack
+        let readyCount = translation.readyCount
         // Simgeler çeviride uydurma adlarla korunmuştu (`IconText`); adlar yerlerine konur.
         let prepared = candidate.paragraphs.map(IconText.protect)
         var slots: [IconSlot] = []
         var text: [String] = []
         for (index, source) in candidate.paragraphs.enumerated() {
             let trimmed = (index < translated.count ? translated[index] : nil)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            text.append(trimmed.isEmpty ? IconText.indexed(source, offset: slots.count)
-                        : IconText.restore(trimmed, names: prepared[index].names, offset: slots.count))
+            if trimmed.isEmpty || trimmed.contains(ButtonIcons.marker) {
+                text.append(IconText.indexed(trimmed.isEmpty ? source : trimmed, offset: slots.count))
+            } else {
+                text.append(IconText.restore(trimmed, names: prepared[index].names, offset: slots.count))
+            }
             if let all = candidate.icons, index < all.count { slots += all[index] }
         }
         // Çevirisi aslıyla aynı (ad, sayı, zaten hedef dilde): kutu gösterilmez.
@@ -441,7 +446,7 @@ public final class RegionWatcher {
             states[area.id]?.renderedBlocks = nil
             return
         }
-        let origin = cached != nil ? "hazır çeviri" : fromPack == candidate.paragraphs.count ? "paket" : fromPack > 0 ? "paket+motor" : "motor"
+        let origin = cached != nil || readyCount == candidate.paragraphs.count ? "hazır çeviri" : readyCount > 0 ? "hazır çeviri+motor" : "motor"
         onLog?("ek alan \(area.name): \(SubtitleLog.excerpt(IconText.plain(candidate.paragraphs.joined(separator: " ")))) → \(origin)")
         let rendered = IconText.render(text.joined(separator: "\n"), slots: slots)
         let icons = rendered.icons.isEmpty ? nil : rendered.icons
@@ -482,8 +487,10 @@ public final class RegionWatcher {
     /// korunmuş metin gider (`IconText`; simgeler paket aramasında yok sayılır). Çevrilemeyen parça nil kalır.
     private func translate(_ paragraphs: [String]) async throws -> Translation {
         let prepared = paragraphs.map(IconText.protect)
-        var result = paragraphs.map { packLookup?(IconText.plain($0))?.text }
-        let fromPack = result.compactMap { $0 }.count
+        var result = paragraphs.map { paragraph in
+            packLookup?(IconText.plain(paragraph))?.text ?? (translatesUiCommands ? UiCommands.translate(paragraph) : nil)
+        }
+        let readyCount = result.compactMap { $0 }.count
         // Zaten Türkçe olan parça çevrilmez: aslı kalır, tümü öyleyse kutu gösterilmez.
         for index in result.indices where result[index] == nil && skipsTurkish && TurkishText.isSure(paragraphs[index]) {
             result[index] = paragraphs[index]
@@ -495,7 +502,7 @@ public final class RegionWatcher {
                 : try await sequential(texts)
             for (index, translation) in zip(missing, translated) { result[index] = translation }
         }
-        return Translation(result: result, fromPack: fromPack)
+        return Translation(result: result, readyCount: readyCount)
     }
 
     private func sequential(_ texts: [String]) async throws -> [String] {

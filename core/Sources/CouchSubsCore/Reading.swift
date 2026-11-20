@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import CoreGraphics
 import Foundation
 
 /// Yazının yeri, içinde bulunduğu alanın kenarlarına oranla (0–1, üstten ve soldan).
@@ -223,8 +224,10 @@ public struct Reading: Equatable, Sendable {
     }
 
     /// Yazının içindeki kumanda simgeleri `ButtonIcons.marker` ile işaretlenmiş hali (bkz. `ButtonIcons.mark`).
-    public func withButtonIcons() -> Reading {
-        Reading(lines: ButtonIcons.joinHints(self).lines.map(ButtonIcons.mark))
+    public func withButtonIcons(frame: CGImage? = nil) -> Reading {
+        let marked = ButtonIcons.joinHints(self).lines.map(ButtonIcons.mark)
+        guard let frame else { return Reading(lines: marked) }
+        return Reading(lines: marked.map { ButtonIcons.markFree($0, frame: frame) })
     }
 }
 

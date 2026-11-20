@@ -779,6 +779,7 @@ final class PhoneModel: ObservableObject {
         let watcher = RegionWatcher(reader: VisionReader(language: settings.sourceLanguage), translator: makeTranslator(), server: server)
         watcher.packLookup = packLookup
         watcher.skipsTurkish = settings.targetLanguage == "tr"
+        watcher.translatesUiCommands = settings.sourceLanguage == "en" && settings.targetLanguage == "tr"
         watcher.onLog = { SubtitleLog.write($0) }
         return watcher
     }
@@ -1068,7 +1069,7 @@ final class PhoneModel: ObservableObject {
         screenTask = Task { [weak self] in
             do {
                 let reading = try await ReadQueue.shared.run { try reader.readLines(frame, deep: false) }
-                let items = try await ScreenTranslation.translate(reading, using: translator) { shown in
+                let items = try await ScreenTranslation.translate(reading, using: translator, frame: frame) { shown in
                     guard !Task.isCancelled else { return }
                     let milliseconds = ScreenTranslation.displayMilliseconds(shown)
                     server.sendScreen(shown, durationMs: milliseconds)

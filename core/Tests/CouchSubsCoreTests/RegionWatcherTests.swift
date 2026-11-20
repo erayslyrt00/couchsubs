@@ -377,6 +377,28 @@ final class RegionWatcherTests: XCTestCase {
         await watcher.pass(frame(shade), areas: [quest])
     }
 
+    func testCommandGlossaryRespectsLanguagePackPriorityAndCache() async {
+        let scenarios: [(Bool, String?, String, [String])] = [
+            (true, nil, "Aç", []), (true, "Menüyü aç", "Menüyü aç", []), (false, nil, "TR: OPEN", ["OPEN"])
+        ]
+        for (enabled, packText, expected, calls) in scenarios {
+            let reader = Reader(), translator = Translator(), server = Server()
+            let watcher = RegionWatcher(reader: reader, translator: translator, server: server)
+            watcher.translatesUiCommands = enabled
+            var lookups = 0
+            watcher.packLookup = { text in
+                lookups += 1
+                return text == "OPEN" ? packText.map { PackMatch(text: $0, spoken: []) } : nil
+            }
+            await show(watcher, reader, "OPEN", 10)
+            await show(watcher, reader, "", 90)
+            await show(watcher, reader, "OPEN", 10)
+            XCTAssertEqual(server.sent.map(\.text), [expected, "", expected])
+            XCTAssertEqual(translator.calls, calls)
+            XCTAssertEqual(lookups, 1)
+        }
+    }
+
     /// Görev yazısı arada kaybolup yeniden çıkınca çevirmene yeniden gidilmez.
     func testReappearingTextUsesTheEarlierTranslation() async {
         let reader = Reader(), translator = Translator(), server = Server()

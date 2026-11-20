@@ -269,6 +269,17 @@ public enum ButtonIcons {
     /// harf simgeden dar, kestirilen yer kayık olabilir): içindeki zeminden ayrışan pikseller bitişik kümelere ayrılır,
     /// kutunun ortasındaki en büyük küme simgedir ve sıkıca kırpılır. `frame`, kutunun oranlandığı karedir.
     public static func crop(_ frame: CGImage, _ box: TextBox) -> String? {
+        guard let icon = locate(frame, box) else { return nil }
+        let data = png(icon.pixels, stride: icon.stride, x: icon.x, y: icon.y, width: icon.width, height: icon.height)
+        return "data:image/png;base64," + data.base64EncodedString()
+    }
+
+    private struct LocatedIcon {
+        let pixels: [UInt8]
+        let stride, x, y, width, height, inkWidth, inkHeight: Int
+    }
+
+    private static func locate(_ frame: CGImage, _ box: TextBox) -> LocatedIcon? {
         guard box.left.isFinite, box.top.isFinite, box.right.isFinite, box.bottom.isFinite else { return nil }
         let frameWidth = frame.width, frameHeight = frame.height
         let clamp = { (value: Double, limit: Int) -> Int in Int(max(0, min(Double(limit), value))) }
@@ -322,8 +333,84 @@ public enum ButtonIcons {
         let right = min(frameWidth, x0 + end + margin)
         let cropTop = max(0, y0 + top - margin)
         let cropBottom = min(frameHeight, y0 + bottom + margin)
-        let data = png(pixels, stride: stride, x: left - readLeft, y: cropTop - readTop, width: right - left, height: cropBottom - cropTop)
-        return "data:image/png;base64," + data.base64EncodedString()
+        return LocatedIcon(pixels: pixels, stride: stride, x: left - readLeft, y: cropTop - readTop,
+                           width: right - left, height: cropBottom - cropTop, inkWidth: end - start, inkHeight: bottom - top)
+    }
+
+    /// Ek alanlardaki tuş çubuklarında ve satır uçlarında yalnız kareden doğrulanan simgeler işaretlenir.
+    /// Windows ButtonIcons.MarkFree ile aynı kurallar (GameTranslator ve Nino Game Translator, bkz. THIRD-PARTY-NOTICES.md).
+    static func markFree(_ line: TextLine, frame: CGImage) -> TextLine {
+        guard let lineBox = line.box, (line.icons ?? []).isEmpty, frame.width >= 8, frame.height >= 8 else { return line }
+        let measured = !(line.words ?? []).isEmpty
+        let words = measured ? line.words! : estimate(line.text, lineBox)
+        let width = Double(frame.width)
+        let lineHeight = lineBox.bottom - lineBox.top
+        let linePx = lineHeight * Double(frame.height)
+        guard let first = words.first, linePx >= 6 else { return line }
+        let head = words.map(\.text).filter { $0.utf16.count > 1 && !names.contains($0.uppercased()) }.joined()
+        let bar = head.filter(\.isLetter).count >= 2 && head == head.uppercased()
+        let spanX = linePx * 1.8 / width
+        let symbol = String(marker)
+        var tokens: [String] = []
+        var icons: [IconSlot] = []
+        func padded(_ left: Double, _ right: Double) -> TextBox {
+            TextBox(left: max(0, min(1, left)), top: max(0, min(1, lineBox.top - lineHeight * 0.3)),
+                    right: max(0, min(1, right)), bottom: max(0, min(1, lineBox.bottom + lineHeight * 0.3)))
+        }
+        func hasIcon(_ box: TextBox) -> Bool {
+            guard let ink = locate(frame, box), Double(ink.inkHeight) >= linePx * 0.5,
+                  Double(ink.inkHeight) <= linePx * 2.2 else { return false }
+            return (0.6...2.4).contains(Double(ink.inkWidth) / Double(ink.inkHeight))
+        }
+        func addEdge(_ left: Double, _ right: Double) {
+            let box = padded(left, right)
+            if hasIcon(box) {
+                tokens.append(symbol)
+                icons.append(IconSlot(box: box, text: ""))
+            }
+        }
+        if !isIconToken(first.text), lineBox.left > 0 {
+            addEdge(lineBox.left - spanX, lineBox.left - spanX * 0.08)
+        }
+        for (i, word) in words.enumerated() {
+            if bar, i > 0, tokens.last != symbol {
+                let left = words[i - 1].box.right, gap = word.box.left - left
+                if gap * width > linePx * 0.9 { addEdge(left + gap * 0.1, word.box.left - gap * 0.1) }
+            }
+            let core = trimming(word.text, brackets)
+            let named = names.contains(core.uppercased())
+            let hasLettersOrDigits = core.unicodeScalars.contains { isLetter($0) || $0.properties.generalCategory == .decimalNumber }
+            let suspicious = bar ? (named || core.utf16.count == 1 || ["11", "12", "13", "21", "22", "23"].contains(core)
+                                     || (core.utf16.count <= 2 && !hasLettersOrDigits))
+                                 : (i == 0 && words.count >= 2 && isIconToken(word.text))
+            if suspicious {
+                let halfWidth = (word.box.right - word.box.left) / 2
+                var left = i > 0 ? min(word.box.left, (words[i - 1].box.right + word.box.left) / 2) : word.box.left - halfWidth
+                var right = i + 1 < words.count ? max(word.box.right, (word.box.right + words[i + 1].box.left) / 2)
+                                                  : word.box.right + halfWidth
+                let measuredButton = named && measured
+                if measuredButton {
+                    let rim = linePx * 0.3 / width
+                    left = max(left, word.box.left - rim)
+                    right = min(right, word.box.right + rim)
+                }
+                let box = padded(left, right)
+                if hasIcon(box) {
+                    if measuredButton || tokens.last != symbol {
+                        tokens.append(symbol)
+                        icons.append(IconSlot(box: box, text: core))
+                    }
+                    continue
+                }
+                if !named && !hasLettersOrDigits && !["+", "/", "&", "-"].contains(core) { continue }
+            }
+            tokens.append(word.text)
+        }
+        if bar, !tokens.isEmpty, tokens.last != symbol, lineBox.right < 1 {
+            addEdge(lineBox.right + spanX * 0.08, lineBox.right + spanX)
+        }
+        guard !icons.isEmpty else { return line }
+        return TextLine(tokens.joined(separator: " "), box: line.box, confidence: line.confidence, icons: icons)
     }
 
     /// Kesilmiş simgeler: kutusu verilen her simge kareden kesilir (bkz. `crop`).

@@ -50,7 +50,7 @@ public enum ScreenTranslation {
     public static func translate(_ reading: Reading, using translate: (String) async throws -> String,
                                  frame: CGImage? = nil, progress: ([Item]) -> Void = { _ in }) async throws -> [Item] {
         var items: [Item] = []
-        for group in withImages(groups(reading), from: frame) {
+        for group in withImages(groups(reading, frame: frame), from: frame) {
             try Task.checkCancellation()
             let prepared = group.paragraphs.map(IconText.protect)
             var translated: [String] = []
@@ -69,7 +69,7 @@ public enum ScreenTranslation {
         guard translator.translatesTogether else {
             return try await translate(reading, using: { try await translator.translate($0) }, frame: frame, progress: progress)
         }
-        let groups = withImages(groups(reading), from: frame)
+        let groups = withImages(groups(reading, frame: frame), from: frame)
         let prepared = groups.map { group in group.paragraphs.map(IconText.protect) }
         let paragraphs = prepared.flatMap { list in list.map { $0.text } }
         guard !paragraphs.isEmpty else { return [] }
@@ -124,10 +124,22 @@ public enum ScreenTranslation {
     /// satır, üstündeki satırın hemen altındaysa, yatayda onunla üst üste biniyorsa ve yazı boyu benziyorsa o gruba
     /// katılır; küçük harfle başlayan satır üstteki bitmemiş cümleye katılır (`continues`). Gruplar yukarıdan aşağı; en çok
     /// `maxGroups`, en çok yazısı olanlar.
-    public static func groups(_ reading: Reading) -> [Group] {
-        let lines = reading.withButtonIcons().withoutButtonPrompts().withoutOcrNoise().lines
+    public static func groups(_ reading: Reading, frame: CGImage? = nil) -> [Group] {
+        var marked = reading.withButtonIcons()
+        // Tam ekranda yalnız aksi halde atılacak kısa ipuçlarında simgeyi görüntüden doğrula.
+        if let frame {
+            marked = Reading(lines: marked.lines.map { line in
+                (line.icons ?? []).isEmpty && ButtonPrompts.isPrompt(line.text) ? ButtonIcons.markFree(line, frame: frame) : line
+            })
+        }
+        let lines = marked.withoutButtonPrompts().withoutOcrNoise().lines
             .filter { $0.box != nil && isWords($0.text) }
             .sorted { $0.box!.top < $1.box!.top }
+        return groups(from: lines)
+    }
+
+    /// Kutuları bilinen, süzülmüş ve sıralı satırları yeniden işaretlemeden gruplar.
+    static func groups(from lines: [TextLine]) -> [Group] {
         var groups: [[TextLine]] = []
         for line in lines {
             if let index = groups.lastIndex(where: { belongs(line.box!, below: $0.last!.box!) }),
