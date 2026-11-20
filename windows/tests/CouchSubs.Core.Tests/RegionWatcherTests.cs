@@ -138,7 +138,7 @@ public class RegionWatcherTests
         var watcher = new RegionWatcher(reader, new Translator(), server, clock: () => clock);
         for (var step = 0; step <= 20; step++)
         {
-            clock = step * 100;
+            clock = step * RegionWatcher.DefaultIntervalMs / 10;
             watcher.Offer(Shade(10), [Quest]);
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             while (watcher.IsBusy) await Task.Delay(5, timeout.Token);
@@ -319,13 +319,14 @@ public class RegionWatcherTests
             while (watcher.IsBusy) await Task.Delay(5);
         }
         await OfferAndWait();
+        const int interval = RegionWatcher.DefaultIntervalMs;
         for (var step = 1; step <= 9; step++)
         {
-            clock = step * 100;
+            clock = step * interval / 10;
             await OfferAndWait();
         }
         Assert.Equal(1, watcher.Passes);
-        clock = 1000;
+        clock = interval;
         await OfferAndWait();
         Assert.Equal(2, watcher.Passes);
         Assert.Equal(["TR: Find the blacksmith"], server.Sent.Select(s => s.Text));
@@ -467,6 +468,103 @@ public class RegionWatcherTests
         await watcher.PassAsync(Shade(10), [Quest]);
         await watcher.PassAsync(Shade(10), [Quest]);
         Assert.Equal([null], server.Blocks);
+    }
+
+    /// <summary>Kararlı gösterilip shown edilmiş yazı.</summary>
+    private static async Task Show(RegionWatcher watcher, Reader reader, string text, byte shade)
+    {
+        reader.Lines = [Line(text)];
+        await watcher.PassAsync(Shade(shade), [Quest]);
+        await watcher.PassAsync(Shade(shade), [Quest]);
+    }
+
+    /// <summary>Görev yazısı arada kaybolup yeniden çıkınca çevirmene yeniden gidilmez.</summary>
+    [Fact]
+    public async Task ReappearingTextUsesTheEarlierTranslation()
+    {
+        var (reader, translator, server) = (new Reader(), new Translator(), new Server());
+        var watcher = new RegionWatcher(reader, translator, server);
+        await Show(watcher, reader, "Find the blacksmith", 10);
+        await Show(watcher, reader, "", 90);
+        await Show(watcher, reader, "Find the blacksmith", 170);
+        Assert.Equal(["Find the blacksmith"], translator.Calls);
+        Assert.Equal(["TR: Find the blacksmith", "", "TR: Find the blacksmith"], server.Sent.Select(s => s.Text));
+    }
+
+    /// <summary>Önceden çeviri açıkken çeviri yazı kararlı mı diye beklenirken istenir; gösterimde yeniden istenmez.</summary>
+    [Fact]
+    public async Task PrefetchedTranslationIsReusedWhenTheTextIsConfirmed()
+    {
+        var (reader, translator, server) = (new Reader(), new Translator(), new Server());
+        var watcher = new RegionWatcher(reader, translator, server) { PrefetchesTranslations = true };
+        reader.Lines = [Line("Find the blacksmith")];
+        await watcher.PassAsync(Shade(10), [Quest]);
+        Assert.Equal(["Find the blacksmith"], translator.Calls);
+        Assert.Empty(server.Sent);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        Assert.Equal(["Find the blacksmith"], translator.Calls);
+        Assert.Equal(["TR: Find the blacksmith"], server.Sent.Select(s => s.Text));
+    }
+
+    /// <summary>
+    /// Yazı belirirken renkli sözcük geç geliyor: az önce gösterilen yazının başı okunursa tamamı beklenir; görev iki kez
+    /// çevrilip değişmez.
+    /// </summary>
+    [Fact]
+    public async Task PartialReadingOfTheLastTextWaitsForTheWholeText()
+    {
+        var (reader, translator, server) = (new Reader(), new Translator(), new Server());
+        var watcher = new RegionWatcher(reader, translator, server);
+        await Show(watcher, reader, "Fly to a drop point", 10);
+        await Show(watcher, reader, "", 90);
+        await Show(watcher, reader, "Fly to a", 170);
+        reader.Lines = [Line("Fly to a drop point")];
+        await watcher.PassAsync(Shade(250), [Quest]);
+        await watcher.PassAsync(Shade(250), [Quest]);
+        Assert.Equal(["Fly to a drop point"], translator.Calls);
+        Assert.Equal(["TR: Fly to a drop point", "", "TR: Fly to a drop point"], server.Sent.Select(s => s.Text));
+    }
+
+    /// <summary>Arka plan oynarken ekrandakinin harfi bozuk okuması kutuyu değiştirmez.</summary>
+    [Fact]
+    public async Task NearlySameReadingKeepsTheShownText()
+    {
+        var (reader, translator, server) = (new Reader(), new Translator(), new Server());
+        var watcher = new RegionWatcher(reader, translator, server);
+        await Show(watcher, reader, "SET DESTINATION EXIT", 10);
+        await Show(watcher, reader, "SET DESTINATIPN EXIT", 90);
+        await Show(watcher, reader, "SET DESTINATION EXIT", 170);
+        Assert.Equal(["SET DESTINATION EXIT"], translator.Calls);
+        Assert.Single(server.Sent);
+    }
+
+    /// <summary>Yalnız bir sözcüğü değişen görev, o hâlde kalırsa birkaç tur sonra gösterilir.</summary>
+    [Fact]
+    public async Task NearlySameTextThatStaysIsShownAfterTheHoldLimit()
+    {
+        var (reader, translator, server) = (new Reader(), new Translator(), new Server());
+        var watcher = new RegionWatcher(reader, translator, server);
+        await Show(watcher, reader, "Go to the barn", 10);
+        await Show(watcher, reader, "Go to the bank", 90);
+        Assert.Single(server.Sent);
+        for (var i = 0; i < RegionWatcher.HoldLimit; i++) await watcher.PassAsync(Shade(90), [Quest]);
+        Assert.Equal(["TR: Go to the barn", "TR: Go to the bank"], server.Sent.Select(s => s.Text));
+    }
+
+    [Fact]
+    public void PartialAndWordLosingReadingsAreRecognised()
+    {
+        Assert.True(RegionWatcher.IsPartOf("add marker set destination", "add marker set destination exit"));
+        Assert.False(RegionWatcher.IsPartOf("talk to arthur", "meet arthur at the barn"));
+        Assert.True(RegionWatcher.LosesWords("find ￼", "find donnie"));
+        Assert.False(RegionWatcher.LosesWords("hold ￼ to climb", "hold to climb"));
+    }
+
+    [Fact]
+    public void TextKeyKeepsButtonIcons()
+    {
+        Assert.Equal("set destination ￼ exit", RegionWatcher.TextKey(["SET DESTINATION ￼ EXIT"]));
+        Assert.NotEqual(RegionWatcher.TextKey(["SET DESTINATION"]), RegionWatcher.TextKey(["SET DESTINATION ￼"]));
     }
 
     [Fact]

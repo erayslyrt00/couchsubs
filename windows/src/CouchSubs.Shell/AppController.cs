@@ -2211,7 +2211,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (regionWatcher is null)
         {
             if (services.MakeReader(settings.SourceLanguage, settings.OcrEngine) is not { } reader) return;
-            regionWatcher = new RegionWatcher(reader, MakeTranslator(), server) { Log = SubtitleLog.Write };
+            regionWatcher = new RegionWatcher(reader, MakeTranslator(), server) { Log = SubtitleLog.Write, PrefetchesTranslations = true };
         }
         regionWatcher.PackLookup = PacksActive ? services.FindInPacks : null;
         regionWatcher.SkipsTurkish = settings.TargetLanguage == "tr";

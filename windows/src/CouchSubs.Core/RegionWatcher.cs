@@ -42,7 +42,23 @@ public sealed record WatchedArea(string Id, string Name, CropRegion Region);
 /// </summary>
 public sealed class RegionWatcher
 {
-    public const int DefaultIntervalMs = 1000;
+    /// <summary>
+    /// İki tur arasındaki en kısa süre. 1 saniyeyken yazı ancak 2–3 saniyede çevriliyordu (bir tur bekleme, bir tur
+    /// kararlılık); görüntüsü değişmeyen alan yeniden okunmadığı için sık tur işlemciyi yormaz.
+    /// </summary>
+    public const int DefaultIntervalMs = 250;
+
+    /// <summary>Telefonda pil ve ısı için daha seyrek tur.</summary>
+    public const int PhoneIntervalMs = 450;
+
+    /// <summary>
+    /// Ekrandakinden yalnız biraz farklı (ya da eksik) kararlı okuma en çok bu kadar tur bekletilir; o hâlde kalırsa
+    /// gerçekten değişmiş sayılır ve gösterilir (görevin tek sözcüğü değişebilir: "Go to the barn" → "Go to the bank").
+    /// </summary>
+    internal const int HoldLimit = 4;
+
+    /// <summary>Çevirisi saklanan en çok yazı sayısı (oyun görev yazısını arada silip yeniden gösteriyor).</summary>
+    private const int RenderedLimit = 64;
 
     private sealed class State
     {
@@ -50,6 +66,15 @@ public sealed class RegionWatcher
         public string? LastRead;
         public Candidate? Candidate;
         public string Shown = "";
+        /// <summary>Gösterilen yazının <see cref="Candidate.Text"/>'i.</summary>
+        public string ShownText = "";
+        /// <summary>Gösterilen yazıdaki tuş simgesi sayısı.</summary>
+        public int ShownIcons;
+        /// <summary>Son gösterilen (boş olmayan) yazı; alan boşalınca da hatırlanır (yarım okumayı tanımak için).</summary>
+        public string Remembered = "";
+        /// <summary>Bekletilen okuma ve kaç turdur bekletildiği (<see cref="HoldLimit"/>).</summary>
+        public string? Held;
+        public int Holds;
         public string? RenderedKey;
         public string? RenderedText;
         public IReadOnlyList<IconPlacement>? RenderedIcons;
@@ -67,7 +92,24 @@ public sealed class RegionWatcher
     /// <param name="Icons">Her parçadaki kumanda simgeleri (kareden kesilmiş), parçadaki sırasıyla.</param>
     /// <param name="Blocks">Alanda birden çok ayrı yazı grubu varsa grupları; tek grupta null (tek kutu).</param>
     internal sealed record Candidate(IReadOnlyList<string> Paragraphs, TextBox? Box, double? LineHeight, string Key,
-                                     IReadOnlyList<IReadOnlyList<IconSlot>>? Icons = null, IReadOnlyList<Block>? Blocks = null);
+                                     IReadOnlyList<IReadOnlyList<IconSlot>>? Icons = null, IReadOnlyList<Block>? Blocks = null)
+    {
+        /// <summary>Yazının sadeleştirilmiş hâli (simgeler dahil, yerleşim hariç); okumaları karşılaştırmak için.</summary>
+        public string Text { get; init; } = "";
+    }
+
+    /// <summary>
+    /// Sadeleştirilmiş yazı; tuş simgeleri <see cref="ButtonIcons.Marker"/> olarak kalır. Simgesi sonradan bulunan okuma
+    /// ("SET DESTINATION ✕") eskisinden ayrılsın.
+    /// </summary>
+    internal static string TextKey(IEnumerable<string> paragraphs) =>
+        string.Join(' ', string.Join(' ', paragraphs).Split(ButtonIcons.Marker).Select(TextMatch.Normalize)
+            .Aggregate(new List<string>(), (parts, part) =>
+            {
+                if (parts.Count > 0) parts.Add(ButtonIcons.Marker.ToString());
+                parts.Add(part);
+                return parts;
+            }).Where(part => part.Length > 0));
 
     private readonly ITextReader reader;
     private readonly ITextTranslator translator;
@@ -85,6 +127,11 @@ public sealed class RegionWatcher
     public Func<string, PackMatch?>? PackLookup { get; set; }
     /// <summary>Hedef dil Türkçe: yüksek güvenle Türkçe olan parça çevrilmez, aslı sayılır (#289).</summary>
     public bool SkipsTurkish { get; set; } = true;
+    /// <summary>
+    /// Yazı kararlı mı diye bir tur beklenirken çevirisi şimdiden istensin: doğrulanınca çoğu zaman hazırdır (gecikme
+    /// çevirmenin süresi kadar kısalır; yazı belirirken okunan ara hâller de çevrilebildiği için biraz fazla karakter harcar).
+    /// </summary>
+    public bool PrefetchesTranslations { get; set; }
     /// <summary>Oynanan oyunun adı (bilinmiyorsa null); oyuna özgü yerleşim kuralları için.</summary>
     public Func<string?>? Game { get; set; }
 
@@ -199,7 +246,77 @@ public sealed class RegionWatcher
         {
             state.LastRead = candidate.Key;
             state.Candidate = candidate;
+            // Yazı kararlı mı diye bir tur beklenirken çevirisi şimdiden istenir: doğrulanınca çoğu zaman hazırdır.
+            Prefetch(candidate, state);
         }
+    }
+
+    /// <summary>
+    /// Kararlılık beklenirken çeviriyi başlatır. Ekrandaki yazı, bekletilecek okuma (yarım ya da ekrandakine çok benzer)
+    /// ve zaten Türkçe ya da paketten gelecek yazı için istenmez.
+    /// </summary>
+    private void Prefetch(Candidate candidate, State state)
+    {
+        if (!PrefetchesTranslations || candidate.Key.Length == 0 || candidate.Key == state.Shown || ShouldHold(candidate, state)) return;
+        // Hata gözlenir; asıl gösterimde yeniden denenir.
+        _ = Translate(candidate).ContinueWith(task => _ = task.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
+
+    private static int IconCount(Candidate candidate) =>
+        candidate.Paragraphs.Sum(paragraph => paragraph.Count(c => c == ButtonIcons.Marker));
+
+    /// <summary>
+    /// Okuma bekletilmeli mi (gösterilmeden önce bir iki tur daha okunur):
+    /// <list type="bullet">
+    /// <item>Az önce gösterilen yazının başı: yazı belirirken renkli sözcük geç geliyor ("Fly to a" ← "Fly to a drop");
+    /// görev her belirişinde iki kez çevrilip değişiyordu.</item>
+    /// <item>Ekrandakiyle neredeyse aynı ya da onun eksik hâli, ve daha çok simge bulmamış: harita arkada oynarken tuş
+    /// çubuğu "SET DESTINATION ✕ EXIT ○" / "SET DESTINATIPN EXIT ○" diye okunup kutu sürekli değişiyordu.</item>
+    /// <item>Daha çok simge bulmuş ama ekrandakinin bir sözcüğünü simgeyle değiştirmiş ("Find □" ← "Find Donnie").</item>
+    /// </list>
+    /// </summary>
+    private static bool ShouldHold(Candidate candidate, State state)
+    {
+        if (candidate.Text.Length == 0) return false;
+        if (state.Remembered.Length > candidate.Text.Length && state.Remembered.StartsWith(candidate.Text + " ", StringComparison.Ordinal))
+            return true;
+        if (state.ShownText.Length == 0 || state.ShownText == candidate.Text) return false;
+        var icons = IconCount(candidate);
+        return icons <= state.ShownIcons
+            ? TextMatch.IsSimilar(state.ShownText, candidate.Text, 0.85) || IsPartOf(candidate.Text, state.ShownText)
+            : LosesWords(candidate.Text, state.ShownText);
+    }
+
+    private static bool Matches(string a, string b) => a == b || TextMatch.IsSimilar(a, b, 0.75);
+
+    private static string[] Words(string text) =>
+        [.. text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(token => token.Any(char.IsLetterOrDigit))];
+
+    /// <summary>Okuma ekrandakinin eksik hâli mi: sözcükleri (biri tanınmayabilir) ekrandakinde sırasıyla geçiyor.</summary>
+    internal static bool IsPartOf(string reading, string shown)
+    {
+        var part = reading.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var whole = shown.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (part.Length == 0 || part.Length >= whole.Length) return false;
+        int at = 0, misses = 0;
+        foreach (var word in part)
+        {
+            var found = Array.FindIndex(whole, at, w => Matches(w, word));
+            if (found < 0) { if (++misses > 1) return false; continue; }
+            at = found + 1;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Okumanın bütün sözcükleri ekrandakinde geçiyor ama ekrandakinin bir sözcüğü kayıp (simge onun yerine okunmuş).
+    /// </summary>
+    internal static bool LosesWords(string reading, string shown)
+    {
+        var have = Words(reading);
+        var whole = Words(shown);
+        return have.Length > 0 && whole.Any(word => !have.Any(w => Matches(w, word))) && have.All(word => whole.Any(w => Matches(w, word)));
     }
 
     /// <summary>
@@ -225,7 +342,7 @@ public sealed class RegionWatcher
         // gibi gruplanır; her grubun çevirisi TV'de kendi yerine konur. Tek grupta (ya da yeri bilinmeyen satır varsa)
         // eskisi gibi tek kutu. Anahtar grup yapısını da içerir: aynı yazı farklı gruplanırsa bloklar yeniden kurulur.
         IReadOnlyList<Block>? blocks = null;
-        var key = TextMatch.Normalize(string.Join(' ', paragraphs));
+        var key = TextKey(paragraphs);
         var groups = lines.Count > 1 && boxes.Count == lines.Count ? ScreenTranslation.Groups(reading, menuRows) : [];
         if (groups.Count is > 1 and < ScreenTranslation.MaxGroups)
         {
@@ -240,11 +357,11 @@ public sealed class RegionWatcher
                 start += group.Paragraphs.Count;
             }
             blocks = list;
-            key = TextMatch.Normalize(string.Join(' ', paragraphs)) + "|" + string.Join(',', list.Select(block => block.Count));
+            key = TextKey(paragraphs) + "|" + string.Join(',', list.Select(block => block.Count));
         }
         IReadOnlyList<IReadOnlyList<IconSlot>>? cut = frame is null || icons.All(list => list.Count == 0) ? null
             : [.. icons.Select(list => ButtonIcons.WithImages(list, frame))];
-        return new Candidate(paragraphs, box, lineHeight, key, cut, blocks);
+        return new Candidate(paragraphs, box, lineHeight, key, cut, blocks) { Text = TextKey(paragraphs) };
     }
 
     private static bool SameLayout(IReadOnlyList<Block>? a, IReadOnlyList<Block>? b) =>
@@ -270,8 +387,21 @@ public sealed class RegionWatcher
             state.RenderedBlocks = moved;
             return;
         }
-        var previousShown = state.Shown;
+        if (ShouldHold(candidate, state))
+        {
+            if (state.Held != candidate.Key) (state.Held, state.Holds) = (candidate.Key, 0);
+            if (++state.Holds <= HoldLimit)
+            {
+                // Sonraki tur (iz değişmese de) bu okumayı yeniden dener; o hâlde kalırsa sınırda gösterilir.
+                state.Candidate = candidate;
+                return;
+            }
+        }
+        (state.Held, state.Holds) = (null, 0);
+        var previous = (state.Shown, state.ShownText, state.ShownIcons);
         state.Shown = candidate.Key;
+        state.ShownText = candidate.Text;
+        state.ShownIcons = IconCount(candidate);
         if (candidate.Key.Length == 0)
         {
             server.SendRegion(area.Id, "", null);
@@ -282,30 +412,20 @@ public sealed class RegionWatcher
             Log?.Invoke($"ek alan {area.Name}: boşaldı");
             return;
         }
-        // Simgeler paket aramasında yok sayılır, çeviride uydurma adlarla korunur (IconText).
-        var prepared = candidate.Paragraphs.Select(IconText.Protect).ToList();
-        string?[] result = [.. candidate.Paragraphs.Select(paragraph => PackLookup?.Invoke(IconText.Plain(paragraph))?.Text)];
-        var fromPack = result.Count(text => text is not null);
-        // Zaten Türkçe olan parça çevrilmez: aslı kalır, tümü öyleyse kutu gösterilmez.
-        for (var i = 0; i < result.Length; i++)
-            if (result[i] is null && SkipsTurkish && TurkishText.IsSure(candidate.Paragraphs[i])) result[i] = candidate.Paragraphs[i];
-        try
-        {
-            var missing = Enumerable.Range(0, result.Length).Where(i => result[i] is null).ToList();
-            if (missing.Count > 0)
-            {
-                var texts = missing.Select(i => prepared[i].Text).ToList();
-                var translations = await translator.TranslateAllAsync(texts).ConfigureAwait(false);
-                for (var i = 0; i < missing.Count && i < translations.Count; i++) result[missing[i]] = translations[i];
-            }
-        }
+        state.Remembered = candidate.Text;
+        // Önceden istenmiş ya da daha önce gösterilmiş yazı: çevirmene yeniden gidilmez.
+        bool ready;
+        lock (translations) ready = translations.ContainsKey(candidate.Key);
+        var task = Translate(candidate);
+        Translation translation;
+        try { translation = await task.ConfigureAwait(false); }
         catch (Exception error)
         {
             if (Volatile.Read(ref session) == started)
             {
                 if (state.Shown == candidate.Key)
                 {
-                    state.Shown = previousShown;
+                    (state.Shown, state.ShownText, state.ShownIcons) = previous;
                     state.Candidate = candidate;
                 }
                 Log?.Invoke($"ek alan {area.Name}: {SubtitleLog.Excerpt(IconText.Plain(string.Join(' ', candidate.Paragraphs)))} çevrilemedi ({error.Message})");
@@ -313,6 +433,8 @@ public sealed class RegionWatcher
             return;
         }
         if (Volatile.Read(ref session) != started || state.Shown != candidate.Key) return;
+        var (result, fromPack) = (translation.Result, translation.FromPack);
+        var prepared = candidate.Paragraphs.Select(IconText.Protect).ToList();
         var slots = new List<IconSlot>();
         var text = new List<string>(candidate.Paragraphs.Count);
         for (var i = 0; i < candidate.Paragraphs.Count; i++)
@@ -337,7 +459,7 @@ public sealed class RegionWatcher
             state.RenderedBlocks = null;
             return;
         }
-        var origin = fromPack == candidate.Paragraphs.Count ? "paket" : fromPack > 0 ? "paket+motor" : "motor";
+        var origin = ready ? "hazır çeviri" : fromPack == candidate.Paragraphs.Count ? "paket" : fromPack > 0 ? "paket+motor" : "motor";
         Log?.Invoke($"ek alan {area.Name}: {SubtitleLog.Excerpt(IconText.Plain(string.Join(' ', candidate.Paragraphs)))} → {origin}");
         var (shown, icons) = IconText.Render(string.Join('\n', text), slots);
         var blocks = candidate.Blocks is { } layout ? RenderBlocks(candidate, layout, text, similar, slots) : null;
@@ -374,6 +496,54 @@ public sealed class RegionWatcher
         return result;
     }
 
+    /// <summary>Paragrafların çevirisi (çevrilmeyen parça null) ve kaçının paketten geldiği.</summary>
+    private sealed record Translation(string?[] Result, int FromPack);
+
+    /// <summary>
+    /// Süren ya da bitmiş çeviriler (anahtar → çeviri). Oyun görev yazısını arada silip yeniden gösteriyor; aynı yazı
+    /// gelince çevirmene yeniden gidilmez, anında gösterilir. Önceden istenen çeviri de buradan alınır.
+    /// </summary>
+    private readonly Dictionary<string, Task<Translation>> translations = [];
+
+    /// <summary>Çevirinin görevini başlatır ya da süreni / bitmişi verir. Başarısız çeviri saklanmaz, sonra yeniden denenir.</summary>
+    private Task<Translation> Translate(Candidate candidate)
+    {
+        lock (translations)
+        {
+            if (translations.TryGetValue(candidate.Key, out var known)) return known;
+            if (translations.Count >= RenderedLimit)
+                foreach (var key in translations.Where(pair => pair.Value.IsCompleted).Select(pair => pair.Key).ToList())
+                    translations.Remove(key);
+            var task = TranslateAsync(candidate.Paragraphs);
+            translations[candidate.Key] = task;
+            _ = task.ContinueWith(_ =>
+            {
+                lock (translations)
+                    if (translations.TryGetValue(candidate.Key, out var current) && current == task) translations.Remove(candidate.Key);
+            }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            return task;
+        }
+    }
+
+    private async Task<Translation> TranslateAsync(IReadOnlyList<string> paragraphs)
+    {
+        // Simgeler paket aramasında yok sayılır, çeviride uydurma adlarla korunur (IconText).
+        var prepared = paragraphs.Select(IconText.Protect).ToList();
+        string?[] result = [.. paragraphs.Select(paragraph => PackLookup?.Invoke(IconText.Plain(paragraph))?.Text)];
+        var fromPack = result.Count(text => text is not null);
+        // Zaten Türkçe olan parça çevrilmez: aslı kalır, tümü öyleyse kutu gösterilmez.
+        for (var i = 0; i < result.Length; i++)
+            if (result[i] is null && SkipsTurkish && TurkishText.IsSure(paragraphs[i])) result[i] = paragraphs[i];
+        var missing = Enumerable.Range(0, result.Length).Where(i => result[i] is null).ToList();
+        if (missing.Count > 0)
+        {
+            var texts = missing.Select(i => prepared[i].Text).ToList();
+            var translated = await translator.TranslateAllAsync(texts).ConfigureAwait(false);
+            for (var i = 0; i < missing.Count && i < translated.Count; i++) result[missing[i]] = translated[i];
+        }
+        return new Translation(result, fromPack);
+    }
+
     /// <summary>Çeviri durdu ya da hat yeniden kuruldu: süren tur bırakılır, TV'deki ek alan kutuları kalkar.</summary>
     public void Reset()
     {
@@ -381,6 +551,7 @@ public sealed class RegionWatcher
         var anyShown = AnyShown();
         states = [];
         lastPass = null;
+        lock (translations) translations.Clear();
         if (anyShown) server.ClearRegions();
     }
 }
