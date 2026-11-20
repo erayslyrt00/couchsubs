@@ -955,7 +955,7 @@ struct TranslationCard: View {
             SwitchRow(title: "Check unchanged subtitle areas more often", isOn: $model.settings.fastSubtitleDetection)
             HintText(text: "When the subtitle area looks unchanged, read it again after 2 frames instead of 20. Uses more CPU.")
             SwitchRow(title: "Watch subtitle background (GTA 6 experimental)", isOn: $model.settings.watchSubtitleBackground)
-            HintText(text: "Only translate lines on GTA 6’s dark blue subtitle background. Other text in the subtitle area is ignored.")
+            HintText(text: "In GTA 6, set the subtitle background to Solid. Only text on the dark blue subtitle panel will be translated.")
         }
     }
 

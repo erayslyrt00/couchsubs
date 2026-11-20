@@ -78,8 +78,9 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     private readonly List<(int Number, string Source, string? Translation)> pairs = [];
     /// <summary>Okuma durdurulunca artar; önceki oturumdan dönen çeviriler gösterilmez.</summary>
     private int session;
-    /// <summary>Son okunan satırlar; kare değişmediyse yeniden okunmaz, bunlar kullanılır.</summary>
-    private Reading lastReading = Reading.Empty;
+    /// <summary>Son ham OCR. Gri görüntü izi aynı kalırken satırların altındaki panel rengi değişebilir.</summary>
+    private Reading lastOcrReading = Reading.Empty;
+    private Reading lastPanelReading = Reading.Empty;
     /// <summary>Konuşma değişirken sabit duran görev/HUD satırları (GTA 6).</summary>
     private readonly StickyRows stickyRows = new();
     /// <summary>Oturumun (hat kurulunca ya da sıfırlanınca) başladığı an; ilk karenin ne kadar sonra geldiği günlüğe yazılır.</summary>
@@ -208,22 +209,46 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
                 var area = RegionCropper.Crop(frame, region);
                 signature = RegionCropper.Signature(area);
                 ReadPlan plan;
+                Reading recognized;
+                Reading previousPanel;
+                int? readMs;
                 lock (gate)
                 {
                     plan = schedule.Plan(signature);
-                    if (plan.Reuse) return (lastReading, lastReadMs, signature);
+                    recognized = lastOcrReading;
+                    previousPanel = lastPanelReading;
+                    readMs = lastReadMs;
                 }
+                var watchPanel = WatchSubtitleBackground;
+                if (plan.Reuse)
+                {
+                    if (!watchPanel) return (recognized, readMs, signature);
+                    var visible = SubtitleBackground.Filter(recognized, area);
+                    // Panel yeni bir kutunun altına geldiyse eski HUD yazısını diyalog sanma.
+                    if (visible.Lines.All(previousPanel.Lines.Contains))
+                    {
+                        lock (gate) { if (startedSession == session) lastPanelReading = visible; }
+                        // Aynı kutular yeniden sınandı ve panel yoksa bu boşluk bir OCR kaçağı değil.
+                        bool panelLeft = previousPanel.Lines.Count > 0 && visible.Lines.Count == 0;
+                        return (visible, readMs, panelLeft ? null : signature);
+                    }
+                }
+
                 var readStarted = now();
-                var read = reader.ReadLines(area, plan.Deep);
-                if (WatchSubtitleBackground) read = SubtitleBackground.Filter(read, area);
-                var readMs = (int)Math.Clamp(now() - readStarted, 0, int.MaxValue);
+                recognized = reader.ReadLines(area, plan.Deep);
+                var read = watchPanel ? SubtitleBackground.Filter(recognized, area) : recognized;
+                readMs = (int)Math.Clamp(now() - readStarted, 0, int.MaxValue);
                 lock (gate)
                 {
-                    schedule.Record(read.Text);
-                    lastReading = read;
-                    lastReadMs = readMs;
+                    if (startedSession == session)
+                    {
+                        schedule.Record(read.Text);
+                        lastOcrReading = recognized;
+                        lastPanelReading = watchPanel ? read : Reading.Empty;
+                        lastReadMs = readMs;
+                    }
                 }
-                return (read, (int?)readMs, signature);
+                return (read, readMs, signature);
             }
             catch { return (Reading.Empty, (int?)null, signature); }
         });
@@ -927,7 +952,8 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             lastClearAt = long.MinValue;
             inFlightCancel?.Cancel();
             pairs.Clear();
-            lastReading = Reading.Empty;
+            lastOcrReading = Reading.Empty;
+            lastPanelReading = Reading.Empty;
             lastReadMs = null;
             currentRead = null;
             schedule.Reset();

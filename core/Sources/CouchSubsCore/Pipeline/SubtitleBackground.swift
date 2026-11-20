@@ -10,6 +10,7 @@ public enum SubtitleBackground {
 
     /// Yalnız GTA 6 altyazı zemininin üstündeki OCR satırlarını bırakır.
     public static func filter(_ reading: Reading, in image: CGImage) -> Reading {
+        guard reading.lines.contains(where: { $0.box != nil }) else { return .empty }
         let width = 384
         let height = max(64, min(192, Int((Double(image.height) / Double(image.width) * Double(width)).rounded())))
         var pixels = [UInt8](repeating: 0, count: width * height * 4)

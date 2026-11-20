@@ -94,6 +94,39 @@ final class SubtitleBackgroundTests: XCTestCase {
         XCTAssertTrue(try JSONDecoder().decode(UserSettings.self, from: JSONEncoder().encode(settings)).watchSubtitleBackground)
     }
 
+    @MainActor
+    func testReusedOcrConfirmsNewPanelWordsAndKeepsOcrIdleOnRemoval() async {
+        func frame(top: Int?) -> CGImage {
+            var pixels = solid(33, 33, 33)
+            if let top { fill(&pixels, left: 10, top: top, right: 118, bottom: top + 18, red: 33, green: 33, blue: 46) }
+            let provider = CGDataProvider(data: Data(pixels) as CFData)!
+            return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                           bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                           bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue
+                               | CGBitmapInfo.byteOrder32Big.rawValue), provider: provider,
+                           decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+        }
+        let top = frame(top: 4), bottom = frame(top: 26)
+        let reader = PanelReader(), translator = PanelTranslator(), sender = PanelSender()
+        var time = 0
+        let pipeline = SubtitlePipeline(reader: reader, translator: translator, server: sender,
+                                        scheduler: ReadScheduler(), clock: { time })
+        pipeline.watchSubtitleBackground = true
+        pipeline.cleanWait = 0
+        pipeline.packWait = 0
+        var reads = 0
+        pipeline.onReadResult = { _ in reads += 1 }
+        let neutral = frame(top: nil)
+        for image in [top, top, top, bottom, bottom, bottom, neutral, neutral, neutral] {
+            await pipeline.process(image, region: CropRegion(top: 0, bottom: 1, left: 0, right: 1))
+            await pipeline.waitForTranslations()
+            time += 500
+        }
+        XCTAssertEqual(translator.requested, ["Open the door.", "Get back here!"])
+        XCTAssertEqual(reads, 2)
+        XCTAssertEqual(sender.clears, 1)
+    }
+
     private func solid(_ red: UInt8, _ green: UInt8, _ blue: UInt8) -> [UInt8] {
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         fill(&pixels, left: 0, top: 0, right: width, bottom: height, red: red, green: green, blue: blue)
@@ -112,4 +145,33 @@ final class SubtitleBackgroundTests: XCTestCase {
             }
         }
     }
+}
+
+private final class PanelReader: TextReader, @unchecked Sendable {
+    private let lock = NSLock()
+    private var first = true
+    func read(_ image: CGImage) throws -> String { try readLines(image, deep: false).text }
+    func readLines(_ image: CGImage, deep: Bool) throws -> Reading {
+        lock.withLock {
+            defer { first = false }
+            return Reading(lines: [
+                TextLine("Open the door.", box: TextBox(left: 0.25, top: 0.22, right: 0.75, bottom: 0.32)),
+                TextLine(first ? "Open menu" : "Get back here!", box: TextBox(left: 0.25, top: 0.64, right: 0.75, bottom: 0.74))
+            ])
+        }
+    }
+}
+
+private final class PanelTranslator: TextTranslator {
+    var requested: [String] = []
+    func translate(_ text: String) async throws -> String {
+        requested.append(text)
+        return "TR " + text
+    }
+}
+
+private final class PanelSender: SubtitleSending {
+    var clears = 0
+    func sendSubtitle(_ text: String, durationMs: Int, box: TextBox?, replaces: Bool) {}
+    func clear() { clears += 1 }
 }

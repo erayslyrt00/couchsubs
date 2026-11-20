@@ -265,7 +265,7 @@
                             <CheckBox x:Name="WatchSubtitleBackground" Content="{t:T 'Watch subtitle background (GTA 6 experimental)'}"
                                       Checked="OnWatchSubtitleBackground" Unchecked="OnWatchSubtitleBackground" />
                             <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,6,0,16"
-                                       Text="{t:T 'Only translate lines on GTA 6’s dark blue subtitle background. Other text in the subtitle area is ignored.'}" />
+                                       Text="{t:T 'In GTA 6, set the subtitle background to Solid. Only text on the dark blue subtitle panel will be translated.'}" />
                             <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,0,0,12"
                                        Text="{t:T 'These waits only delay lines that were read badly; most lines are shown without waiting. A shorter wait shows those lines sooner but lets more wrong translations through.'}" />
                             <TextBlock Text="{t:T 'Wait for a misread line'}" Margin="0,0,0,8" />
