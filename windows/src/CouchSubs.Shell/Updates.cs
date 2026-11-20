@@ -12,6 +12,7 @@ public interface IUpdater
     Uri DownloadPage { get; }
     /// <summary>Daha yeni sürüm varsa numarası, yoksa null.</summary>
     Task<string?> CheckAsync();
+    Task<IReadOnlyList<ReleaseNoteRun>> ReleaseNotesAsync(string version);
     /// <summary>İndirir, kurar ve uygulamayı yeniden başlatır.</summary>
     Task InstallAsync(IProgress<double> progress);
 }

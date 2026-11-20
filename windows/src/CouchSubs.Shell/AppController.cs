@@ -2723,6 +2723,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <summary>Kurulum dosyasıyla kurulduysa tek tıkla güncellenir; değilse sürüm sayfası açılır.</summary>
     public bool CanUpdateItself => services.Updater?.CanUpdateItself == true;
 
+    public Task<IReadOnlyList<ReleaseNoteRun>> LoadUpdateNotesAsync(string version) =>
+        UpdateVersion == version && services.Updater is { } updater ? updater.ReleaseNotesAsync(version)
+            : Task.FromResult<IReadOnlyList<ReleaseNoteRun>>([]);
+
     /// <summary>Açılışta bir kez; ağ yoksa sessizce geçer.</summary>
     public async Task CheckForUpdateAsync()
     {

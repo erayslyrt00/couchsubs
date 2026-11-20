@@ -16,9 +16,12 @@ internal sealed class Updater : IUpdater
     private const string Repository = "https://github.com/yorulmazsinan/couchsubs";
     private readonly UpdateManager manager = new(new GithubSource(Repository, null, false));
     private UpdateInfo? pending;
+    private readonly GitHubReleaseNotes notes = new(new HttpClient
+        { Timeout = TimeSpan.FromSeconds(10), MaxResponseContentBufferSize = 2 * 1024 * 1024 });
 
     public bool CanUpdateItself => manager.IsInstalled;
     public Uri DownloadPage { get; } = new($"{Repository}/releases/latest");
+    public Task<IReadOnlyList<ReleaseNoteRun>> ReleaseNotesAsync(string version) => notes.LoadAsync(version);
 
     public async Task<string?> CheckAsync()
     {

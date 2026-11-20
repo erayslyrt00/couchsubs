@@ -81,6 +81,7 @@ a trademark of Marvel and Sony Interactive Entertainment LLC.
 |---|---|---|
 | FFmpeg 7.1.2 (`libavcodec` H.264 decoder, `libswscale`; statically linked) | LGPL-2.1-or-later | https://ffmpeg.org |
 | .NET runtime and WPF | MIT | https://github.com/dotnet |
+| Html Agility Pack (reads GitHub release notes as text and links) | MIT, ZZZ Projects | https://github.com/zzzprojects/html-agility-pack |
 | CTranslate2 4.9.0 (Windows CPU and NVIDIA CUDA inference) | MIT | https://github.com/OpenNMT/CTranslate2 |
 | Python 3.12 embedded runtime | Python Software Foundation License | https://www.python.org/downloads/release/python-31210/ |
 | NumPy (CTranslate2 wheel dependency) | BSD-3-Clause | https://github.com/numpy/numpy |

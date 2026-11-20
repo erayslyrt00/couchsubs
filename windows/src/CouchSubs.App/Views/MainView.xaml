@@ -50,6 +50,12 @@
                             <TextBlock x:Name="UpdateErrorText" Foreground="{DynamicResource dangerBrush}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed" />
                             <Button x:Name="UpdateButton" Content="{t:T 'Update now'}" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left"
                                     Margin="0,12,0,0" Click="OnUpdate" />
+                            <Expander x:Name="UpdateNotes" Margin="0,8,0,0" Header="{t:T 'Release notes'}"
+                                      Foreground="{DynamicResource textPrimaryBrush}" Expanded="OnUpdateNotesExpanded">
+                                <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto" Margin="0,6,0,0">
+                                    <TextBlock x:Name="UpdateNotesText" Style="{StaticResource SecondaryText}" TextWrapping="Wrap" />
+                                </ScrollViewer>
+                            </Expander>
                         </StackPanel>
                     </c:Card>
 

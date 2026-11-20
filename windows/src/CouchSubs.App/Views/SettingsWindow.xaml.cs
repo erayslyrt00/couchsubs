@@ -43,6 +43,7 @@ public partial class SettingsWindow : Window
     {
         this.controller = controller;
         InitializeComponent();
+        InstalledVersion.Text = Localizer.Current.Format("Installed version: %@", AppVersion.Current(typeof(SettingsWindow).Assembly));
         var settings = controller.Settings;
         DataContext = controller;
         GeminiPaidTier.IsChecked = settings.GeminiPaidTier;

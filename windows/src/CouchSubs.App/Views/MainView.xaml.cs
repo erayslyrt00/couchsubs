@@ -5,6 +5,8 @@ using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using Hyperlink = System.Windows.Documents.Hyperlink;
+using Run = System.Windows.Documents.Run;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using CouchSubs.App.Controls;
@@ -17,6 +19,8 @@ namespace CouchSubs.App.Views;
 public partial class MainView : UserControl
 {
     private readonly AppController controller;
+    private string? notesVersion;
+    private bool notesUnavailable;
     // Çeviri sürerken PS5 ve TV bağlanamıyorsa güvenlik duvarı kartı önerilir.
     private readonly DispatcherTimer connectionWatch = new() { Interval = TimeSpan.FromSeconds(5) };
     /// <summary>Canlı altyazı karosu yalnız bu oturumun satırlarını gösterir (önceki oturumlar Geçmiş'te).</summary>
@@ -70,6 +74,12 @@ public partial class MainView : UserControl
     private void ShowUpdate()
     {
         var text = Localizer.Current;
+        if (notesVersion is not null && notesVersion != controller.UpdateVersion)
+        {
+            UpdateNotes.IsExpanded = false;
+            UpdateNotesText.Inlines.Clear();
+            notesVersion = null;
+        }
         UpdateCard.Visibility = controller.UpdateVersion is null ? Visibility.Collapsed : Visibility.Visible;
         UpdateTitle.Text = text["A new version of CouchSubs is available: %@"].Replace("%@", controller.UpdateVersion ?? "");
         UpdateButton.Content = text[controller.CanUpdateItself ? "Update now" : "Download"];
@@ -78,6 +88,32 @@ public partial class MainView : UserControl
         UpdateBar.Value = controller.UpdateProgress;
         UpdateErrorText.Text = controller.UpdateError ?? "";
         UpdateErrorText.Visibility = controller.UpdateError is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private async void OnUpdateNotesExpanded(object sender, RoutedEventArgs e)
+    {
+        if (controller.UpdateVersion is not { } version || (notesVersion == version && !notesUnavailable)) return;
+        notesVersion = version;
+        notesUnavailable = false;
+        UpdateNotesText.Text = Localizer.Current["Loading release notes…"];
+        var notes = await controller.LoadUpdateNotesAsync(version);
+        if (controller.UpdateVersion != version || notesVersion != version) return;
+        UpdateNotesText.Inlines.Clear();
+        foreach (var note in notes)
+        {
+            var run = new Run(note.Text);
+            if (note.Bold) run.FontWeight = FontWeights.SemiBold;
+            if (note.Link is not { } url) UpdateNotesText.Inlines.Add(run);
+            else
+            {
+                var link = new Hyperlink(run) { NavigateUri = url };
+                link.SetResourceReference(Hyperlink.ForegroundProperty, "accentTextBrush");
+                link.RequestNavigate += (_, args) => { controller.OpenInBrowser(args.Uri); args.Handled = true; };
+                UpdateNotesText.Inlines.Add(link);
+            }
+        }
+        notesUnavailable = notes.Count == 0;
+        if (notesUnavailable) UpdateNotesText.Text = Localizer.Current["Release notes are unavailable."];
     }
 
     /// <summary>

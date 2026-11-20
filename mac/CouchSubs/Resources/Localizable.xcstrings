@@ -4880,6 +4880,70 @@
         }
       }
     },
+    "Installed version: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed version: %@"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kurulu sürüm: %@"
+          }
+        }
+      }
+    },
+    "Loading release notes…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading release notes…"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sürüm notları yükleniyor…"
+          }
+        }
+      }
+    },
+    "Release notes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Release notes"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neler değişti?"
+          }
+        }
+      }
+    },
+    "Release notes are unavailable.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Release notes are unavailable."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sürüm notlarına ulaşılamadı."
+          }
+        }
+      }
+    },
     "Update now": {
       "localizations": {
         "en": {

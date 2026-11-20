@@ -648,6 +648,7 @@
             <TabItem Header="{t:T 'About CouchSubs'}">
                 <StackPanel>
                     <TextBlock Text="{t:T 'About CouchSubs'}" Style="{StaticResource DisplayText}" Margin="0,0,0,12" />
+                    <TextBlock x:Name="InstalledVersion" Style="{StaticResource SecondaryText}" Margin="0,0,0,12" />
                     <s:TvAppCard Margin="0,0,0,12" />
                     <!-- Uygulamanın görünümü: koyu (varsayılan), açık ya da Windows'un temasıyla aynı; anında uygulanır. -->
                     <c:Card Margin="0,0,0,12">
