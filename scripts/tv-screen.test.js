@@ -74,6 +74,22 @@ function render(width, height) {
       result.regionBlocks = Array.from($('regions').children[0].children).map(measure);
       showRegion({id:'q', text:'Ahıra git', box:regionBlocks[1].box});
       result.regionSingle = Array.from($('regions').children).map(function(el) { return el.className; });
+      function regionSample(sample) {
+        showRegion(sample);
+        return measure($('regions').children[0]);
+      }
+      result.shortPhone = regionSample({id:'q', text:'Tamam.', line:.023, box:{left:.71, top:.72, right:.98, bottom:.82}});
+      result.longPhone = regionSample({id:'q', text:'Kuzey yolundaki eski istasyondan gelen son mesajı kontrol et ve hemen eve dön. '.repeat(3),
+        line:.04, box:{left:.71,top:.77,right:.98,bottom:.88}});
+      result.help = regionSample({id:'q', text:'Görev listesini açmak için basılı tut', line:.04,
+        box:{left:.02,top:.07,right:.14,bottom:.11}});
+      showRegion({id:'q', text:'Köşe', box:{left:.98,right:.999,top:.13,bottom:.16},
+        blocks:[{text:'Görev',box:{left:.81,right:.967,top:.13,bottom:.16},line:.025},
+          {text:'Köşe',box:{left:.98,right:.999,top:.13,bottom:.16},line:.025}]});
+      result.edgeNeighbours = Array.from($('regions').children[0].children).map(measure);
+      result.fullWidthRegion = regionSample({id:'q', text:'Devam', box:{left:0,top:.05,right:1,bottom:.09}});
+      result.denseHelp = regionSample({id:'q', text:'İşaretli güzergâhtaki en eski binanın ön kapısına kadar ilerle. '.repeat(12),
+        line:.03, box:{left:.04,top:.08,right:.18,bottom:.11}});
       var scenarios = ${JSON.stringify(scenarios)};
       for (var key in scenarios) {
         showScreen(scenarios[key], 10000);
@@ -186,6 +202,35 @@ test('TV ekran çevirisi: ' + width + '×' + height, {skip: !browser && 'Chrome/
     assert.ok(title.bottom <= goal.top + 1 || title.right <= goal.left || title.left >= goal.right, JSON.stringify(r.regionBlocks));
     assert.ok(title.scrollHeight <= title.clientHeight + 1 || title.font === 14);
     assert.deepEqual(r.regionSingle, ['region']);
+  });
+  await t.test('kısa telefon çevirisi İngilizce mesaj kutusunun tamamını örter', () => {
+    const m = r.shortPhone;
+    assert.ok(m.top <= .72 * height + 1 && m.bottom >= .82 * height - 1, JSON.stringify(m));
+    assert.ok(m.left <= .71 * width + 1 && m.right >= .98 * width - 1, JSON.stringify(m));
+  });
+  await t.test('uzun telefon çevirisi alta yaslı kalır ve okunabilir boyutta sığar', () => {
+    const m = r.longPhone;
+    assert.ok(Math.abs(m.bottom - .884 * height) < 1, JSON.stringify(m));
+    assert.ok(m.height <= .118 * height * 1.35 + 1 || m.font === 14, JSON.stringify(m));
+    assert.ok(m.scrollHeight <= m.clientHeight + 1 && m.font >= 14 && m.top >= 0, JSON.stringify(m));
+  });
+  await t.test('tek satırlık ipucu tek satıra sığıyorsa altındaki HUD satırına taşmaz', () => {
+    const m = r.help;
+    assert.ok(m.height <= .048 * height + 1, JSON.stringify(m));
+    assert.ok(m.left >= 0 && m.width <= .35 * width + 1, JSON.stringify(m));
+    assert.equal(m.text, 'Görev listesini açmak için basılı tut');
+  });
+  await t.test('sağ kenardaki dar ek alan bloğunun çevirisi ekran içinde kalır', () => {
+    const [label, edge] = r.edgeNeighbours;
+    assert.ok(label.right <= edge.left + 1 && edge.right <= width + 1, JSON.stringify(r.edgeNeighbours));
+    assert.equal(edge.text, 'Köşe');
+  });
+  await t.test('ek alan ekran genişliğini aşmaz; sığmayan ipucu okunabilir boyutta sarılır', () => {
+    assert.ok(r.fullWidthRegion.left >= 0 && r.fullWidthRegion.right <= width + 1);
+    const m = r.denseHelp;
+    assert.equal(m.text, 'İşaretli güzergâhtaki en eski binanın ön kapısına kadar ilerle. '.repeat(12));
+    if (m.height > .038 * height + 1) assert.equal(m.font, 14);
+    assert.ok(m.scrollHeight <= m.clientHeight + 1 && m.right <= width + 1);
   });
   await t.test('kapatma ve normal altyazıdan geçiş korunur', () => {
     assert.equal(r.hidden, 'hidden'); assert.equal(r.count, 0);

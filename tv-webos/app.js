@@ -779,7 +779,7 @@
   }
 
   // Yeriyle gelen çevirileri (ekranı çevir öğeleri, ek alan blokları) kendi İngilizce yazılarının üstüne koyar.
-  function placeItems(host, items) {
+  function placeItems(host, items, regionBlocks) {
     var width = window.innerWidth || 1920;
     var height = window.innerHeight || 1080;
     for (var i = 0; i < (items || []).length; i++) {
@@ -792,9 +792,10 @@
       var left = Math.max(0, box.left - SCREEN_PAD);
       var top = Math.max(0, box.top - SCREEN_PAD);
       var boxHeight = (box.bottom - box.top + 2 * SCREEN_PAD) * height;
+      var itemWidth = Math.max(80, (Math.min(1, box.right + SCREEN_PAD) - left) * width);
+      if (regionBlocks) itemWidth = Math.min(itemWidth, (1 - left) * width);
       el.style.left = (left * 100) + '%';
       el.style.top = (top * 100) + '%';
-      var itemWidth = Math.max(80, (Math.min(1, box.right + SCREEN_PAD) - left) * width);
       el.style.width = itemWidth + 'px';
       // Bir piksel pay, tarayıcının kesirli koordinat/scrollHeight yuvarlamasını karşılar.
       var available = Math.max(0, Math.floor(screenBottom(items, box, left * width, itemWidth, width, height) - top * height) - 1);
@@ -848,7 +849,7 @@
     var id = data && typeof data.id === 'string' ? data.id : '';
     if (!id) return;
     var box = validBox(data.box);
-    if (!data.text || !box) return hideRegion(id);
+    if (typeof data.text !== 'string' || !data.text || !box) return hideRegion(id);
     // Alanda ayrı duran yazı grupları (görev başlığı ve ayrı sütundaki hedef) kendi yerleriyle gelir: her biri "ekranı
     // çevir"deki gibi kendi İngilizce yazısının üstüne konur. Bloksuz olayda alanın çevirisi tek kutuda kalır.
     var blocks = Array.isArray(data.blocks) ? data.blocks : null;
@@ -867,7 +868,7 @@
     }
     $('regions').className = '';
     if (kind === 'region-blocks') {
-      placeItems(el, blocks);
+      placeItems(el, blocks, true);
       return;
     }
     var width = window.innerWidth || 1920;
@@ -884,11 +885,22 @@
     } else {
       el.style.top = (Math.max(0, box.top - REGION_PAD) * 100) + '%';
     }
-    var boxWidth = (box.right - box.left + 2 * REGION_PAD) * width;
+    var boxWidth = (Math.min(1, box.right + REGION_PAD) - Math.max(0, box.left - REGION_PAD)) * width;
+    var boxHeight = (Math.min(1, box.bottom + REGION_PAD) - Math.max(0, box.top - REGION_PAD)) * height;
+    var hasLine = typeof data.line === 'number' && data.line > 0;
+    var singleLine = hasLine && box.bottom - box.top <= data.line * 1.4 && data.text.indexOf('\n') < 0;
     el.style.minWidth = Math.round(boxWidth) + 'px';
-    el.style.maxWidth = Math.round(Math.max(boxWidth, width * 0.3)) + 'px';
-    var line = typeof data.line === 'number' && data.line > 0 ? data.line * height : 30;
-    el.style.fontSize = Math.max(REGION_MIN_FONT, Math.min(REGION_MAX_FONT, Math.round(line * 0.9))) + 'px';
+    el.style.maxWidth = Math.round(Math.max(boxWidth, width * (singleLine ? 0.35 : 0.3))) + 'px';
+    el.style.minHeight = Math.round(boxHeight) + 'px';
+    var line = hasLine ? data.line * height : 30;
+    var size = Math.max(REGION_MIN_FONT, Math.min(REGION_MAX_FONT, Math.round(line * 0.9)));
+    el.style.fontSize = size + 'px';
+    // Tek satırlık yardım yazısını kendi satırında tut; uzun mesajın kutusu biraz büyüyebilir.
+    var limit = Math.round(singleLine ? boxHeight : Math.max(boxHeight * 1.35, line * 2.4));
+    while (el.scrollHeight > limit && size > SCREEN_MIN_FONT) {
+      size = Math.max(SCREEN_MIN_FONT, size - 2);
+      el.style.fontSize = size + 'px';
+    }
   }
 
   function hideRegion(id) {
