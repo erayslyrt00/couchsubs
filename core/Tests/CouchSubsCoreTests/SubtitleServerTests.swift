@@ -99,6 +99,34 @@ final class SubtitleServerTests: XCTestCase {
         XCTAssertEqual(received.all, [.region(id: "q", text: "Demirciyi bul", box: box), .region(id: "q", text: "", box: nil), .regionClear])
     }
 
+    func testOnlyPhoneBlocksCarryNativeSurfaceOnTVAndDesktop() async throws {
+        let server = SubtitleServer(port: 0)
+        let port = try await server.start()
+        defer { server.stop() }
+        let received = LockedEvents()
+        server.onEvent = { received.append($0) }
+        let (bytes, _) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events")!)
+        try await waitUntil { server.connectedClients == 1 }
+        let box = TextBox(left: 0.4, top: 0.45, right: 0.55, bottom: 0.50)
+        var item = ScreenTranslation.Item(source: "Reply", translation: "Yanıtla", box: box, lineHeight: 0.05)
+        item.style = PhoneTextStyle(background: "#123456", foreground: "#ABCDEF")
+        for id in ["q", "game-phone"] {
+            server.sendRegion(id: id, text: item.translation, box: box, lineHeight: item.lineHeight, icons: nil, blocks: [item])
+        }
+        server.sendRegion(id: "game-phone", text: "", box: nil)
+        server.clearRegions()
+
+        let lines = try await readLines(bytes, until: "event: region-clear")
+        let phone = try XCTUnwrap(lines.first { $0.contains(#""id":"game-phone""#) && $0.contains(#""blocks""#) })
+        XCTAssertTrue(phone.contains(##""surface":{"background":"#123456","foreground":"#ABCDEF"}"##))
+        let manual = try XCTUnwrap(lines.first { $0.contains(#""id":"q""#) })
+        XCTAssertFalse(manual.contains(#""surface""#))
+        XCTAssertEqual(received.all, [.region(id: "q", text: item.translation, box: box), .gamePhone([item]), .gamePhone([]), .regionClear])
+
+        item.style = PhoneTextStyle(background: "transparent", foreground: "#ABCDEF")
+        XCTAssertNil(SubtitleServer.json(item, phone: true)["surface"])
+    }
+
     func testSpeechIsAnnouncedAndServed() async throws {
         let server = SubtitleServer(port: 0)
         let port = try await server.start()

@@ -27,6 +27,7 @@ public enum ScreenTranslation {
         public var lineHeight: Double
         /// Çevirinin içindeki kumanda simgeleri (kareden kesilmiş); TV `translation`'ın o yerine koyar.
         public var icons: [IconPlacement]?
+        public var style: PhoneTextStyle?
 
         public init(source: String, translation: String, box: TextBox, lineHeight: Double, icons: [IconPlacement]? = nil) {
             self.source = source
@@ -88,7 +89,7 @@ public enum ScreenTranslation {
     }
 
     /// Simgelerin resimleri kareden kesilir; kare yoksa gruplar olduğu gibi kalır (simge okunan haliyle yazılır).
-    private static func withImages(_ groups: [Group], from frame: CGImage?) -> [Group] {
+    static func withImages(_ groups: [Group], from frame: CGImage?) -> [Group] {
         guard let frame else { return groups }
         return groups.map { group in
             guard let icons = group.icons else { return group }
@@ -100,7 +101,7 @@ public enum ScreenTranslation {
 
     /// Grubun gösterilecek çevirisi; çevirisi aslıyla aynıysa (ad, sayı, zaten Türkçe yazı) nil. Boş çeviride parçanın
     /// aslı gösterilir; simgeler TV'de çevirinin içindeki yerlerine konur.
-    private static func item(_ group: Group, _ prepared: [IconText.Protected], _ translations: [String]) -> Item? {
+    static func item(_ group: Group, _ prepared: [IconText.Protected], _ translations: [String]) -> Item? {
         var changed = false
         var texts: [String] = []
         var slots: [IconSlot] = []
@@ -124,7 +125,7 @@ public enum ScreenTranslation {
     /// satır, üstündeki satırın hemen altındaysa, yatayda onunla üst üste biniyorsa ve yazı boyu benziyorsa o gruba
     /// katılır; küçük harfle başlayan satır üstteki bitmemiş cümleye katılır (`continues`). Gruplar yukarıdan aşağı; en çok
     /// `maxGroups`, en çok yazısı olanlar.
-    public static func groups(_ reading: Reading, frame: CGImage? = nil) -> [Group] {
+    public static func groups(_ reading: Reading, frame: CGImage? = nil, keepIdentifiers: Bool = false) -> [Group] {
         var marked = reading.withButtonIcons()
         // Tam ekranda yalnız aksi halde atılacak kısa ipuçlarında simgeyi görüntüden doğrula.
         if let frame {
@@ -132,7 +133,7 @@ public enum ScreenTranslation {
                 (line.icons ?? []).isEmpty && ButtonPrompts.isPrompt(line.text) ? ButtonIcons.markFree(line, frame: frame) : line
             })
         }
-        let lines = marked.withoutButtonPrompts().withoutOcrNoise().lines
+        let lines = marked.withoutButtonPrompts().withoutOcrNoise(keepIdentifiers: keepIdentifiers).lines
             .filter { $0.box != nil && isWords($0.text) }
             .sorted { $0.box!.top < $1.box!.top }
         return groups(from: lines)

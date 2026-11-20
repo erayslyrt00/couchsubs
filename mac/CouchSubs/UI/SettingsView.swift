@@ -288,6 +288,9 @@ private struct AreaCards: View {
             }
         }
         ExtraAreasCard()
+        Card {
+            SwitchRow(title: "Automatically translate the GTA 6 phone (experimental)", isOn: $model.settings.autoReadGamePhone)
+        }
         Card(title: "Translate the screen (⌥⌘T)") {
             HintText(text: "Press ⌥⌘T while playing: every text on the screen is translated once and shown on the TV in its own place. Press again to remove the translations.")
         }

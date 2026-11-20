@@ -107,6 +107,8 @@ public enum SubtitleEvent: Equatable, Sendable {
     case region(id: String, text: String, box: TextBox?)
     /// Bütün ek alan kutuları kalktı (çeviri durdu).
     case regionClear
+    /// Oyun içi telefonun renkleri ve yerleriyle gösterilen balonları. Boş liste yalnız telefonu kaldırır.
+    case gamePhone([ScreenTranslation.Item])
 }
 
 /// TV uygulamasının bağlandığı yerel Server-Sent Events sunucusu.
@@ -277,12 +279,19 @@ public final class SubtitleServer: @unchecked Sendable {
     }
 
     /// Yeriyle bir çeviri ("Ekranı çevir" öğesi ya da ek alan bloğu).
-    static func json(_ item: ScreenTranslation.Item) -> [String: Any] {
+    static func json(_ item: ScreenTranslation.Item, phone: Bool = false) -> [String: Any] {
         let line = Decimal(Int((max(0, min(1, item.lineHeight)) * 10000).rounded())) / 10000
         var result: [String: Any] = ["box": Self.json(item.box), "line": line, "text": item.translation]
         if item.paragraphs { result["paragraphs"] = true }
+        if phone, let style = item.style, isRGB(style.background), isRGB(style.foreground) {
+            result["surface"] = ["background": style.background, "foreground": style.foreground]
+        }
         if let icons = item.icons, !icons.isEmpty { result["icons"] = Self.json(icons) }
         return result
+    }
+
+    private static func isRGB(_ color: String) -> Bool {
+        color.utf8.count == 7 && color.first == "#" && color.dropFirst().allSatisfy { $0.isASCII && $0.isHexDigit }
     }
 
     static func json(_ icons: [IconPlacement]) -> [[String: Any]] {
@@ -346,11 +355,12 @@ public final class SubtitleServer: @unchecked Sendable {
                            blocks: [ScreenTranslation.Item]?) {
         var json: [String: Any] = ["id": id, "text": text]
         if let icons, !icons.isEmpty { json["icons"] = Self.json(icons) }
-        if let blocks, !blocks.isEmpty, !text.isEmpty { json["blocks"] = blocks.map { Self.json($0) } }
+        if let blocks, !blocks.isEmpty, !text.isEmpty { json["blocks"] = blocks.map { Self.json($0, phone: id == "game-phone") } }
         if let box { json["box"] = Self.json(box) }
         if let lineHeight { json["line"] = Decimal(Int((max(0, min(1, lineHeight)) * 10000).rounded())) / 10000 }
         broadcast(event: "region", json: json)
-        onEvent?(.region(id: id, text: text, box: box))
+        if id == "game-phone" { onEvent?(.gamePhone(text.isEmpty ? [] : blocks ?? [])) }
+        else { onEvent?(.region(id: id, text: text, box: box)) }
     }
 
     /// Bütün ek alan kutularını kaldırır.

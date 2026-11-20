@@ -127,6 +127,8 @@ public final class RegionWatcher {
     private let now: () -> Int
     private var states: [String: State] = [:]
     private var lastPass: Int?
+    private var phoneSession: PhoneRegionSession?
+    public var englishPhoneMessages = false
     private var running: Task<Void, Never>?
     private var session = 0
     /// Yalnız kararlı okumaların başarılı çevirileri saklanır.
@@ -158,16 +160,29 @@ public final class RegionWatcher {
     public var isBusy: Bool { running != nil }
 
     /// Her karede çağrılır; tur zamanı geldiyse ve önceki tur bittiyse turu arka planda başlatır, hemen döner.
-    public func offer(_ frame: CGImage, areas: [ExtraArea]) {
+    public func offer(_ frame: CGImage, areas: [ExtraArea], phone pose: GamePhoneGeometry.Pose? = nil) {
+        if let pose {
+            if phoneSession == nil { phoneSession = PhoneRegionSession(reader: reader, translator: translator, server: server) }
+            phoneSession?.observe(frame, pose: pose)
+        } else if phoneSession != nil {
+            closePhone()
+        }
         guard running == nil else { return }
-        guard !areas.isEmpty || states.values.contains(where: { !$0.shown.isEmpty }) else { return }
         let time = now()
-        if let lastPass, time - lastPass < intervalMs { return }
-        lastPass = time
+        let manualDue = (!areas.isEmpty || states.values.contains { !$0.shown.isEmpty })
+            && (lastPass.map { time - $0 >= intervalMs } ?? true)
+        let phone = phoneSession
+        let phoneDue = phone?.beginIfDue(time) ?? false
+        guard manualDue || phoneDue else { return }
+        if manualDue { lastPass = time }
         let session = self.session
         running = Task { [weak self] in
             guard let self, self.session == session else { return }
-            await self.pass(frame, areas: areas)
+            if manualDue { await self.pass(frame, areas: areas) }
+            if phoneDue, let phone, self.phoneSession === phone, self.session == session {
+                await phone.visit(packLookup: self.packLookup, skipsTurkish: self.skipsTurkish,
+                                  english: self.englishPhoneMessages)
+            }
             // Bu arada sıfırlandıysa yeni oturumun turuna dokunulmaz.
             if self.session == session { self.running = nil }
         }
@@ -514,8 +529,15 @@ public final class RegionWatcher {
         return result
     }
 
+    /// Telefon kapanınca yalnız onun bekleyen isteğini ve görünür bloklarını kaldırır.
+    public func closePhone() {
+        phoneSession?.close()
+        phoneSession = nil
+    }
+
     /// Çeviri durdu ya da hat yeniden kuruldu: süren tur bırakılır, TV'deki ek alan kutuları kalkar.
     public func reset() {
+        closePhone()
         session += 1
         running?.cancel()
         running = nil

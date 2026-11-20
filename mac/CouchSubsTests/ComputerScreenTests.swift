@@ -125,6 +125,20 @@ final class ComputerScreenTests: XCTestCase {
         XCTAssertEqual(model.settings.output, .tv)
     }
 
+    func testClosingPhoneKeepsTheOtherOverlayRegions() {
+        let model = AppModel(services: FakeServices(), store: storeWithoutTV(), defaults: .isolated())
+        model.settings.output = .computer
+        let box = TextBox(left: 0.4, top: 0.3, right: 0.6, bottom: 0.4)
+        let message = ScreenTranslation.Item(source: "Hello", translation: "Merhaba", box: box, lineHeight: 0.03)
+        model.overlayReceive(.gamePhone([message]))
+        XCTAssertEqual(model.overlayPhoneItems, [message])
+        XCTAssertTrue(model.overlayVisible)
+        model.overlayReceive(.region(id: "quest", text: "Görev", box: box))
+        model.overlayReceive(.gamePhone([]))
+        XCTAssertTrue(model.overlayPhoneItems.isEmpty)
+        XCTAssertEqual(model.overlayRegions.map(\.id), ["quest"])
+    }
+
     func testTestSubtitleAppearsInComputerWindow() async {
         let model = AppModel(services: FakeServices(), store: storeWithoutTV(), defaults: .isolated())
         model.settings.output = .computer

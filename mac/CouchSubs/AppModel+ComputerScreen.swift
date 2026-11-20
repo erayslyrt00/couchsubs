@@ -26,7 +26,7 @@ struct OverlayRegion: Equatable, Identifiable {
 extension AppModel {
     /// Pencere görünmeli mi: altyazı bilgisayar ekranında gösteriliyor ve ekranda bir satır var (ya da yeri ayarlanıyor).
     var overlayVisible: Bool {
-        settings.output.showsOnComputer && (overlayAdjusting || !overlayLines.isEmpty || !overlayRegions.isEmpty)
+        settings.output.showsOnComputer && (overlayAdjusting || !overlayLines.isEmpty || !overlayRegions.isEmpty || !overlayPhoneItems.isEmpty)
     }
 
     /// Pencere tıklamaları geçiriyor mu (ayarlanırken hiçbir zaman).
@@ -56,7 +56,11 @@ extension AppModel {
             if !text.isEmpty { regions.append(OverlayRegion(id: id, text: text, box: box)) }
             overlayRegions = regions.sorted { ($0.box?.top ?? 0) < ($1.box?.top ?? 0) }
             return
+        case .gamePhone(let items):
+            if overlayPhoneItems != items { overlayPhoneItems = items }
+            return
         case .regionClear:
+            if !overlayPhoneItems.isEmpty { overlayPhoneItems = [] }
             if !overlayRegions.isEmpty { overlayRegions = [] }
             return
         }
@@ -82,6 +86,7 @@ extension AppModel {
     /// Penceredeki her şeyi hemen kaldırır (çeviri durdu ya da altyazı artık bilgisayarda gösterilmiyor).
     func overlayHide() {
         overlayStack.hide()
+        if !overlayPhoneItems.isEmpty { overlayPhoneItems = [] }
         overlayTimer?.cancel()
         overlayTimer = nil
         if !overlayLines.isEmpty { overlayLines = [] }

@@ -50,6 +50,8 @@ public struct TextLine: Equatable, Sendable {
     public var words: [TextWord]?
     /// Metindeki her `ButtonIcons.marker` için, sırasıyla, simgenin yeri ve okunan hali.
     public var icons: [IconSlot]?
+    /// Telefon balonlarının eğimi düzeltilmiş ekrandaki yeri. TV için box kullanılır.
+    var phoneBox: TextBox?
 
     public init(_ text: String, box: TextBox? = nil, confidence: Double? = nil, words: [TextWord]? = nil, icons: [IconSlot]? = nil) {
         self.text = text
@@ -125,11 +127,11 @@ public struct Reading: Equatable, Sendable {
 
     /// Yazı tanımanın uydurduğu sözcük çöpleri ("ou$3e", "waters2aljd") ayıklanmış hali; çevirmen bunları olduğu
     /// gibi taşıyıp TV'de anlamsız harfler gösteriyordu.
-    public func withoutOcrNoise() -> Reading {
+    public func withoutOcrNoise(keepIdentifiers: Bool = false) -> Reading {
         // Sözcük ve simge yerleri korunur (simgenin imi çöp sayılmaz, bkz. `OcrNoise.clean`).
         Reading(lines: lines.map { line in
             var cleaned = line
-            cleaned.text = OcrNoise.clean(line.text)
+            cleaned.text = OcrNoise.clean(line.text, keepIdentifiers: keepIdentifiers)
             return cleaned
         })
     }

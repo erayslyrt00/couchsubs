@@ -547,6 +547,7 @@ final class AppModel: ObservableObject {
                 || settings.localAIBaseURL != oldValue.localAIBaseURL || settings.localAIModel != oldValue.localAIModel
                 || settings.aiInstruction != oldValue.aiInstruction
             if translationChanged { Task { await refreshTranslatorStatus() } }
+            if settings.autoReadGamePhone != oldValue.autoReadGamePhone { configureGamePhone() }
             let languageChanged = settings.sourceLanguage != oldValue.sourceLanguage
                 || settings.targetLanguage != oldValue.targetLanguage
             if isRunning, languageChanged || translationChanged || settings.fastSubtitleDetection != oldValue.fastSubtitleDetection
@@ -622,6 +623,7 @@ final class AppModel: ObservableObject {
     private var pipeline: SubtitlePipeline?
     /// Ek alanları (görev, telefon, bildirim) okuyup çeviren; çeviri sürerken var.
     private var regionWatcher: RegionWatcher?
+    private var gamePhoneTracker: GamePhoneTracker?
     /// Oyundaki altyazının son görüldüğü yer; deneme altyazısı TV'de oraya yerleşir.
     private var lastSubtitleBox: TextBox?
     /// Hatta aynı anda tek kare girer. Durdurma ve yeni hat kapıyı sıfırlar; takılan okuma hattı yeniden kurdurur.
@@ -661,6 +663,7 @@ final class AppModel: ObservableObject {
     @Published var overlayLines: [SubtitleStack.Line] = []
     /// Penceredeki ek alan çevirileri (yukarıdan aşağı).
     @Published var overlayRegions: [OverlayRegion] = []
+    @Published var overlayPhoneItems: [ScreenTranslation.Item] = []
     /// Pencerenin yeri ve genişliği ayarlanıyor: örnek yazı görünür, tıklamalar geçmez.
     @Published var overlayAdjusting = false
     var overlayStack = SubtitleStack()
@@ -741,6 +744,7 @@ final class AppModel: ObservableObject {
         let pool = self.pool
         gameChoice.onChange = { [weak self] game in
             self?.regionWatcher?.reset()
+            self?.configureGamePhone()
             Task { await pool.setGame(game) }
             // Bu oyunun (havuzdan otomatik) paketi sunucuda yeni çıkmış olabilir.
             if game != nil { self?.packsForGame() }
@@ -1761,8 +1765,18 @@ final class AppModel: ObservableObject {
         // Ek alan okuyucusu yeni dil ve motorla, ilk ek alan karesinde yeniden kurulur.
         regionWatcher?.reset()
         regionWatcher = nil
+        configureGamePhone()
         connectPacks(to: pipeline)
         activeLanguages = (settings.sourceLanguage, settings.targetLanguage)
+    }
+
+    private func configureGamePhone() {
+        regionWatcher?.closePhone()
+        if pipeline != nil, settings.autoReadGamePhone, let name = gameChoice.game?.name, GameName.key(name) == "gta 6" {
+            gamePhoneTracker = GamePhoneTracker()
+        } else {
+            gamePhoneTracker = nil
+        }
     }
 
     /// Ek alanlar aynı dil, motor ve paketlerle okunur; ayrı bir okuyucu ve çevirmenle (altyazının sırasını beklemez).
@@ -1771,6 +1785,7 @@ final class AppModel: ObservableObject {
         watcher.packLookup = packLookup
         watcher.skipsTurkish = settings.targetLanguage == "tr"
         watcher.translatesUiCommands = settings.sourceLanguage == "en" && settings.targetLanguage == "tr"
+        watcher.englishPhoneMessages = settings.sourceLanguage == "en"
         watcher.onLog = { SubtitleLog.write($0) }
         return watcher
     }
@@ -1972,6 +1987,7 @@ final class AppModel: ObservableObject {
         pipeline = nil
         regionWatcher?.reset()
         regionWatcher = nil
+        gamePhoneTracker = nil
         // Yeni "Başlat" eski oturumdan kalan (belki takılmış) okumayı beklemeden temiz başlar.
         frameGate.reset()
         activeLanguages = nil
@@ -2016,6 +2032,7 @@ final class AppModel: ObservableObject {
         if case .disconnected = state {
             pipeline?.reset()
             regionWatcher?.reset()
+            gamePhoneTracker?.reset()
             server.clear()
             dubber?.stop()
         }
@@ -2147,8 +2164,11 @@ final class AppModel: ObservableObject {
         guard pipeline != nil else { return }
         // Ek alanlar altyazıyla aynı OCR kuyruğunu kullanır; saniyede bir tur yeterlidir.
         let areas = settings.activeExtraAreas
-        if regionWatcher == nil, !areas.isEmpty, let pipeline { regionWatcher = makeRegionWatcher(packLookup: pipeline.packLookup) }
-        regionWatcher?.offer(frame, areas: areas)
+        let pose = gamePhoneTracker?.sample(frame, now: capturedAt).pose
+        if regionWatcher == nil, !areas.isEmpty || pose != nil, let pipeline {
+            regionWatcher = makeRegionWatcher(packLookup: pipeline.packLookup)
+        }
+        regionWatcher?.offer(frame, areas: areas, phone: pose)
         // Önceki kare hâlâ işleniyorsa bu kare atlanır; okuma kareleri biriktirmez.
         var entry = frameGate.enter(now: SubtitleStabilizer.uptimeMs())
         if case .stuck(let ms) = entry {

@@ -43,6 +43,14 @@ final class AreaPresetTests: XCTestCase {
         XCTAssertFalse(try JSONDecoder().decode(UserSettings.self, from: JSONEncoder().encode(settings)).keepAreaCentered)
     }
 
+    func testGamePhoneIsOptInForNewAndExistingSettings() throws {
+        XCTAssertFalse(UserSettings().autoReadGamePhone)
+        XCTAssertFalse(try JSONDecoder().decode(UserSettings.self, from: Data("{}".utf8)).autoReadGamePhone)
+        var enabled = UserSettings()
+        enabled.autoReadGamePhone = true
+        XCTAssertTrue(try JSONDecoder().decode(UserSettings.self, from: JSONEncoder().encode(enabled)).autoReadGamePhone)
+    }
+
     func testCustomKeepsTheRegionAndManualEditsBecomeCustom() {
         var settings = UserSettings()
         settings.selectAreaPreset(.full)

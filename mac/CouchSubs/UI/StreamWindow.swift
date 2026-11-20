@@ -78,6 +78,9 @@ struct StreamWindowView: View {
             .padding(.horizontal, 24 * scale)
             .padding(.bottom, proxy.size.height * 0.07)
             .frame(width: proxy.size.width, height: proxy.size.height)
+            .background {
+                if !model.overlayPhoneItems.isEmpty { GamePhoneBlocks(items: model.overlayPhoneItems) }
+            }
         }
         .background(Self.color(model.streamBackground))
     }
@@ -142,5 +145,37 @@ struct StreamWindowView: View {
             .background(Color.black.opacity(alpha), in: RoundedRectangle(cornerRadius: corner))
             .opacity(shown)
             .animation(.linear(duration: SubtitleStack.previousFade), value: line.fading)
+    }
+}
+
+/// Yayın katmanının koordinatları telefondaki kaynak kutularıyla aynı, sol üst köşeye göre 0…1 aralığındadır.
+struct GamePhoneBlocks: View {
+    let items: [ScreenTranslation.Item]
+
+    var body: some View {
+        GeometryReader { proxy in
+            ForEach(items.indices, id: \.self) { i in
+                let item = items[i]
+                let box = item.box
+                let width = max(0, box.right - box.left) * proxy.size.width
+                let height = max(0, box.bottom - box.top) * proxy.size.height
+                Text(verbatim: item.translation)
+                    .font(.system(size: max(1, item.lineHeight * proxy.size.height * 0.85), weight: .semibold))
+                    .minimumScaleFactor(0.55)
+                    .foregroundStyle(Self.color(item.style?.foreground, fallback: .white))
+                    .frame(width: width, height: height, alignment: .leading)
+                    .background(Self.color(item.style?.background, fallback: .black))
+                    .clipped()
+                    .position(x: (box.left + box.right) * 0.5 * proxy.size.width,
+                              y: (box.top + box.bottom) * 0.5 * proxy.size.height)
+            }
+        }
+        .clipped()
+        .allowsHitTesting(false)
+    }
+
+    private static func color(_ hex: String?, fallback: Color) -> Color {
+        guard let hex, let (r, g, b) = DesignTokens.rgb(hex) else { return fallback }
+        return Color(.sRGB, red: r, green: g, blue: b)
     }
 }

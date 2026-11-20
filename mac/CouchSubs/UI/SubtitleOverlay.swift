@@ -202,7 +202,12 @@ struct SubtitleOverlayView: View {
             }
             VStack(spacing: 14 * scale) {
                 ForEach(model.overlayRegions) { regionBox($0) }
-                Spacer(minLength: 0)
+                if model.overlayPhoneItems.isEmpty {
+                    Spacer(minLength: 0)
+                } else {
+                    GamePhoneBlocks(items: model.overlayPhoneItems)
+                        .layoutPriority(-1)
+                }
                 if lines.isEmpty, adjusting {
                     line(SubtitleStack.Line(id: 0, text: String(localized: "Subtitles appear here."), role: .current,
                                             paragraphs: false, fading: false))

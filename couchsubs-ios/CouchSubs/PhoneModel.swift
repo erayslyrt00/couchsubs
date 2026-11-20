@@ -1006,7 +1006,7 @@ final class PhoneModel: ObservableObject {
         case .clear:
             stack.clear(now: now)
         // "Ekranı çevir" sonuçları yazının yerinde gösterilir (`screenItems`); satır yığınına girmez.
-        case .screen, .screenClear:
+        case .screen, .screenClear, .gamePhone:
             return
         // Ek alanın çevirisi telefon ekranında da kendi yerinde küçük kutuda görünür (boş metin kutuyu kaldırır).
         case .region(let id, let text, let box):
