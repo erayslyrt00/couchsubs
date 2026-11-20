@@ -246,13 +246,6 @@ public static class ButtonIcons
     /// </summary>
     public static string? Crop(Frame frame, TextBox box)
     {
-        if (Locate(frame, box) is not { } ink) return null;
-        return "data:image/png;base64," + Convert.ToBase64String(Png(frame.Crop(ink.Left, ink.Top, ink.Width, ink.Height)));
-    }
-
-    /// <summary>Kutudaki simgenin karedeki yeri (piksel, kenar payıyla); simge yoksa null. Bkz. <see cref="Crop"/>.</summary>
-    private static (int Left, int Top, int Width, int Height, int InkWidth, int InkHeight)? Locate(Frame frame, TextBox box)
-    {
         int x0 = Math.Clamp((int)Math.Floor(box.Left * frame.Width), 0, frame.Width);
         int x1 = Math.Clamp((int)Math.Ceiling(box.Right * frame.Width), 0, frame.Width);
         int y0 = Math.Clamp((int)Math.Floor(box.Top * frame.Height), 0, frame.Height);
@@ -290,114 +283,7 @@ public static class ButtonIcons
         var right = Math.Min(frame.Width, x0 + end + margin);
         var cropTop = Math.Max(0, y0 + top - margin);
         var cropBottom = Math.Min(frame.Height, y0 + bottom + margin);
-        return (left, cropTop, right - left, cropBottom - cropTop, end - start, bottom - top);
-    }
-
-    /// <summary>
-    /// Kutuda simge biçiminde bir şekil var mı: zeminden ayrışan, satır yüksekliğinin en az yarısı kadar ve kabaca kare
-    /// (düğme dairesi, omuz tuşu kutusu). Boşluk ya da harf kırıntısı simge sayılmaz.
-    /// </summary>
-    internal static bool HasIcon(Frame frame, TextBox box, double lineHeightPx)
-    {
-        if (Locate(frame, box) is not { } ink) return false;
-        if (ink.InkHeight < lineHeightPx * 0.5 || ink.InkHeight > lineHeightPx * 2.2) return false;
-        var aspect = (double)ink.InkWidth / ink.InkHeight;
-        return aspect is >= 0.6 and <= 2.4;
-    }
-
-    /// <summary>
-    /// Ek alanlarda fiilsiz yerlerdeki simgeler (yalnız simge kareden doğrulanırsa işaretlenir; <see cref="Mark"/> fiil
-    /// kalıbını zaten kapsar):
-    /// <list type="bullet">
-    /// <item>Büyük harfli tuş çubuğu ("SET DESTINATION ✕ EXIT ○", "OFFER RIDE e LUCIA"): sözcük arasındaki simge
-    /// genişliğinde boşluk, tek harf ya da harfsiz parça ("e", "A", "•"), sonundaki simge.</item>
-    /// <item>Satırın başındaki simge ("△ Pick up", "B Pick up"): satırın hemen solu ya da başta tek harf/işaret.</item>
-    /// </list>
-    /// Sıradan cümlenin ortasındaki boşluk aranmaz: orada harita işareti ya da renkli ad durur (GTA 6: "your personal
-    /// vehicle ◆ for easy access"). GameTranslator.IconWords (AGPL-3.0-only) üzerinden Nino Game Translator'ın VisionReader.withIcons / withEdgeIcons kurallarından uyarlandı.
-    /// </summary>
-    public static TextLine MarkFree(TextLine line, Frame frame)
-    {
-        if (line.Box is not { } lineBox || line.Icons is { Count: > 0 } || frame.Width < 8 || frame.Height < 8) return line;
-        var words = line.Words is { Count: > 0 } measured ? measured : Estimate(line.Text, lineBox);
-        if (words.Count == 0) return line;
-        double top = lineBox.Top, bottom = lineBox.Bottom, pad = (bottom - top) * 0.3;
-        var linePx = (bottom - top) * frame.Height;
-        if (linePx < 6) return line;
-        var head = string.Concat(words.Where(word => word.Text.Length > 1 && !Names.Contains(word.Text)).Select(word => word.Text));
-        var bar = head.Count(char.IsLetter) >= 2 && head == head.ToUpperInvariant();
-        var tokens = new List<string>();
-        var icons = new List<IconSlot>();
-        var spanX = linePx * 1.8 / frame.Width;
-        TextBox Padded(double left, double right) =>
-            new(Math.Clamp(left, 0, 1), Math.Clamp(top - pad, 0, 1),
-                Math.Clamp(right, 0, 1), Math.Clamp(bottom + pad, 0, 1));
-        bool Icon(TextBox box) => HasIcon(frame, box, linePx);
-
-        // Satırın solundaki simge (okunmamış): "△ Pick up".
-        if (!IsIconToken(words[0].Text) && lineBox.Left > 0)
-        {
-            var box = Padded(lineBox.Left - spanX, lineBox.Left - (spanX * 0.08));
-            if (Icon(box)) { tokens.Add(Marker.ToString()); icons.Add(new IconSlot(box, "")); }
-        }
-        for (var i = 0; i < words.Count; i++)
-        {
-            var word = words[i];
-            if (bar && i > 0)
-            {
-                var left = words[i - 1].Box.Right;
-                var gapPx = (word.Box.Left - left) * frame.Width;
-                if (gapPx > linePx * 0.9 && tokens.LastOrDefault() != Marker.ToString())
-                {
-                    var box = Padded(left + (gapPx * 0.1 / frame.Width), word.Box.Left - (gapPx * 0.1 / frame.Width));
-                    if (Icon(box)) { tokens.Add(Marker.ToString()); icons.Add(new IconSlot(box, "")); }
-                }
-            }
-            var text = word.Text;
-            var core = text.Trim(Brackets.ToCharArray());
-            // Tuş çubuğunda tek harf/rakam ya da yanlış okunmuş omuz tuşu ("11", "12"); satır başında simge gibi parça.
-            var named = Names.Contains(core);
-            var suspicious = bar
-                ? named || core.Length == 1 || core is "11" or "12" or "13" or "21" or "22" or "23" || (core.Length <= 2 && !core.Any(char.IsLetterOrDigit))
-                : i == 0 && words.Count >= 2 && IsIconToken(text);
-            if (suspicious)
-            {
-                var boxLeft = i > 0 ? Math.Min(word.Box.Left, (words[i - 1].Box.Right + word.Box.Left) / 2) : word.Box.Left - ((word.Box.Right - word.Box.Left) / 2);
-                var boxRight = i + 1 < words.Count ? Math.Max(word.Box.Right, (word.Box.Right + words[i + 1].Box.Left) / 2)
-                                                   : word.Box.Right + ((word.Box.Right - word.Box.Left) / 2);
-                // OCR yalnız içteki harfleri kutulayabilir. Dış çerçeveye pay bırak, iki düğme arasındaki ortayı geçme.
-                var measuredButton = named && line.Words is { Count: > 0 };
-                if (measuredButton)
-                {
-                    var rim = linePx * 0.3 / frame.Width;
-                    boxLeft = Math.Max(boxLeft, word.Box.Left - rim);
-                    boxRight = Math.Min(boxRight, word.Box.Right + rim);
-                }
-                var box = Padded(boxLeft, boxRight);
-                // Satır başında okunan düğme adı ("R2 Swing") kareden doğrulanmadıkça işaretlenmez: bu kısa ipuçları
-                // eskisi gibi çevrilmez, düğme görünür kalır.
-                if (Icon(box))
-                {
-                    if (measuredButton || tokens.LastOrDefault() != Marker.ToString())
-                    {
-                        tokens.Add(Marker.ToString());
-                        icons.Add(new IconSlot(box, core));
-                    }
-                    continue;
-                }
-                // Tanınmayan harfsiz parça ("•", "*"): simge değil, yazı da değil.
-                if (!named && !core.Any(char.IsLetterOrDigit) && core is not ("+" or "/" or "&" or "-")) continue;
-            }
-            tokens.Add(text);
-        }
-        // Tuş çubuğunun sonundaki simge: "SELECT ✕".
-        if (bar && tokens.Count > 0 && tokens[^1] != Marker.ToString() && lineBox.Right < 1)
-        {
-            var box = Padded(lineBox.Right + (spanX * 0.08), lineBox.Right + spanX);
-            if (Icon(box)) { tokens.Add(Marker.ToString()); icons.Add(new IconSlot(box, "")); }
-        }
-        if (icons.Count == 0) return line;
-        return line with { Text = string.Join(' ', tokens), Words = null, Icons = icons };
+        return "data:image/png;base64," + Convert.ToBase64String(Png(frame.Crop(left, cropTop, right - left, cropBottom - cropTop)));
     }
 
     /// <summary>Kesilmiş simgeler: kutusu verilen her simge kareden kesilir (bkz. <see cref="Crop"/>).</summary>
