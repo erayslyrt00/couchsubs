@@ -77,6 +77,13 @@ a trademark of Marvel and Sony Interactive Entertainment LLC.
 
 ## Windows app only
 
+The Turkish command glossary in `UiCommands.cs` and the controller-icon detection in
+`ButtonIcons.MarkFree` were adapted on 2026-11-20 from [GameTranslator's UiPrompts](https://gitlab.com/sefflex/GameTranslator/-/blob/2492049b8435962b05933075978dd52084c67bfc/windows/src/GameTranslator.Core/UiPrompts.cs)
+and [IconWords](https://gitlab.com/sefflex/GameTranslator/-/blob/2492049b8435962b05933075978dd52084c67bfc/windows/src/GameTranslator.Core/IconWords.cs), by emir-kaya (Sefflex).
+IconWords credits [Nino Game Translator's VisionReader](https://github.com/yunusdemirbag/nino-game-translator/blob/83c138fbf87292c800082270e4b33e771bae3df1/core/Sources/CouchSubsCore/Pipeline/VisionReader.swift)
+for the `withIcons` and `withEdgeIcons` rules by Yunus Demirbağ. Both projects are based on
+CouchSubs, Copyright (C) 2026 Sinan Yorulmaz. These adaptations are licensed under AGPL-3.0-only (see [LICENSE](LICENSE)).
+
 | Component | License | Source |
 |---|---|---|
 | FFmpeg 7.1.2 (`libavcodec` H.264 decoder, `libswscale`; statically linked) | LGPL-2.1-or-later | https://ffmpeg.org |

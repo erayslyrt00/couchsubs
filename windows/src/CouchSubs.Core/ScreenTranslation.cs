@@ -58,7 +58,7 @@ public static class ScreenTranslation
         Action<IReadOnlyList<Item>>? progress = null, CancellationToken cancellationToken = default, Frame? frame = null)
     {
         var items = new List<Item>();
-        var groups = Groups(reading);
+        var groups = ReadGroups(reading, false, frame);
         if (frame is not null)
             groups = [.. groups.Select(group => group.Icons is null ? group
                 : group with { Icons = [.. group.Icons.Select(icons => ButtonIcons.WithImages(icons, frame))] })];
@@ -126,12 +126,26 @@ public static class ScreenTranslation
     /// <paramref name="menuRows"/> açıksa yalnız kısa büyük harfli etiketlerden oluşan grup (oyun menüsü) satır satır
     /// ayrı gruplara bölünür (<see cref="IsMenuLabel"/>).
     /// </summary>
-    public static IReadOnlyList<Group> Groups(Reading reading, bool menuRows = false)
+    public static IReadOnlyList<Group> Groups(Reading reading, bool menuRows = false) =>
+        ReadGroups(reading, menuRows, null);
+
+    private static IReadOnlyList<Group> ReadGroups(Reading reading, bool menuRows, Frame? frame)
     {
-        var lines = reading.WithButtonIcons().WithoutButtonPrompts().WithoutOcrNoise().Lines
+        var marked = reading.WithButtonIcons();
+        // Tam ekranda yalnız aksi halde atılacak kumanda ipuçlarında kareye bak.
+        if (frame is not null)
+            marked = new Reading(marked.Lines.Select(line => line.Icons is not { Count: > 0 } && ButtonPrompts.IsPrompt(line.Text)
+                ? ButtonIcons.MarkFree(line, frame) : line));
+        var lines = marked.WithoutButtonPrompts().WithoutOcrNoise().Lines
             .Where(line => line.Box is not null && IsWords(line.Text))
             .OrderBy(line => line.Box!.Value.Top)
             .ToList();
+        return GroupsFromLines(lines, menuRows);
+    }
+
+    // Satırlar süzülmüş, kutulu ve yukarıdan aşağıya sıralıdır.
+    internal static IReadOnlyList<Group> GroupsFromLines(IReadOnlyList<TextLine> lines, bool menuRows)
+    {
         var groups = new List<List<TextLine>>();
         foreach (var line in lines)
         {

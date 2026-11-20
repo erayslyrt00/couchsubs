@@ -439,6 +439,26 @@ public class RegionWatcherTests
         Assert.Equal(["Call me when you get this."], translator.Calls);
     }
 
+    [Theory]
+    [InlineData(true, null, "Aç", false)]
+    [InlineData(true, "Menüyü aç", "Menüyü aç", false)]
+    [InlineData(false, null, "TR: OPEN", true)]
+    public async Task CommandGlossaryRespectsPackAndLanguagePair(bool enabled, string? packText, string expected, bool usesEngine)
+    {
+        var reader = new Reader { Lines = [Line("OPEN")] };
+        var translator = new Translator();
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server)
+        {
+            PackLookup = text => text == "OPEN" && packText is not null ? new PackMatch(packText, []) : null,
+            TranslatesUiCommands = enabled,
+        };
+        await watcher.PassAsync(Shade(10), [Quest]);
+        await watcher.PassAsync(Shade(10), [Quest]);
+        Assert.Equal(expected, Assert.Single(server.Sent).Text);
+        Assert.Equal(usesEngine ? 1 : 0, translator.Calls.Count);
+    }
+
     [Fact]
     public async Task RemovedAreaLosesItsBoxAndResetClearsAll()
     {

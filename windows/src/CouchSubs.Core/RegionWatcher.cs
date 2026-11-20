@@ -130,6 +130,8 @@ public sealed class RegionWatcher
     public Func<string, PackMatch?>? PackLookup { get; set; }
     /// <summary>Hedef dil Türkçe: yüksek güvenle Türkçe olan parça çevrilmez, aslı sayılır (#289).</summary>
     public bool SkipsTurkish { get; set; } = true;
+    /// <summary>İngilizceden Türkçeye çeviride tuş çubuğu komutları, simgeleriyle birlikte, sözlükten gelir.</summary>
+    public bool TranslatesUiCommands { get; set; }
     /// <summary>Oynanan oyunun adı (bilinmiyorsa null); oyuna özgü yerleşim kuralları için.</summary>
     public Func<string?>? Game { get; set; }
 
@@ -416,7 +418,7 @@ public sealed class RegionWatcher
     /// </summary>
     internal static Candidate MakeCandidate(Reading reading, CropRegion region, Frame? frame = null, bool menuRows = false)
     {
-        var lines = reading.WithButtonIcons().WithoutButtonPrompts().WithoutOcrNoise().Lines
+        var lines = (frame is null ? reading.WithButtonIcons() : reading.WithButtonIcons(frame)).WithoutButtonPrompts().WithoutOcrNoise().Lines
             .Where(line => ScreenTranslation.IsWords(line.Text))
             .OrderBy(line => line.Box?.Top ?? 0)
             .ToList();
@@ -433,7 +435,7 @@ public sealed class RegionWatcher
         // eskisi gibi tek kutu. Anahtar grup yapısını da içerir: aynı yazı farklı gruplanırsa bloklar yeniden kurulur.
         IReadOnlyList<Block>? blocks = null;
         var key = TextKey(paragraphs);
-        var groups = lines.Count > 1 && boxes.Count == lines.Count ? ScreenTranslation.Groups(reading, menuRows) : [];
+        var groups = lines.Count > 1 && boxes.Count == lines.Count ? ScreenTranslation.GroupsFromLines(lines, menuRows) : [];
         if (groups.Count is > 1 and < ScreenTranslation.MaxGroups)
         {
             paragraphs = [.. groups.SelectMany(group => group.Paragraphs)];
@@ -584,7 +586,7 @@ public sealed class RegionWatcher
         }
         if (Volatile.Read(ref session) != started) return;
         state.Remembered = candidate.Text;
-        var (result, fromPack) = (translation.Result, translation.FromPack);
+        var (result, readyCount) = (translation.Result, translation.ReadyCount);
         var prepared = candidate.Paragraphs.Select(IconText.Protect).ToList();
         var slots = new List<IconSlot>();
         var text = new List<string>(candidate.Paragraphs.Count);
@@ -592,6 +594,7 @@ public sealed class RegionWatcher
         {
             var source = candidate.Paragraphs[i];
             text.Add(result[i]?.Trim() is not { Length: > 0 } translated ? IconText.Indexed(source, slots.Count)
+                : translated.Contains(ButtonIcons.Marker) ? IconText.Indexed(translated, slots.Count)
                 : IconText.Restore(translated, prepared[i].Names, slots.Count));
             slots.AddRange(candidate.Icons is { } all && i < all.Count ? all[i] : []);
         }
@@ -610,7 +613,7 @@ public sealed class RegionWatcher
             state.RenderedBlocks = null;
             return;
         }
-        var origin = cached is not null ? "hazır çeviri" : fromPack == candidate.Paragraphs.Count ? "paket" : fromPack > 0 ? "paket+motor" : "motor";
+        var origin = cached is not null ? "hazır çeviri" : readyCount == candidate.Paragraphs.Count ? "hazır çeviri" : readyCount > 0 ? "hazır çeviri+motor" : "motor";
         Log?.Invoke($"ek alan {area.Name}: {SubtitleLog.Excerpt(IconText.Plain(string.Join(' ', candidate.Paragraphs)))} → {origin}");
         var (shown, icons) = IconText.Render(string.Join('\n', text), slots);
         var blocks = candidate.Blocks is { } layout ? RenderBlocks(candidate, layout, text, similar, slots) : null;
@@ -653,8 +656,8 @@ public sealed class RegionWatcher
         return result;
     }
 
-    /// <summary>Paragrafların çevirisi (çevrilmeyen parça null) ve kaçının paketten geldiği.</summary>
-    private sealed record Translation(string?[] Result, int FromPack);
+    /// <summary>Paragrafların çevirisi (çevrilmeyen parça null) ve kaçının paket veya komut sözlüğünde bulunduğu.</summary>
+    private sealed record Translation(string?[] Result, int ReadyCount);
 
     // Yalnız kararlı okumaların başarılı çevirileri saklanır.
     private readonly Dictionary<string, Translation> translations = [];
@@ -669,8 +672,9 @@ public sealed class RegionWatcher
     {
         // Simgeler paket aramasında yok sayılır, çeviride uydurma adlarla korunur (IconText).
         var prepared = paragraphs.Select(IconText.Protect).ToList();
-        string?[] result = [.. paragraphs.Select(paragraph => PackLookup?.Invoke(IconText.Plain(paragraph))?.Text)];
-        var fromPack = result.Count(text => text is not null);
+        string?[] result = [.. paragraphs.Select(paragraph =>
+            PackLookup?.Invoke(IconText.Plain(paragraph))?.Text ?? (TranslatesUiCommands ? UiCommands.Translate(paragraph) : null))];
+        var readyCount = result.Count(text => text is not null);
         // Zaten Türkçe olan parça çevrilmez: aslı kalır, tümü öyleyse kutu gösterilmez.
         for (var i = 0; i < result.Length; i++)
             if (result[i] is null && SkipsTurkish && TurkishText.IsSure(paragraphs[i])) result[i] = paragraphs[i];
@@ -681,7 +685,7 @@ public sealed class RegionWatcher
             var translated = await translator.TranslateAllAsync(texts).ConfigureAwait(false);
             for (var i = 0; i < missing.Count && i < translated.Count; i++) result[missing[i]] = translated[i];
         }
-        return new Translation(result, fromPack);
+        return new Translation(result, readyCount);
     }
 
     /// <summary>Çeviri durdu ya da hat yeniden kuruldu: süren tur bırakılır, TV'deki ek alan kutuları kalkar.</summary>
