@@ -356,7 +356,7 @@ final class RegionWatcherTests: XCTestCase {
         let image = frame(10)
         watcher.offer(image, areas: [quest])
         while watcher.isBusy { await Task.yield() }
-        let interval = RegionWatcher.defaultIntervalMs
+        let interval = 1000 // Mac ve iPhone aynı seri OCR kuyruğunda saniyede en çok bir tur başlatır.
         for step in 1...9 {
             clock = step * interval / 10
             watcher.offer(image, areas: [quest])

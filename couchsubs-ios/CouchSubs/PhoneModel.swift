@@ -776,8 +776,7 @@ final class PhoneModel: ObservableObject {
 
     /// Ek alanlar aynı dil, motor ve paketlerle okunur; ayrı bir okuyucu ve çevirmenle (altyazının sırasını beklemez).
     private func makeRegionWatcher(packLookup: ((String) -> PackMatch?)?) -> RegionWatcher {
-        let watcher = RegionWatcher(reader: VisionReader(language: settings.sourceLanguage), translator: makeTranslator(), server: server,
-                                    intervalMs: RegionWatcher.phoneIntervalMs)
+        let watcher = RegionWatcher(reader: VisionReader(language: settings.sourceLanguage), translator: makeTranslator(), server: server)
         watcher.packLookup = packLookup
         watcher.skipsTurkish = settings.targetLanguage == "tr"
         watcher.onLog = { SubtitleLog.write($0) }
@@ -787,7 +786,7 @@ final class PhoneModel: ObservableObject {
     private func handle(_ frame: CGImage, capturedAt: Int) async {
         framePreview.image = frame
         guard let current = pipeline else { return }
-        // Ek alanlar ayrı ve seyrek okunur (en çok 450 ms'de bir); altyazı okumasını beklemez, onu bekletmez.
+        // Ek alanlar altyazıyla aynı OCR kuyruğunu kullanır; saniyede bir tur yeterlidir.
         let areas = settings.activeExtraAreas
         if regionWatcher == nil, !areas.isEmpty { regionWatcher = makeRegionWatcher(packLookup: current.packLookup) }
         regionWatcher?.offer(frame, areas: areas)

@@ -43,12 +43,8 @@ extension SubtitleServer: RegionSending {}
 ///   yazıları havuzu kirletmesin).
 @MainActor
 public final class RegionWatcher {
-    /// İki tur arasındaki en kısa süre. 1 saniyeyken yazı ancak 2–3 saniyede çevriliyordu (bir tur bekleme, bir tur
-    /// kararlılık); görüntüsü değişmeyen alan yeniden okunmadığı için sık tur işlemciyi yormaz.
-    public static let defaultIntervalMs = 250
-
-    /// Telefonda pil ve ısı için daha seyrek tur.
-    public static let phoneIntervalMs = 450
+    /// Ek alanlar altyazıyla aynı seri OCR kuyruğunu kullanır. Mac ve iPhone'da saniyede en çok bir tur çalışır.
+    public static let defaultIntervalMs = 1000
 
     /// Ekrandakinden yalnız biraz farklı (ya da eksik) kararlı okuma en çok bu kadar tur bekletilir; o hâlde kalırsa
     /// gerçekten değişmiş sayılır ve gösterilir (görevin tek sözcüğü değişebilir: "Go to the barn" → "Go to the bank").

@@ -2143,7 +2143,7 @@ final class AppModel: ObservableObject {
     private func handle(_ frame: CGImage, capturedAt: Int) async {
         lastFrame = frame
         guard pipeline != nil else { return }
-        // Ek alanlar ayrı okunur (en çok 250 ms'de bir); altyazı okumasını beklemez, onu bekletmez.
+        // Ek alanlar altyazıyla aynı OCR kuyruğunu kullanır; saniyede bir tur yeterlidir.
         let areas = settings.activeExtraAreas
         if regionWatcher == nil, !areas.isEmpty, let pipeline { regionWatcher = makeRegionWatcher(packLookup: pipeline.packLookup) }
         regionWatcher?.offer(frame, areas: areas)
