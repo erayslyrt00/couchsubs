@@ -132,6 +132,8 @@ public sealed class RegionWatcher
     /// çevirmenin süresi kadar kısalır; yazı belirirken okunan ara hâller de çevrilebildiği için biraz fazla karakter harcar).
     /// </summary>
     public bool PrefetchesTranslations { get; set; }
+    /// <summary>Hedef dil Türkçe: tuş çubuğundaki büyük harfli komutlar hazır sözlükten çevrilir (<see cref="UiCommands"/>).</summary>
+    public bool TranslatesUiCommands { get; set; }
     /// <summary>Oynanan oyunun adı (bilinmiyorsa null); oyuna özgü yerleşim kuralları için.</summary>
     public Func<string?>? Game { get; set; }
 
@@ -223,7 +225,12 @@ public sealed class RegionWatcher
         }
         var clock = now();
         Reading reading;
-        try { reading = reader.ReadLines(crop, false); }
+        // Alan "Ekranı çevir" gibi okunur (ham okuma + yalnız beyaz yazının eklediği satırlar): altyazının hazırlık zinciri
+        // gölgeli-beyaz hazırlığı seçince görev yazısındaki renkli sözcük ("Fly to a drop point" içinde pembe "drop
+        // point") ve koyu zeminli ipucu kutusu yazıları düşüyordu. 720p akışta küçük yazı (telefon mesajı, ipucu) iki kat
+        // büyütülerek okunur.
+        var image = frame.Height < 900 ? crop.Scaled(2) : crop;
+        try { reading = reader.ReadScreen(image); }
         catch
         {
             // OCR hatası boş alan değildir. Eski kutuyu koru; aynı kareyi sonraki normal turda yeniden oku.
@@ -236,7 +243,7 @@ public sealed class RegionWatcher
         if (Volatile.Read(ref session) != started) return;
         Interlocked.Increment(ref reads);
         ReadMeasured?.Invoke(now() - clock);
-        var candidate = MakeCandidate(reading, area.Region, crop, SplitsMenuRows(Game?.Invoke()));
+        var candidate = MakeCandidate(reading, area.Region, image, SplitsMenuRows(Game?.Invoke()));
         if (state.LastRead == candidate.Key)
         {
             state.Candidate = null;
@@ -326,7 +333,7 @@ public sealed class RegionWatcher
     /// </summary>
     internal static Candidate MakeCandidate(Reading reading, CropRegion region, Frame? frame = null, bool menuRows = false)
     {
-        var lines = reading.WithButtonIcons().WithoutButtonPrompts().WithoutOcrNoise().Lines
+        var lines = (frame is null ? reading.WithButtonIcons() : reading.WithButtonIcons(frame)).WithoutButtonPrompts().WithoutOcrNoise().Lines
             .Where(line => ScreenTranslation.IsWords(line.Text))
             .OrderBy(line => line.Box?.Top ?? 0)
             .ToList();
@@ -415,7 +422,7 @@ public sealed class RegionWatcher
         state.Remembered = candidate.Text;
         // Önceden istenmiş ya da daha önce gösterilmiş yazı: çevirmene yeniden gidilmez.
         bool ready;
-        lock (translations) ready = translations.ContainsKey(candidate.Key);
+        lock (translations) ready = translations.ContainsKey(TranslationKey(candidate));
         var task = Translate(candidate);
         Translation translation;
         try { translation = await task.ConfigureAwait(false); }
@@ -440,7 +447,9 @@ public sealed class RegionWatcher
         for (var i = 0; i < candidate.Paragraphs.Count; i++)
         {
             var source = candidate.Paragraphs[i];
+            // Simgeleri yerinde olan sonuç (tuş çubuğu sözlüğü, zaten Türkçe olan parça) doğrudan sıralanır.
             text.Add(result[i]?.Trim() is not { Length: > 0 } translated ? IconText.Indexed(source, slots.Count)
+                : translated.Contains(ButtonIcons.Marker) ? IconText.Indexed(translated, slots.Count)
                 : IconText.Restore(translated, prepared[i].Names, slots.Count));
             slots.AddRange(candidate.Icons is { } all && i < all.Count ? all[i] : []);
         }
@@ -505,21 +514,28 @@ public sealed class RegionWatcher
     /// </summary>
     private readonly Dictionary<string, Task<Translation>> translations = [];
 
+    /// <summary>
+    /// Saklanan çevirinin anahtarı: paragraflar ayrı ayrı. Aynı yazı başka satırlardan bölünürse paragraf sayısı değişir;
+    /// <see cref="Candidate.Key"/> aynı kalsa da eski çeviri kullanılmaz (dizinin dışına taşardı).
+    /// </summary>
+    private static string TranslationKey(Candidate candidate) => string.Join('\n', candidate.Paragraphs);
+
     /// <summary>Çevirinin görevini başlatır ya da süreni / bitmişi verir. Başarısız çeviri saklanmaz, sonra yeniden denenir.</summary>
     private Task<Translation> Translate(Candidate candidate)
     {
+        var key = TranslationKey(candidate);
         lock (translations)
         {
-            if (translations.TryGetValue(candidate.Key, out var known)) return known;
+            if (translations.TryGetValue(key, out var known)) return known;
             if (translations.Count >= RenderedLimit)
-                foreach (var key in translations.Where(pair => pair.Value.IsCompleted).Select(pair => pair.Key).ToList())
-                    translations.Remove(key);
+                foreach (var done in translations.Where(pair => pair.Value.IsCompleted).Select(pair => pair.Key).ToList())
+                    translations.Remove(done);
             var task = TranslateAsync(candidate.Paragraphs);
-            translations[candidate.Key] = task;
+            translations[key] = task;
             _ = task.ContinueWith(_ =>
             {
                 lock (translations)
-                    if (translations.TryGetValue(candidate.Key, out var current) && current == task) translations.Remove(candidate.Key);
+                    if (translations.TryGetValue(key, out var current) && current == task) translations.Remove(key);
             }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             return task;
         }
@@ -529,7 +545,9 @@ public sealed class RegionWatcher
     {
         // Simgeler paket aramasında yok sayılır, çeviride uydurma adlarla korunur (IconText).
         var prepared = paragraphs.Select(IconText.Protect).ToList();
-        string?[] result = [.. paragraphs.Select(paragraph => PackLookup?.Invoke(IconText.Plain(paragraph))?.Text)];
+        // Tuş çubuğu komutları sözlükten, simgeleri yerinde (motor bunları bağlamsız yanlış çeviriyordu: "OPEN" → "AÇIK").
+        string?[] result = [.. paragraphs.Select(paragraph =>
+            (TranslatesUiCommands ? UiCommands.Translate(paragraph) : null) ?? PackLookup?.Invoke(IconText.Plain(paragraph))?.Text)];
         var fromPack = result.Count(text => text is not null);
         // Zaten Türkçe olan parça çevrilmez: aslı kalır, tümü öyleyse kutu gösterilmez.
         for (var i = 0; i < result.Length; i++)

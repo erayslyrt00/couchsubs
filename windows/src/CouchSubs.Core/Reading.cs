@@ -204,6 +204,13 @@ public sealed class Reading
 
     /// <summary>Yazının içindeki kumanda simgeleri <see cref="ButtonIcons.Marker"/> ile işaretlenmiş hali (bkz. <see cref="ButtonIcons.Mark"/>).</summary>
     public Reading WithButtonIcons() => new(ButtonIcons.JoinHints(this).Lines.Select(ButtonIcons.Mark));
+
+    /// <summary>
+    /// <see cref="WithButtonIcons()"/>, ayrıca fiilsiz yerlerdeki simgeler (tuş çubuğu, satır başı) <paramref name="frame"/>'den
+    /// (okunan görüntü) doğrulanarak işaretlenir (<see cref="ButtonIcons.MarkFree"/>).
+    /// </summary>
+    public Reading WithButtonIcons(Frame frame) =>
+        new(ButtonIcons.JoinHints(this).Lines.Select(ButtonIcons.Mark).Select(line => ButtonIcons.MarkFree(line, frame)));
 }
 
 /// <summary>
