@@ -33,8 +33,8 @@ public sealed record WatchedArea(string Id, string Name, CropRegion Region);
 /// aynı kurallar).
 /// <list type="bullet">
 /// <item>Ana okuma hattını beklemez, onu bekletmez: <see cref="Offer"/> hemen döner, tur arka planda sürer.</item>
-/// <item>En çok <see cref="DefaultIntervalMs"/>'de bir tur atılır; önceki tur bitmediyse kare atlanır.</item>
-/// <item>Bölge izi değişmeyen alan yeniden okunmaz.</item>
+/// <item>En çok <see cref="DefaultIntervalMs"/>'de bir tur atılır; süren tur yalnız en yeni kareyi tutar.</item>
+/// <item>Bölge ve son okunan satırlar değişmedikçe OCR çalışmaz.</item>
 /// <item>Yazı ancak kararlıysa çevrilir: iz bir tur değişmediyse ya da iki okuma aynı yazıyı verdiyse.</item>
 /// <item>Yazı değişmedikçe yeniden çevrilmez; boşalan alanın kutusu kalkar.</item>
 /// <item>Paket ve çeviri motoru altyazıyla aynıdır; ama ek alan satırları ortak havuza önerilmez.</item>
@@ -63,6 +63,9 @@ public sealed class RegionWatcher
     private sealed class State
     {
         public byte[]? Signature;
+        public Frame? LastReadCrop;
+        public TextBox[] Lines = [];
+        public long LastFullCheck;
         public string? LastRead;
         public Candidate? Candidate;
         public string Shown = "";
@@ -118,6 +121,8 @@ public sealed class RegionWatcher
     private readonly Func<long> now;
     private Dictionary<string, State> states = [];
     private long? lastPass;
+    private readonly object captureGate = new();
+    private (Frame Frame, IReadOnlyList<WatchedArea> Areas)? latest;
     private int busy;
     private int session;
     private int passes;
@@ -157,17 +162,37 @@ public sealed class RegionWatcher
     /// <summary>Her karede çağrılır; tur zamanı geldiyse ve önceki tur bittiyse turu arka planda başlatır, hemen döner.</summary>
     public void Offer(Frame frame, IReadOnlyList<WatchedArea> areas)
     {
-        if (areas.Count == 0 && !AnyShown()) return;
         var time = now();
-        if (lastPass is { } last && time - last < intervalMs) return;
-        if (Interlocked.Exchange(ref busy, 1) == 1) return;
-        lastPass = time;
+        lock (captureGate)
+        {
+            if (IsBusy)
+            {
+                latest = (frame, areas);
+                return;
+            }
+            if (areas.Count == 0 && !AnyShown()) return;
+            if (lastPass is { } last && time - last < intervalMs) return;
+            Volatile.Write(ref busy, 1);
+            lastPass = time;
+        }
         _ = Task.Run(async () =>
         {
             try { await PassAsync(frame, areas).ConfigureAwait(false); }
             catch (Exception error) { Log?.Invoke($"ek alan turu hata verdi: {error.Message}"); }
-            finally { Volatile.Write(ref busy, 0); }
+            finally
+            {
+                lock (captureGate)
+                {
+                    latest = null;
+                    Volatile.Write(ref busy, 0);
+                }
+            }
         });
+    }
+
+    private (Frame Frame, IReadOnlyList<WatchedArea> Areas)? Latest()
+    {
+        lock (captureGate) return latest;
     }
 
     private bool AnyShown()
@@ -192,7 +217,9 @@ public sealed class RegionWatcher
         foreach (var id in removed) server.SendRegion(id, "", null);
         foreach (var area in areas)
         {
-            await VisitAsync(area, frame, map, started).ConfigureAwait(false);
+            var current = Latest();
+            if (current is null || current.Value.Areas.Contains(area))
+                await VisitAsync(area, current?.Frame ?? frame, map, started).ConfigureAwait(false);
             if (Volatile.Read(ref session) != started) return;
         }
     }
@@ -206,8 +233,15 @@ public sealed class RegionWatcher
         {
             if (!map.TryGetValue(area.Id, out state!)) map[area.Id] = state = new State();
         }
-        var changed = state.Signature is not { } previous || ReadScheduler.Changed(previous, signature, ReadScheduler.ChangeThreshold);
-        state.Signature = signature;
+        var changed = PixelsChanged(state, crop, signature);
+        // Örneklerin arasına düşen ya da eski satır kutusunun dışında beliren bir yazıyı da yakala.
+        // Birebir aynı görüntüde süre dolsa bile OCR çalışmaz.
+        var time = now();
+        if (!changed && time - state.LastFullCheck >= 5000 && state.LastReadCrop is { } last)
+        {
+            state.LastFullCheck = time;
+            changed = !last.Pixels.AsSpan().SequenceEqual(crop.Pixels);
+        }
         if (!changed)
         {
             // İz bir tur değişmedi: okunan yazı kararlıdır.
@@ -218,6 +252,52 @@ public sealed class RegionWatcher
             }
             return;
         }
+        var candidate = ReadCandidate(frame, crop, signature, area, state, started);
+        if (candidate is null) return;
+        if (state.LastRead == candidate.Key)
+        {
+            state.Candidate = null;
+            await CommitAsync(candidate, area, state, started).ConfigureAwait(false);
+        }
+        else Stage(candidate, state);
+    }
+
+    private static void Stage(Candidate candidate, State state)
+    {
+        state.LastRead = candidate.Key;
+        (state.Held, state.Holds) = (null, 0);
+        state.Candidate = candidate;
+    }
+
+    // Alanın seyrek izinin arasına sığan kısa komutlar için son okunan satırların içinden örnek al.
+    // Birkaç parlaklık seviyesindeki sıkıştırma gürültüsü yeniden OCR başlatmaz.
+    private static bool PixelsChanged(State state, Frame crop, byte[] signature)
+    {
+        if (state.Signature is not { } previous || ReadScheduler.Changed(previous, signature, ReadScheduler.ChangeThreshold)) return true;
+        if (state.LastReadCrop is not { } before || before.Width != crop.Width || before.Height != crop.Height) return true;
+        foreach (var line in state.Lines)
+        {
+            var x0 = Math.Clamp((int)(line.Left * crop.Width), 0, crop.Width);
+            var x1 = Math.Clamp((int)Math.Ceiling(line.Right * crop.Width), 0, crop.Width);
+            var y0 = Math.Clamp((int)(line.Top * crop.Height), 0, crop.Height);
+            var y1 = Math.Clamp((int)Math.Ceiling(line.Bottom * crop.Height), 0, crop.Height);
+            var dx = Math.Max(1, (x1 - x0 + 63) / 64);
+            var dy = Math.Max(1, (y1 - y0 + 7) / 8);
+            int changes = 0;
+            for (var y = y0; y < y1; y += dy)
+                for (var x = x0; x < x1; x += dx)
+                {
+                    var p = y * crop.Stride + x * 4;
+                    if ((Math.Abs(crop.Pixels[p] - before.Pixels[p]) > ReadScheduler.ChangeThreshold
+                        || Math.Abs(crop.Pixels[p + 1] - before.Pixels[p + 1]) > ReadScheduler.ChangeThreshold
+                        || Math.Abs(crop.Pixels[p + 2] - before.Pixels[p + 2]) > ReadScheduler.ChangeThreshold) && ++changes >= 2) return true;
+                }
+        }
+        return false;
+    }
+
+    private Candidate? ReadCandidate(Frame frame, Frame crop, byte[] signature, WatchedArea area, State state, int started)
+    {
         var clock = now();
         Reading reading;
         // Alan "Ekranı çevir" gibi okunur (ham okuma + yalnız beyaz yazının eklediği satırlar): altyazının hazırlık zinciri
@@ -233,23 +313,16 @@ public sealed class RegionWatcher
             state.Signature = null;
             state.LastRead = null;
             state.Candidate = null;
-            return;
+            return null;
         }
-        if (Volatile.Read(ref session) != started) return;
+        if (Volatile.Read(ref session) != started) return null;
         Interlocked.Increment(ref reads);
         ReadMeasured?.Invoke(now() - clock);
-        var candidate = MakeCandidate(reading, area.Region, image, SplitsMenuRows(Game?.Invoke()));
-        if (state.LastRead == candidate.Key)
-        {
-            state.Candidate = null;
-            await CommitAsync(candidate, area, state, started).ConfigureAwait(false);
-        }
-        else
-        {
-            state.LastRead = candidate.Key;
-            (state.Held, state.Holds) = (null, 0);
-            state.Candidate = candidate;
-        }
+        state.Signature = signature;
+        state.LastReadCrop = crop;
+        state.LastFullCheck = now();
+        state.Lines = [.. reading.Lines.Where(line => line.Box.HasValue).Take(32).Select(line => line.Box!.Value)];
+        return MakeCandidate(reading, area.Region, image, SplitsMenuRows(Game?.Invoke()));
     }
 
     private static int IconCount(Candidate candidate) =>
@@ -405,7 +478,25 @@ public sealed class RegionWatcher
         Translation? cached;
         lock (translations) translations.TryGetValue(key, out cached);
         Translation translation;
-        try { translation = cached ?? await TranslateAsync(candidate.Paragraphs).ConfigureAwait(false); }
+        var waited = false;
+        try
+        {
+            if (cached is not null) translation = cached;
+            else
+            {
+                var request = TranslateAsync(candidate.Paragraphs);
+                waited = !request.IsCompleted;
+                // Yeni komut doğrulandı; yavaş motor yanıtını beklerken eski Türkçe onun üstünde kalmasın.
+                if (waited && !string.IsNullOrEmpty(state.RenderedText) && Volatile.Read(ref session) == started)
+                {
+                    server.SendRegion(area.Id, "", null);
+                    state.RenderedText = null;
+                    state.RenderedKey = null;
+                    previous = ("", "", 0);
+                }
+                translation = await request.ConfigureAwait(false);
+            }
+        }
         catch (Exception error)
         {
             if (Volatile.Read(ref session) == started)
@@ -428,6 +519,42 @@ public sealed class RegionWatcher
                 translations[key] = translation;
             }
         }
+        // Motor çalışırken araya giren kareler kuyruğa alınmaz. Yalnız en son karede bu alan değiştiyse
+        // tekrar oku: arka plandaki hareket geçerli bir çeviriyi silemez, eski menü komutu da geri dönmez.
+        if (waited && Latest() is { } newest)
+        {
+            if (!newest.Areas.Contains(area))
+            {
+                (state.Shown, state.ShownText, state.ShownIcons) = previous;
+                state.Signature = null;
+                state.LastRead = null;
+                return;
+            }
+            var crop = RegionCropper.Crop(newest.Frame, area.Region);
+            var signature = RegionCropper.Signature(crop);
+            if (PixelsChanged(state, crop, signature))
+            {
+                var fresh = ReadCandidate(newest.Frame, crop, signature, area, state, started);
+                if (fresh is null || fresh.Key != candidate.Key || TranslationKey(fresh) != key)
+                {
+                    (state.Shown, state.ShownText, state.ShownIcons) = previous;
+                    if (fresh is not null) Stage(fresh, state);
+                    return;
+                }
+                // OCR sürerken de başka bir komuta geçilebilir. Motor sonucunu sakladık; tekrar motor
+                // çağırmadan sonraki normal turda doğrula, burada sürekli OCR yaparak yetişmeye çalışma.
+                if (Latest() is { } afterRead && (!afterRead.Areas.Contains(area)
+                    || (!ReferenceEquals(afterRead.Frame, newest.Frame)
+                        && PixelsChangedSinceRead(afterRead.Frame, area, state))))
+                {
+                    (state.Shown, state.ShownText, state.ShownIcons) = previous;
+                    Stage(fresh, state);
+                    return;
+                }
+                candidate = fresh;
+            }
+        }
+        if (Volatile.Read(ref session) != started) return;
         state.Remembered = candidate.Text;
         var (result, fromPack) = (translation.Result, translation.FromPack);
         var prepared = candidate.Paragraphs.Select(IconText.Protect).ToList();
@@ -470,6 +597,12 @@ public sealed class RegionWatcher
         state.RenderedLineHeight = candidate.LineHeight;
         state.RenderedLayout = candidate.Blocks;
         state.RenderedBlocks = blocks;
+    }
+
+    private static bool PixelsChangedSinceRead(Frame frame, WatchedArea area, State state)
+    {
+        var crop = RegionCropper.Crop(frame, area.Region);
+        return PixelsChanged(state, crop, RegionCropper.Signature(crop));
     }
 
     /// <summary>

@@ -12,10 +12,12 @@ public class RegionWatcherTests
         public List<TextLine> Lines { get; set; } = [];
         public int Count;
         public int FailuresRemaining;
+        public Action? OnRead;
         public string Read(Frame image) => string.Join('\n', Lines.Select(line => line.Text));
         public Reading ReadLines(Frame image, bool deep)
         {
             Interlocked.Increment(ref Count);
+            OnRead?.Invoke();
             if (FailuresRemaining > 0)
             {
                 FailuresRemaining--;
@@ -78,6 +80,154 @@ public class RegionWatcherTests
     private static readonly WatchedArea Phone = new("p", "Phone", ExtraAreaPreset.Phone.Region());
 
     private static TextLine Line(string text, double top = 0.2, double height = 0.1) => new(text, new TextBox(0.1, top, 0.9, top + height));
+
+    private static readonly WatchedArea Hud = new("hud", "HUD", new CropRegion(0, 1, 0, 1));
+
+    // Beş piksel boyundaki etiket, tüm ekranı örnekleyen iki satırın arasına düşer.
+    private static Frame HudFrame(int letters)
+    {
+        var frame = Frame.Blank(320, 180);
+        for (var y = 38; y < 43; y++)
+            for (var x = 33; x < 33 + 5 * letters; x++)
+                if (x % 5 < 3)
+                    Array.Fill(frame.Pixels, (byte)245, y * frame.Stride + x * 4, 3);
+        return frame;
+    }
+
+    private static async Task WaitForPass(RegionWatcher watcher)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (watcher.IsBusy) await Task.Delay(5, timeout.Token);
+    }
+
+    [Fact]
+    public async Task SmallChangingMenuLabelIsReadEvenWhenTheAreaSignatureMatches()
+    {
+        var greet = HudFrame(5);
+        var antagonize = HudFrame(10);
+        Assert.Equal(RegionCropper.Signature(greet), RegionCropper.Signature(antagonize));
+        var reader = new Reader { Lines = [Line("Greet", 0.2, 0.05)] };
+        var server = new Server();
+        long clock = 0;
+        var watcher = new RegionWatcher(reader, new Translator(), server, clock: () => clock);
+        await watcher.PassAsync(greet, [Hud]);
+        await watcher.PassAsync(greet, [Hud]);
+        reader.Lines = [Line("Antagonize", 0.2, 0.05)];
+        await watcher.PassAsync(antagonize, [Hud]);
+        await watcher.PassAsync(antagonize, [Hud]);
+        clock += 6000;
+        await watcher.PassAsync(antagonize, [Hud]);
+        Assert.Equal(2, reader.Count);
+        Assert.Equal(["TR: Greet", "TR: Antagonize"], server.Sent.Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task NewTextOutsideEarlierBoxesIsEventuallyReadOnASparseSignatureCollision()
+    {
+        long clock = 0;
+        var reader = new Reader();
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, new Translator(), server, clock: () => clock);
+        await watcher.PassAsync(HudFrame(0), [Hud]);
+        await watcher.PassAsync(HudFrame(0), [Hud]);
+        clock += 6000;
+        reader.Lines = [Line("Antagonize", 0.2, 0.05)];
+        await watcher.PassAsync(HudFrame(10), [Hud]);
+        await watcher.PassAsync(HudFrame(10), [Hud]);
+        Assert.Equal(2, reader.Count);
+        Assert.Equal("TR: Antagonize", Assert.Single(server.Sent).Text);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InFlightTranslationOnlyPublishesIfTheSourceStillMatches(bool newCommand)
+    {
+        var greet = HudFrame(5);
+        var reader = new Reader { Lines = [Line("Greet", 0.2, 0.05)] };
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var translator = new Translator { Respond = text =>
+        {
+            if (text != "Greet") return Task.FromResult("Kışkırt");
+            entered.TrySetResult();
+            return release.Task;
+        } };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server, intervalMs: 0);
+        watcher.Offer(greet, [Hud]);
+        await WaitForPass(watcher);
+        watcher.Offer(greet, [Hud]);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var next = HudFrame(newCommand ? 10 : 5);
+        // Başka bölgede de hareket var. O tek başına değişmeyen komutun çevirisini düşürmemeli.
+        Array.Fill(next.Pixels, (byte)200, 0, next.Stride);
+        if (newCommand) reader.Lines = [Line("Antagonize", 0.2, 0.05)];
+        watcher.Offer(next, [Hud]);
+        release.SetResult("Selam ver");
+        await WaitForPass(watcher);
+        watcher.Offer(next, [Hud]);
+        await WaitForPass(watcher);
+        Assert.Equal(newCommand ? "Kışkırt" : "Selam ver", Assert.Single(server.Sent).Text);
+    }
+
+    [Fact]
+    public async Task AConfirmedNewCommandClearsOnlyItsOldTranslationWhileWaiting()
+    {
+        var reader = new Reader { Lines = [Line("Greet", 0.2, 0.05)] };
+        var translator = new Translator();
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        await watcher.PassAsync(HudFrame(5), [Hud]);
+        await watcher.PassAsync(HudFrame(5), [Hud]);
+        reader.Lines = [Line("Antagonize", 0.2, 0.05)];
+        var release = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        translator.Respond = _ => release.Task;
+        await watcher.PassAsync(HudFrame(10), [Hud]);
+        var pending = watcher.PassAsync(HudFrame(10), [Hud]);
+        Assert.Equal(["TR: Greet", ""], server.Sent.Select(message => message.Text));
+        Assert.All(server.Sent, message => Assert.Equal(Hud.Id, message.Id));
+        release.SetResult("Kışkırt");
+        await pending;
+        Assert.Equal("Kışkırt", server.Sent.Last().Text);
+    }
+
+    [Fact]
+    public async Task CommandChangedDuringTheFinalReadDoesNotPublishTheOldResponse()
+    {
+        var greet = HudFrame(5);
+        var next = HudFrame(10);
+        var reader = new Reader { Lines = [Line("Greet", 0.2, 0.05)] };
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var translator = new Translator { Respond = text =>
+        {
+            if (text != "Greet") return Task.FromResult("Kışkırt");
+            entered.TrySetResult();
+            return release.Task;
+        } };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server, intervalMs: 0);
+        watcher.Offer(greet, [Hud]);
+        await WaitForPass(watcher);
+        watcher.Offer(greet, [Hud]);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var sameWithMotion = HudFrame(5);
+        Array.Fill(sameWithMotion.Pixels, (byte)200, 0, sameWithMotion.Stride);
+        watcher.Offer(sameWithMotion, [Hud]);
+        reader.OnRead = () => watcher.Offer(next, [Hud]);
+        release.SetResult("Selam ver");
+        await WaitForPass(watcher);
+        Assert.Empty(server.Sent);
+        reader.OnRead = null;
+        reader.Lines = [Line("Antagonize", 0.2, 0.05)];
+        watcher.Offer(next, [Hud]);
+        await WaitForPass(watcher);
+        watcher.Offer(next, [Hud]);
+        await WaitForPass(watcher);
+        Assert.Equal("Kışkırt", Assert.Single(server.Sent).Text);
+    }
 
     [Fact]
     public async Task FailedReadRetriesOnAnUnchangedFrameThenStopsReading()
