@@ -125,6 +125,7 @@ internal sealed class FakeServices : IAppServices
     public IDubbingModel? Dubbing { get; set; }
     public IDubbingModel? FastDubbing { get; set; }
     public GamePackLibrary? GamePacks { get; set; }
+    public PackMatch? FindInPacks(string text) => GamePacks?.Find(text) is { } found ? new PackMatch(found, []) : null;
     public FakeTranslation Translation { get; } = new();
     public IFirewall? Firewall { get; set; }
     ITranslationModel IAppServices.Translation => Translation;

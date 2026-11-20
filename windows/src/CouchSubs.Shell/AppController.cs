@@ -1986,6 +1986,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         PlayedGame = current?.Name;
         FollowGameAreas();
         if (current == publishedGame) return;
+        // Yeni oyunda aynı HUD satırının çevirisi ve paketi farklı olabilir.
+        regionWatcher?.Reset();
         publishedGame = current;
         services.Pool?.SetGame(current);
         if (current is not null && services.PackUpdates is { } packUpdater) _ = RefreshPacksAsync(packUpdater, maxAge: PackUpdater.GameCheckInterval);

@@ -252,6 +252,7 @@ public sealed class RegionWatcher
         else
         {
             state.LastRead = candidate.Key;
+            (state.Held, state.Holds) = (null, 0);
             state.Candidate = candidate;
             // Yazı kararlı mı diye bir tur beklenirken çevirisi şimdiden istenir: doğrulanınca çoğu zaman hazırdır.
             Prefetch(candidate, state);
@@ -265,9 +266,8 @@ public sealed class RegionWatcher
     private void Prefetch(Candidate candidate, State state)
     {
         if (!PrefetchesTranslations || candidate.Key.Length == 0 || candidate.Key == state.Shown || ShouldHold(candidate, state)) return;
-        // Hata gözlenir; asıl gösterimde yeniden denenir.
-        _ = Translate(candidate).ContinueWith(task => _ = task.Exception, CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        // Geçici okumalar çevirmende birikmesin. Kararlı yazı bu sınırı beklemeden çevrilir.
+        if (prefetch is not { IsCompleted: false }) prefetch = Translate(candidate);
     }
 
     private static int IconCount(Candidate candidate) =>
@@ -288,7 +288,7 @@ public sealed class RegionWatcher
         if (candidate.Text.Length == 0) return false;
         if (state.Remembered.Length > candidate.Text.Length && state.Remembered.StartsWith(candidate.Text + " ", StringComparison.Ordinal))
             return true;
-        if (state.ShownText.Length == 0 || state.ShownText == candidate.Text) return false;
+        if (state.ShownText.Length == 0 || state.ShownText == candidate.Text || TextMatch.AddsMeaning(candidate.Text, state.ShownText)) return false;
         var icons = IconCount(candidate);
         return icons <= state.ShownIcons
             ? TextMatch.IsSimilar(state.ShownText, candidate.Text, 0.85) || IsPartOf(candidate.Text, state.ShownText)
@@ -313,7 +313,7 @@ public sealed class RegionWatcher
             if (found < 0) { if (++misses > 1) return false; continue; }
             at = found + 1;
         }
-        return true;
+        return misses < part.Length;
     }
 
     /// <summary>
@@ -350,7 +350,7 @@ public sealed class RegionWatcher
         // eskisi gibi tek kutu. Anahtar grup yapısını da içerir: aynı yazı farklı gruplanırsa bloklar yeniden kurulur.
         IReadOnlyList<Block>? blocks = null;
         var key = TextKey(paragraphs);
-        var groups = lines.Count > 1 && boxes.Count == lines.Count ? ScreenTranslation.Groups(reading, menuRows) : [];
+        var groups = lines.Count > 1 && boxes.Count == lines.Count ? ScreenTranslation.GroupsFromLines(lines, menuRows) : [];
         if (groups.Count is > 1 and < ScreenTranslation.MaxGroups)
         {
             paragraphs = [.. groups.SelectMany(group => group.Paragraphs)];
@@ -419,7 +419,6 @@ public sealed class RegionWatcher
             Log?.Invoke($"ek alan {area.Name}: boşaldı");
             return;
         }
-        state.Remembered = candidate.Text;
         // Önceden istenmiş ya da daha önce gösterilmiş yazı: çevirmene yeniden gidilmez.
         bool ready;
         lock (translations) ready = translations.ContainsKey(TranslationKey(candidate));
@@ -440,6 +439,7 @@ public sealed class RegionWatcher
             return;
         }
         if (Volatile.Read(ref session) != started || state.Shown != candidate.Key) return;
+        state.Remembered = candidate.Text;
         var (result, fromPack) = (translation.Result, translation.FromPack);
         var prepared = candidate.Paragraphs.Select(IconText.Protect).ToList();
         var slots = new List<IconSlot>();
@@ -513,6 +513,7 @@ public sealed class RegionWatcher
     /// gelince çevirmene yeniden gidilmez, anında gösterilir. Önceden istenen çeviri de buradan alınır.
     /// </summary>
     private readonly Dictionary<string, Task<Translation>> translations = [];
+    private Task<Translation>? prefetch;
 
     /// <summary>
     /// Saklanan çevirinin anahtarı: paragraflar ayrı ayrı. Aynı yazı başka satırlardan bölünürse paragraf sayısı değişir;
@@ -532,11 +533,12 @@ public sealed class RegionWatcher
                     translations.Remove(done);
             var task = TranslateAsync(candidate.Paragraphs);
             translations[key] = task;
-            _ = task.ContinueWith(_ =>
+            _ = task.ContinueWith(failed =>
             {
+                _ = failed.Exception;
                 lock (translations)
                     if (translations.TryGetValue(key, out var current) && current == task) translations.Remove(key);
-            }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            }, CancellationToken.None, TaskContinuationOptions.NotOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             return task;
         }
     }

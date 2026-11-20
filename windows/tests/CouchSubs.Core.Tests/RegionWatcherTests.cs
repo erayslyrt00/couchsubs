@@ -40,8 +40,9 @@ public class RegionWatcherTests
                     return Task.FromException<string>(new InvalidOperationException("Expected test failure"));
                 }
             }
-            return Task.FromResult(Map(text));
+            return Respond?.Invoke(text) ?? Task.FromResult(Map(text));
         }
+        public Func<string, Task<string>>? Respond { get; set; }
         public Func<string, string> Map { get; set; } = text => "TR: " + text;
     }
 
@@ -549,6 +550,82 @@ public class RegionWatcherTests
         Assert.Single(server.Sent);
         for (var i = 0; i < RegionWatcher.HoldLimit; i++) await watcher.PassAsync(Shade(90), [Quest]);
         Assert.Equal(["TR: Go to the barn", "TR: Go to the bank"], server.Sent.Select(s => s.Text));
+    }
+
+
+    [Theory]
+    [InlineData("Find the blacksmith", "Escape")]
+    [InlineData("Meet me at gate 5", "Meet me at gate 6")]
+    [InlineData("You can open it", "You can't open it")]
+    public async Task ConfirmedNewPromptDoesNotWaitForTheHoldLimit(string first, string next)
+    {
+        var reader = new Reader();
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, new Translator(), server);
+        await Show(watcher, reader, first, 10);
+        await Show(watcher, reader, next, 90);
+        Assert.Equal(["TR: " + first, "TR: " + next], server.Sent.Select(s => s.Text));
+    }
+
+    [Fact]
+    public async Task IntermittentTypoDoesNotAccumulateHolds()
+    {
+        var reader = new Reader();
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, new Translator(), server);
+        await Show(watcher, reader, "Go to the barn", 10);
+        for (var i = 0; i <= RegionWatcher.HoldLimit; i++)
+        {
+            await Show(watcher, reader, "Go to the bank", 90);
+            await Show(watcher, reader, "Go to the barn", 10);
+        }
+        Assert.Equal(["TR: Go to the barn"], server.Sent.Select(s => s.Text));
+    }
+
+    [Fact]
+    public async Task PendingPrefetchSkipsSpeculativeChangesButAllowsConfirmedText()
+    {
+        var pending = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var translator = new Translator { Respond = text => text == "Find the blacksmith" ? pending.Task : Task.FromResult("TR: " + text) };
+        var reader = new Reader { Lines = [Line("Find the blacksmith")] };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server) { PrefetchesTranslations = true };
+        try
+        {
+            await watcher.PassAsync(Shade(10), [Quest]);
+            reader.Lines = [Line("Open the door")];
+            await watcher.PassAsync(Shade(90), [Quest]);
+            await Show(watcher, reader, "Take cover", 170);
+            Assert.Equal(["Find the blacksmith", "Take cover"], translator.Calls);
+            Assert.Equal(["TR: Take cover"], server.Sent.Select(s => s.Text));
+        }
+        finally { pending.TrySetResult("TR: Find the blacksmith"); }
+    }
+
+    [Fact]
+    public async Task CancelledPrefetchCanBeRetriedWhenConfirmed()
+    {
+        var reader = new Reader { Lines = [Line("Find the blacksmith")] };
+        var translator = new Translator { Respond = _ => Task.FromCanceled<string>(new CancellationToken(true)) };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server) { PrefetchesTranslations = true };
+        await watcher.PassAsync(Shade(10), [Quest]);
+        translator.Respond = null;
+        await watcher.PassAsync(Shade(10), [Quest]);
+        Assert.Equal(["Find the blacksmith", "Find the blacksmith"], translator.Calls);
+        Assert.Equal(["TR: Find the blacksmith"], server.Sent.Select(s => s.Text));
+    }
+
+    [Fact]
+    public async Task FailedTranslationDoesNotHoldTheNextConfirmedPrompt()
+    {
+        var reader = new Reader();
+        var translator = new Translator { FailuresRemaining = 1 };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        await Show(watcher, reader, "Find the blacksmith", 10);
+        await Show(watcher, reader, "Find", 90);
+        Assert.Equal(["TR: Find"], server.Sent.Select(s => s.Text));
     }
 
     [Fact]

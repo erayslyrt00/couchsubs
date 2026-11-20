@@ -151,6 +151,47 @@ public class ExtraRegionTests
         lock (received) Assert.Contains(received, e => e.Kind == SubtitleEventKind.RegionClear);
     }
 
+
+    [Fact]
+    public async Task SwitchingGamesRefreshesAnUnchangedLivePromptFromTheNewPack()
+    {
+        const string prompt = "Find the blacksmith";
+        byte[] Pack(string translation) => System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+            new Dictionary<string, string> { [PackKey.Key(prompt)!] = translation });
+        var (controller, services) = Ready();
+        services.GamePacks = new GamePackLibrary(() => [("Hades.json", Pack("Demirciyi bul.")), ("Celeste.json", Pack("Nalbandı bul."))], null);
+        services.ReaderLines = new Reading([new TextLine(prompt, new TextBox(0.1, 0.2, 0.9, 0.3))]);
+        controller.Settings = (controller.Settings with { Output = SubtitleOutput.Computer, GamePacks = true })
+            .WithExtraRegion(1, ExtraAreaPreset.Quest.Region()).WithExtraLive(1, true);
+        var received = new System.Collections.Concurrent.ConcurrentQueue<SubtitleEvent>();
+        controller.OverlayEvent += received.Enqueue;
+        var frame = Frame.Blank(64, 64);
+        async Task<bool> Shows(string translation)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(4);
+            while (DateTime.UtcNow < deadline)
+            {
+                services.Streams[0].Emit(frame);
+                if (received.Any(e => e.Kind == SubtitleEventKind.Region && e.Id == "area1" && e.Text == translation)) return true;
+                await Task.Delay(50);
+            }
+            return false;
+        }
+
+        try
+        {
+            await controller.StartAsync();
+            controller.ChooseGame("Hades");
+            Assert.True(await Shows("Demirciyi bul."));
+            received.Clear();
+            controller.ChooseGame("Celeste");
+            Assert.True(await Shows("Nalbandı bul."));
+            Assert.Contains(received, e => e.Kind == SubtitleEventKind.RegionClear);
+            Assert.DoesNotContain(received, e => e.Kind == SubtitleEventKind.Region && e.Text == "Demirciyi bul.");
+        }
+        finally { controller.Stop(); }
+    }
+
     [Fact]
     public void ExtraRegionIsSetAndClearedBySlot()
     {

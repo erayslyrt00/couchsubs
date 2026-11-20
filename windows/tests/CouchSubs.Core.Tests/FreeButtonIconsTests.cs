@@ -86,4 +86,80 @@ public class FreeButtonIconsTests
         Assert.Null(UiCommands.Translate("Open the door"));
         Assert.Null(UiCommands.Translate($"LAUNCH ROCKETS {M} EXIT"));
     }
+
+    [Fact]
+    public void IconsInsideEitherCropEdgeRemainVisible()
+    {
+        var frame = Draw(400, 40, (4, 11, 18), (377, 11, 18));
+        var line = Line(Word("SELECT", 30 / 400.0, 0.7), Word("ITEM", 0.73, 371 / 400.0));
+        var marked = ButtonIcons.MarkFree(line, frame);
+        Assert.Equal($"{M} SELECT ITEM {M}", marked.Text);
+        Assert.All(ButtonIcons.WithImages(marked.Icons!, frame), icon =>
+        {
+            Assert.InRange(icon.Box.Left, 0, 1);
+            Assert.InRange(icon.Box.Right, 0, 1);
+            Assert.NotNull(icon.Image);
+        });
+    }
+
+    [Fact]
+    public void AdjacentMeasuredShoulderButtonsKeepTheirOwnImages()
+    {
+        var frame = Draw(400, 40, (122, 11, 18), (150, 11, 18));
+        var line = Line(Word("SELECT", 0.05, 0.26), Word("L1", 0.30, 0.355), Word("R1", 0.37, 0.43));
+        var marked = ButtonIcons.MarkFree(line, frame);
+        Assert.Equal($"SELECT {M} {M}", marked.Text);
+        Assert.Equal(new[] { "L1", "R1" }, marked.Icons!.Select(icon => icon.Text));
+        Assert.True(marked.Icons![0].Box.Right <= marked.Icons[1].Box.Left);
+        Assert.All(ButtonIcons.WithImages(marked.Icons, frame), icon => Assert.NotNull(icon.Image));
+    }
+
+    [Fact]
+    public void UnconfirmedSymbolStaysAsTextBesideAConfirmedButton()
+    {
+        var frame = Draw(400, 40, (150, 11, 18));
+        var line = Line(Word("SELECT", 0.05, 0.26), Word("○", 0.30, 0.355), Word("R1", 0.37, 0.43));
+        var marked = ButtonIcons.MarkFree(line, frame);
+        Assert.Equal($"SELECT ○ {M}", marked.Text);
+        Assert.Equal("R1", Assert.Single(marked.Icons!).Text);
+    }
+
+    [Fact]
+    public void RegionGroupsKeepTheImageFoundBesideAnIndependentMessage()
+    {
+        var frame = Draw(400, 40, (22, 11, 18));
+        var reading = new Reading([Line(Word("R2", 0.05, 0.11), Word("Swing", 0.13, 0.28)),
+                                   Line(Word("Incoming", 0.65, 0.79), Word("call", 0.8, 0.89))]);
+        var candidate = RegionWatcher.MakeCandidate(reading, new CropRegion(0, 1, 0, 1), frame);
+        Assert.Equal(2, candidate.Blocks!.Count);
+        Assert.Equal(new[] { $"{M} Swing", "Incoming call" }, candidate.Paragraphs);
+        Assert.NotNull(Assert.Single(candidate.Icons![0]).Image);
+        Assert.Empty(candidate.Icons[1]);
+    }
+
+    [Fact]
+    public async Task FullScreenRecoversAButtonPromptOnlyWhenItsIconIsVisible()
+    {
+        var reading = new Reading([Line(Word("R2", 0.05, 0.11), Word("Swing", 0.13, 0.28))]);
+        var reader = new LinesReader(reading);
+        var translator = new FakeTranslator();
+        Assert.Empty(await ScreenTranslation.TranslateAsync(Draw(400, 40), reader, translator));
+        Assert.Empty(translator.Requested);
+        var frame = Draw(400, 40, (22, 11, 18));
+        var item = Assert.Single(await ScreenTranslation.TranslateAsync(frame, reader, translator));
+        Assert.Single(translator.Requested);
+        Assert.Contains("Swing", item.Translation);
+        Assert.Equal(ButtonIcons.Crop(frame, new TextBox(0.035, 0.1, 0.125, 0.9)), Assert.Single(item.Icons!).Image);
+    }
+
+    [Fact]
+    public void MeasuredButtonIncludesTheOutlineAroundItsLetters()
+    {
+        var frame = Draw(400, 40, (120, 11, 18));
+        // OCR düğmenin yalnız ortasındaki harfleri kutuladı (124..134); kontur 120..138.
+        var line = Line(Word("SELECT", 0.05, 0.26), Word("R1", 124 / 400.0, 134 / 400.0));
+        var marked = ButtonIcons.MarkFree(line, frame);
+        var icon = Assert.Single(ButtonIcons.WithImages(marked.Icons!, frame));
+        Assert.Equal(ButtonIcons.Crop(frame, new TextBox(0.28, 0.1, 0.36, 0.9)), icon.Image);
+    }
 }

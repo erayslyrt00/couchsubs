@@ -329,11 +329,13 @@ public static class ButtonIcons
         var tokens = new List<string>();
         var icons = new List<IconSlot>();
         var spanX = linePx * 1.8 / frame.Width;
-        TextBox Padded(double left, double right) => new(left, top - pad, right, bottom + pad);
+        TextBox Padded(double left, double right) =>
+            new(Math.Clamp(left, 0, 1), Math.Clamp(top - pad, 0, 1),
+                Math.Clamp(right, 0, 1), Math.Clamp(bottom + pad, 0, 1));
         bool Icon(TextBox box) => HasIcon(frame, box, linePx);
 
         // Satırın solundaki simge (okunmamış): "△ Pick up".
-        if (!IsIconToken(words[0].Text) && lineBox.Left - spanX > 0)
+        if (!IsIconToken(words[0].Text) && lineBox.Left > 0)
         {
             var box = Padded(lineBox.Left - spanX, lineBox.Left - (spanX * 0.08));
             if (Icon(box)) { tokens.Add(Marker.ToString()); icons.Add(new IconSlot(box, "")); }
@@ -354,20 +356,29 @@ public static class ButtonIcons
             var text = word.Text;
             var core = text.Trim(Brackets.ToCharArray());
             // Tuş çubuğunda tek harf/rakam ya da yanlış okunmuş omuz tuşu ("11", "12"); satır başında simge gibi parça.
+            var named = Names.Contains(core);
             var suspicious = bar
-                ? core.Length == 1 || core is "11" or "12" or "13" or "21" or "22" or "23" || (core.Length <= 2 && !core.Any(char.IsLetterOrDigit))
+                ? named || core.Length == 1 || core is "11" or "12" or "13" or "21" or "22" or "23" || (core.Length <= 2 && !core.Any(char.IsLetterOrDigit))
                 : i == 0 && words.Count >= 2 && IsIconToken(text);
             if (suspicious)
             {
                 var boxLeft = i > 0 ? Math.Min(word.Box.Left, (words[i - 1].Box.Right + word.Box.Left) / 2) : word.Box.Left - ((word.Box.Right - word.Box.Left) / 2);
                 var boxRight = i + 1 < words.Count ? Math.Max(word.Box.Right, (word.Box.Right + words[i + 1].Box.Left) / 2)
                                                    : word.Box.Right + ((word.Box.Right - word.Box.Left) / 2);
+                // OCR yalnız içteki harfleri kutulayabilir. Dış çerçeveye pay bırak, iki düğme arasındaki ortayı geçme.
+                var measuredButton = named && line.Words is { Count: > 0 };
+                if (measuredButton)
+                {
+                    var rim = linePx * 0.3 / frame.Width;
+                    boxLeft = Math.Max(boxLeft, word.Box.Left - rim);
+                    boxRight = Math.Min(boxRight, word.Box.Right + rim);
+                }
                 var box = Padded(boxLeft, boxRight);
                 // Satır başında okunan düğme adı ("R2 Swing") kareden doğrulanmadıkça işaretlenmez: bu kısa ipuçları
                 // eskisi gibi çevrilmez, düğme görünür kalır.
-                if ((bar && Names.Contains(core)) || Icon(box))
+                if (Icon(box))
                 {
-                    if (tokens.LastOrDefault() != Marker.ToString())
+                    if (measuredButton || tokens.LastOrDefault() != Marker.ToString())
                     {
                         tokens.Add(Marker.ToString());
                         icons.Add(new IconSlot(box, core));
@@ -375,12 +386,12 @@ public static class ButtonIcons
                     continue;
                 }
                 // Tanınmayan harfsiz parça ("•", "*"): simge değil, yazı da değil.
-                if (!core.Any(char.IsLetterOrDigit) && core is not ("+" or "/" or "&" or "-")) continue;
+                if (!named && !core.Any(char.IsLetterOrDigit) && core is not ("+" or "/" or "&" or "-")) continue;
             }
             tokens.Add(text);
         }
         // Tuş çubuğunun sonundaki simge: "SELECT ✕".
-        if (bar && tokens.Count > 0 && tokens[^1] != Marker.ToString() && lineBox.Right + spanX < 1)
+        if (bar && tokens.Count > 0 && tokens[^1] != Marker.ToString() && lineBox.Right < 1)
         {
             var box = Padded(lineBox.Right + (spanX * 0.08), lineBox.Right + spanX);
             if (Icon(box)) { tokens.Add(Marker.ToString()); icons.Add(new IconSlot(box, "")); }
