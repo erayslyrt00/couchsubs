@@ -1766,6 +1766,7 @@ final class AppModel: ObservableObject {
     /// Ek alanlar aynı dil, motor ve paketlerle okunur; ayrı bir okuyucu ve çevirmenle (altyazının sırasını beklemez).
     private func makeRegionWatcher(packLookup: ((String) -> PackMatch?)?) -> RegionWatcher {
         let watcher = RegionWatcher(reader: VisionReader(language: settings.sourceLanguage), translator: makeTranslator(), server: server)
+        watcher.prefetchesTranslations = true
         watcher.packLookup = packLookup
         watcher.skipsTurkish = settings.targetLanguage == "tr"
         watcher.onLog = { SubtitleLog.write($0) }
@@ -2142,7 +2143,7 @@ final class AppModel: ObservableObject {
     private func handle(_ frame: CGImage, capturedAt: Int) async {
         lastFrame = frame
         guard pipeline != nil else { return }
-        // Ek alanlar ayrı ve seyrek okunur (saniyede bir); altyazı okumasını beklemez, onu bekletmez.
+        // Ek alanlar ayrı okunur (en çok 250 ms'de bir); altyazı okumasını beklemez, onu bekletmez.
         let areas = settings.activeExtraAreas
         if regionWatcher == nil, !areas.isEmpty, let pipeline { regionWatcher = makeRegionWatcher(packLookup: pipeline.packLookup) }
         regionWatcher?.offer(frame, areas: areas)

@@ -4,6 +4,10 @@ package com.couchsubs.mobile.core
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.Executor
+import java.util.concurrent.FutureTask
+import java.util.concurrent.RejectedExecutionException
 import kotlin.math.abs
 
 /** Altyazı bölgesinin hazır seçimleri (Ayarlar › Altyazı alanı). Mac/iPhone AreaPreset.swift ve Windows AreaPreset.cs ile aynı. */
@@ -243,9 +247,77 @@ class RegionWatcher(
     private val sender: RegionSender,
     private val intervalMs: Long = DEFAULT_INTERVAL_MS,
     private val clock: () -> Long = monotonicClock,
+    /**
+     * Önceden istenen çevirilerin ([prefetchesTranslations]) sürdüğü yer; verilmezse turun iş parçacığında (testler).
+     * Henüz başlamamış önceden çeviri, yazı gösterilirken turun iş parçacığında çalıştırılır; beklemede kalmaz.
+     */
+    private val prefetchWork: Executor = Executor { it.run() },
 ) {
     companion object {
-        const val DEFAULT_INTERVAL_MS = 1000L
+        /**
+         * İki tur arasındaki en kısa süre. 1 saniyeyken yazı ancak 2–3 saniyede çevriliyordu (bir tur bekleme, bir tur
+         * kararlılık); izi değişmeyen alan yeniden okunmadığı için sık tur işlemciyi yormaz.
+         */
+        const val DEFAULT_INTERVAL_MS = 250L
+
+        /** Telefonda pil ve ısı için daha seyrek tur. */
+        const val PHONE_INTERVAL_MS = 450L
+
+        /**
+         * Ekrandakinden yalnız biraz farklı (ya da eksik) kararlı okuma en çok bu kadar tur bekletilir; o hâlde kalırsa
+         * gerçekten değişmiş sayılır ve gösterilir (görevin tek sözcüğü değişebilir: "Go to the barn" → "Go to the bank").
+         */
+        internal const val HOLD_LIMIT = 4
+
+        /** Çevirisi saklanan en çok yazı sayısı (oyun görev yazısını arada silip yeniden gösteriyor). */
+        private const val TRANSLATION_LIMIT = 64
+
+        /**
+         * Sadeleştirilmiş yazı; tuş simgeleri [ButtonIcons.MARKER] olarak kalır. Simgesi sonradan bulunan okuma
+         * ("SET DESTINATION ✕") eskisinden ayrılsın.
+         */
+        internal fun textKey(paragraphs: List<String>): String =
+            paragraphs.joinToString(" ").split(ButtonIcons.MARKER)
+                .map { TextMatch.normalize(it) }
+                .flatMapIndexed { index, part -> if (index == 0) listOf(part) else listOf(ButtonIcons.MARKER.toString(), part) }
+                .filter { it.isNotEmpty() }
+                .joinToString(" ")
+
+        private fun matches(a: String, b: String) = a == b || TextMatch.isSimilar(a, b, 0.75)
+
+        private fun words(text: String): List<String> =
+            text.split(' ').filter { token -> token.isNotEmpty() && token.any { it.isLetterOrDigit() } }
+
+        /** Okuma ekrandakinin eksik hâli mi: sözcükleri (biri tanınmayabilir) ekrandakinde sırasıyla geçiyor. */
+        internal fun isPartOf(reading: String, shown: String): Boolean {
+            val part = reading.split(' ').filter { it.isNotEmpty() }
+            val whole = shown.split(' ').filter { it.isNotEmpty() }
+            if (part.isEmpty() || part.size >= whole.size) return false
+            var at = 0
+            var misses = 0
+            for (word in part) {
+                val found = (at until whole.size).firstOrNull { matches(whole[it], word) }
+                if (found == null) {
+                    if (++misses > 1) return false
+                    continue
+                }
+                at = found + 1
+            }
+            return true
+        }
+
+        /**
+         * Okumanın bütün sözcükleri ekrandakinde geçiyor ama ekrandakinin bir sözcüğü kayıp (simge onun yerine okunmuş).
+         */
+        internal fun losesWords(reading: String, shown: String): Boolean {
+            val have = words(reading)
+            val whole = words(shown)
+            return have.isNotEmpty() && whole.any { word -> have.none { matches(it, word) } } &&
+                have.all { word -> whole.any { matches(it, word) } }
+        }
+
+        private fun iconCount(candidate: Candidate): Int =
+            candidate.paragraphs.sumOf { paragraph -> paragraph.count { it == ButtonIcons.MARKER } }
 
         /**
          * Okumadan çevrilecek parçalar, kutusu (kareye oranla) ve satır yüksekliği. Yazının içindeki kumanda simgeleri
@@ -262,7 +334,7 @@ class RegionWatcher(
             val heights = boxes.map { (it.bottom - it.top) * height }.sorted()
             val lineHeight = if (heights.isEmpty()) null else heights[heights.size / 2]
             var icons = ScreenText.paragraphIcons(lines)
-            var key = TextMatch.normalize(paragraphs.joinToString(" "))
+            var key = textKey(paragraphs)
             // Alanda birbirinden ayrı duran yazılar (başlık ile ayrı sütundaki hedef, alt alta iki bildirim) "Ekranı
             // çevir"deki gibi gruplanır; her grubun çevirisi TV'de kendi yerine konur. Tek grupta (ya da yeri bilinmeyen
             // satır varsa) eskisi gibi tek kutu. Anahtar grup yapısını da içerir: aynı yazı farklı gruplanırsa bloklar
@@ -278,10 +350,10 @@ class RegionWatcher(
                         .also { start += group.paragraphs.size }
                 }
                 blocks = list
-                key = TextMatch.normalize(paragraphs.joinToString(" ")) + "|" + list.joinToString(",") { it.count.toString() }
+                key = textKey(paragraphs) + "|" + list.joinToString(",") { it.count.toString() }
             }
             val cut = if (frame == null || icons.all { it.isEmpty() }) null else icons.map { ButtonIcons.withImages(it, frame) }
-            return Candidate(paragraphs, box, lineHeight, key, cut, blocks)
+            return Candidate(paragraphs, box, lineHeight, key, cut, blocks, textKey(paragraphs))
         }
 
         /**
@@ -310,11 +382,12 @@ class RegionWatcher(
 
     /**
      * [icons]: her parçadaki kumanda simgeleri (kareden kesilmiş), parçadaki sırasıyla. [blocks]: alanda birden çok ayrı
-     * yazı grubu varsa grupları; tek grupta null (tek kutu).
+     * yazı grubu varsa grupları; tek grupta null (tek kutu). [text]: yazının sadeleştirilmiş hâli (simgeler dahil,
+     * yerleşim hariç; [textKey]); okumaları karşılaştırmak için.
      */
     data class Candidate(
         val paragraphs: List<String>, val box: TextBox?, val lineHeight: Double?, val key: String,
-        val icons: List<List<IconSlot>>? = null, val blocks: List<Block>? = null,
+        val icons: List<List<IconSlot>>? = null, val blocks: List<Block>? = null, val text: String = "",
     )
 
     private class State {
@@ -322,6 +395,15 @@ class RegionWatcher(
         var lastRead: String? = null
         var candidate: Candidate? = null
         var shown = ""
+        /** Gösterilen yazının [Candidate.text]'i. */
+        var shownText = ""
+        /** Gösterilen yazıdaki tuş simgesi sayısı. */
+        var shownIcons = 0
+        /** Son gösterilen (boş olmayan) yazı; alan boşalınca da hatırlanır (yarım okumayı tanımak için). */
+        var remembered = ""
+        /** Bekletilen okuma ve kaç turdur bekletildiği ([HOLD_LIMIT]). */
+        var held: String? = null
+        var holds = 0
         var renderedKey: String? = null
         var renderedText: String? = null
         var renderedIcons: List<IconPlacement>? = null
@@ -341,6 +423,12 @@ class RegionWatcher(
     @Volatile var packLookup: ((String) -> PackMatch?)? = null
     /** Hedef dil Türkçe: yüksek güvenle Türkçe olan parça çevrilmez, aslı sayılır (#289). */
     @Volatile var skipsTurkish = true
+    /**
+     * Yazı kararlı mı diye bir tur beklenirken çevirisi şimdiden istensin ([prefetchWork]'te): doğrulanınca çoğu zaman
+     * hazırdır (gecikme çevirmenin süresi kadar kısalır; yazı belirirken okunan ara hâller de çevrilebildiği için biraz
+     * fazla karakter harcar).
+     */
+    @Volatile var prefetchesTranslations = false
 
     /** Tamamlanan tur ve okuma sayısı (testler için). */
     var passes = 0
@@ -417,6 +505,43 @@ class RegionWatcher(
         } else {
             state.lastRead = candidate.key
             state.candidate = candidate
+            // Yazı kararlı mı diye bir tur beklenirken çevirisi şimdiden istenir: doğrulanınca çoğu zaman hazırdır.
+            prefetch(candidate, state)
+        }
+    }
+
+    /**
+     * Kararlılık beklenirken çeviriyi başlatır. Ekrandaki yazı ve bekletilecek okuma (yarım ya da ekrandakine çok benzer)
+     * için istenmez.
+     */
+    private fun prefetch(candidate: Candidate, state: State) {
+        if (!prefetchesTranslations || candidate.key.isEmpty() || candidate.key == state.shown || shouldHold(candidate, state)) return
+        val (task, created) = translation(candidate)
+        if (!created) return
+        try {
+            prefetchWork.execute(task)
+        } catch (error: RejectedExecutionException) {
+            // Hizmet kapanıyor: iş saklı kalır, yazı gösterilirken turun iş parçacığında çalışır.
+        }
+    }
+
+    /**
+     * Okuma bekletilmeli mi (gösterilmeden önce bir iki tur daha okunur):
+     * - Az önce gösterilen yazının başı: yazı belirirken renkli sözcük geç geliyor ("Fly to a" ← "Fly to a drop");
+     *   görev her belirişinde iki kez çevrilip değişiyordu.
+     * - Ekrandakiyle neredeyse aynı ya da onun eksik hâli, ve daha çok simge bulmamış: harita arkada oynarken tuş çubuğu
+     *   "SET DESTINATION ✕ EXIT ○" / "SET DESTINATIPN EXIT ○" diye okunup kutu sürekli değişiyordu.
+     * - Daha çok simge bulmuş ama ekrandakinin bir sözcüğünü simgeyle değiştirmiş ("Find □" ← "Find Donnie").
+     */
+    private fun shouldHold(candidate: Candidate, state: State): Boolean {
+        val text = candidate.text
+        if (text.isEmpty()) return false
+        if (state.remembered.length > text.length && state.remembered.startsWith("$text ")) return true
+        if (state.shownText.isEmpty() || state.shownText == text) return false
+        return if (iconCount(candidate) <= state.shownIcons) {
+            TextMatch.isSimilar(state.shownText, text, 0.85) || isPartOf(text, state.shownText)
+        } else {
+            losesWords(text, state.shownText)
         }
     }
 
@@ -438,8 +563,25 @@ class RegionWatcher(
             state.renderedBlocks = moved
             return
         }
+        if (shouldHold(candidate, state)) {
+            if (state.held != candidate.key) {
+                state.held = candidate.key
+                state.holds = 0
+            }
+            if (++state.holds <= HOLD_LIMIT) {
+                // Sonraki tur (iz değişmese de) bu okumayı yeniden dener; o hâlde kalırsa sınırda gösterilir.
+                state.candidate = candidate
+                return
+            }
+        }
+        state.held = null
+        state.holds = 0
         val previousShown = state.shown
+        val previousText = state.shownText
+        val previousIcons = state.shownIcons
         state.shown = candidate.key
+        state.shownText = candidate.text
+        state.shownIcons = iconCount(candidate)
         if (candidate.key.isEmpty()) {
             sender.sendRegion(area.id, "", null, null)
             state.renderedKey = candidate.key
@@ -449,23 +591,27 @@ class RegionWatcher(
             state.renderedLineHeight = null
             return
         }
-        // Simgeler paket aramasında yok sayılır, çeviride uydurma adlarla korunur (IconText).
-        val prepared = candidate.paragraphs.map { IconText.protect(it) }
+        state.remembered = candidate.text
         val translated = try {
-            // Zaten Türkçe olan parça çevrilmez: aslı kalır, tümü öyleyse kutu gösterilmez.
-            candidate.paragraphs.mapIndexed { i, paragraph ->
-                packLookup?.invoke(IconText.plain(paragraph))?.text
-                    ?: if (skipsTurkish && TurkishText.isSure(paragraph)) paragraph else translator.translate(prepared[i].text)
-            }
+            // Önceden istenmiş ya da daha önce gösterilmiş yazı: çevirmene yeniden gidilmez. Önceden istenen çeviri
+            // henüz başlamadıysa burada çalışır (run), sürüyorsa beklenir (get).
+            val (task, _) = translation(candidate)
+            task.run()
+            val result = task.get()
+            // Aynı anahtar başka parça bölmesiyle okunmuş olabilir (satır kırılması): sayı tutmazsa bu bölmeyle çevrilir.
+            if (result.size == candidate.paragraphs.size) result else translateNow(candidate.paragraphs)
         } catch (error: Exception) {
             // Çevrilemedi: önceki yazı kutuda kalır, aynı yazı sonraki turda yeniden denenir.
             if (started == session && state.shown == candidate.key) {
                 state.shown = previousShown
+                state.shownText = previousText
+                state.shownIcons = previousIcons
                 state.candidate = candidate
             }
             return
         }
         if (started != session || state.shown != candidate.key) return
+        val prepared = candidate.paragraphs.map { IconText.protect(it) }
         val slots = mutableListOf<IconSlot>()
         val text = mutableListOf<String>()
         for ((i, source) in candidate.paragraphs.withIndex()) {
@@ -500,11 +646,51 @@ class RegionWatcher(
         state.renderedKey = candidate.key
     }
 
+    /** Parçaların çevirisinin işi; başarısız biterse [failed] çağrılır (saklananlardan çıkarılsın, sonra yeniden denensin). */
+    private class Pending(work: Callable<List<String>>, private val failed: (Pending) -> Unit) : FutureTask<List<String>>(work) {
+        override fun done() {
+            if (isCancelled || runCatching { get() }.isFailure) failed(this)
+        }
+    }
+
+    /**
+     * Süren ya da bitmiş çeviriler (anahtar → parçaların çevirisi). Oyun görev yazısını arada silip yeniden gösteriyor;
+     * aynı yazı gelince çevirmene yeniden gidilmez, anında gösterilir. Önceden istenen çeviri de buradan alınır.
+     */
+    private val translations = HashMap<String, Pending>()
+
+    /**
+     * Yazının çeviri işini verir: saklanan (süren ya da bitmiş) ya da yeni kurulan (çalıştırılmamış; ikincisi true).
+     * Başarısız çeviri saklanmaz, sonra yeniden denenir.
+     */
+    private fun translation(candidate: Candidate): Pair<Pending, Boolean> = synchronized(translations) {
+        translations[candidate.key]?.let { return it to false }
+        if (translations.size >= TRANSLATION_LIMIT) translations.values.removeAll { it.isDone }
+        val key = candidate.key
+        val paragraphs = candidate.paragraphs
+        val task = Pending(Callable { translateNow(paragraphs) }) { failed ->
+            synchronized(translations) { if (translations[key] === failed) translations.remove(key) }
+        }
+        translations[key] = task
+        task to true
+    }
+
+    private fun translateNow(paragraphs: List<String>): List<String> {
+        // Simgeler paket aramasında yok sayılır, çeviride uydurma adlarla korunur (IconText).
+        val prepared = paragraphs.map { IconText.protect(it) }
+        // Zaten Türkçe olan parça çevrilmez: aslı kalır, tümü öyleyse kutu gösterilmez.
+        return paragraphs.mapIndexed { i, paragraph ->
+            packLookup?.invoke(IconText.plain(paragraph))?.text
+                ?: if (skipsTurkish && TurkishText.isSure(paragraph)) paragraph else translator.translate(prepared[i].text)
+        }
+    }
+
     /** Çeviri durdu: süren tur bırakılır, TV'deki ek alan kutuları kalkar. */
     fun reset() {
         session++
         busy = false
         lastPass = null
+        synchronized(translations) { translations.clear() }
         val anyShown = synchronized(lock) {
             val shown = states.values.any { it.shown.isNotEmpty() }
             states.clear()

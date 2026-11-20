@@ -43,8 +43,19 @@ extension SubtitleServer: RegionSending {}
 ///   yazıları havuzu kirletmesin).
 @MainActor
 public final class RegionWatcher {
-    /// İki tur arasındaki en kısa süre.
-    public static let defaultIntervalMs = 1000
+    /// İki tur arasındaki en kısa süre. 1 saniyeyken yazı ancak 2–3 saniyede çevriliyordu (bir tur bekleme, bir tur
+    /// kararlılık); görüntüsü değişmeyen alan yeniden okunmadığı için sık tur işlemciyi yormaz.
+    public static let defaultIntervalMs = 250
+
+    /// Telefonda pil ve ısı için daha seyrek tur.
+    public static let phoneIntervalMs = 450
+
+    /// Ekrandakinden yalnız biraz farklı (ya da eksik) kararlı okuma en çok bu kadar tur bekletilir; o hâlde kalırsa
+    /// gerçekten değişmiş sayılır ve gösterilir (görevin tek sözcüğü değişebilir: "Go to the barn" → "Go to the bank").
+    static let holdLimit = 4
+
+    /// Çevirisi saklanan en çok yazı sayısı (oyun görev yazısını arada silip yeniden gösteriyor).
+    private static let translationLimit = 64
 
     private struct State {
         var signature: [UInt8]?
@@ -54,6 +65,15 @@ public final class RegionWatcher {
         var candidate: Candidate?
         /// TV'de şu an çevirisi duran yazı (sadeleştirilmiş); boşsa kutu yok.
         var shown = ""
+        /// Gösterilen yazının `Candidate.text`'i.
+        var shownText = ""
+        /// Gösterilen yazıdaki tuş simgesi sayısı.
+        var shownIcons = 0
+        /// Son gösterilen (boş olmayan) yazı; alan boşalınca da hatırlanır (yarım okumayı tanımak için).
+        var remembered = ""
+        /// Bekletilen okuma ve kaç turdur bekletildiği (`holdLimit`).
+        var held: String?
+        var holds = 0
         /// Son gönderilen çeviri, aynı yazı yeni bir konuma taşındığında yeniden kullanılır.
         var renderedKey: String?
         var renderedText: String?
@@ -83,6 +103,32 @@ public final class RegionWatcher {
         var icons: [[IconSlot]]? = nil
         /// Alanda birden çok ayrı yazı grubu varsa grupları; tek grupta nil (tek kutu).
         var blocks: [Block]? = nil
+        /// Yazının sadeleştirilmiş hâli (simgeler dahil, yerleşim hariç); okumaları karşılaştırmak için.
+        var text = ""
+    }
+
+    /// Sadeleştirilmiş yazı; tuş simgeleri `ButtonIcons.marker` olarak kalır. Simgesi sonradan bulunan okuma
+    /// ("SET DESTINATION ✕") eskisinden ayrılsın.
+    static func textKey(_ paragraphs: [String]) -> String {
+        var parts: [String] = []
+        for part in paragraphs.joined(separator: " ").split(separator: ButtonIcons.marker, omittingEmptySubsequences: false) {
+            if !parts.isEmpty { parts.append(String(ButtonIcons.marker)) }
+            parts.append(TextMatch.normalize(String(part)))
+        }
+        return parts.filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// Paragrafların çevirisi (çevrilmeyen parça nil) ve kaçının paketten geldiği.
+    struct Translation: Sendable {
+        var result: [String?]
+        var fromPack: Int
+    }
+
+    /// Süren ya da bitmiş bir çeviri; `token` sonradan biten eski görevin yeni kaydı silmesini önler.
+    struct StoredTranslation {
+        var token: Int
+        var task: Task<Translation, Error>
+        var finished = false
     }
 
     private let reader: TextReader
@@ -94,11 +140,18 @@ public final class RegionWatcher {
     private var lastPass: Int?
     private var running: Task<Void, Never>?
     private var session = 0
+    /// Süren ya da bitmiş çeviriler (anahtar → çeviri). Oyun görev yazısını arada silip yeniden gösteriyor; aynı yazı
+    /// gelince çevirmene yeniden gidilmez, anında gösterilir. Önceden istenen çeviri de buradan alınır.
+    private var translations: [String: StoredTranslation] = [:]
+    private var translationTokens = 0
 
     /// Oyun paketi: satırın hazır Türkçesi (ana altyazıyla aynı arama).
     public var packLookup: ((String) -> PackMatch?)?
     /// Hedef dil Türkçe: yüksek güvenle Türkçe olan parça çevrilmez, aslı sayılır (#289).
     public var skipsTurkish = true
+    /// Yazı kararlı mı diye bir tur beklenirken çevirisi şimdiden istensin: doğrulanınca çoğu zaman hazırdır (gecikme
+    /// çevirmenin süresi kadar kısalır; yazı belirirken okunan ara hâller de çevrilebildiği için biraz fazla karakter harcar).
+    public var prefetchesTranslations = false
     public var onLog: ((String) -> Void)?
     /// Her okumanın süresi (ms; ölçüm için).
     public var onReadMs: ((Int) -> Void)?
@@ -196,7 +249,68 @@ public final class RegionWatcher {
             state.lastRead = candidate.key
             state.candidate = candidate
             states[area.id] = state
+            // Yazı kararlı mı diye bir tur beklenirken çevirisi şimdiden istenir: doğrulanınca çoğu zaman hazırdır.
+            prefetch(candidate, state: state)
         }
+    }
+
+    /// Kararlılık beklenirken çeviriyi başlatır. Ekrandaki yazı, bekletilecek okuma (yarım ya da ekrandakine çok benzer)
+    /// ve boş yazı için istenmez. Hata asıl gösterimde görülür; orada yeniden denenir.
+    private func prefetch(_ candidate: Candidate, state: State) {
+        guard prefetchesTranslations, !candidate.key.isEmpty, candidate.key != state.shown,
+              !Self.shouldHold(candidate, state) else { return }
+        translation(for: candidate)
+    }
+
+    private static func iconCount(_ candidate: Candidate) -> Int {
+        candidate.paragraphs.reduce(0) { count, paragraph in count + paragraph.filter { $0 == ButtonIcons.marker }.count }
+    }
+
+    /// Okuma bekletilmeli mi (gösterilmeden önce bir iki tur daha okunur):
+    /// - Az önce gösterilen yazının başı: yazı belirirken renkli sözcük geç geliyor ("Fly to a" ← "Fly to a drop");
+    ///   görev her belirişinde iki kez çevrilip değişiyordu.
+    /// - Ekrandakiyle neredeyse aynı ya da onun eksik hâli, ve daha çok simge bulmamış: harita arkada oynarken tuş
+    ///   çubuğu "SET DESTINATION ✕ EXIT ○" / "SET DESTINATIPN EXIT ○" diye okunup kutu sürekli değişiyordu.
+    /// - Daha çok simge bulmuş ama ekrandakinin bir sözcüğünü simgeyle değiştirmiş ("Find □" ← "Find Donnie").
+    private static func shouldHold(_ candidate: Candidate, _ state: State) -> Bool {
+        guard !candidate.text.isEmpty else { return false }
+        if state.remembered.count > candidate.text.count, state.remembered.hasPrefix(candidate.text + " ") { return true }
+        if state.shownText.isEmpty || state.shownText == candidate.text { return false }
+        return iconCount(candidate) <= state.shownIcons
+            ? TextMatch.isSimilar(state.shownText, candidate.text, threshold: 0.85) || isPartOf(candidate.text, state.shownText)
+            : losesWords(candidate.text, state.shownText)
+    }
+
+    private static func matches(_ a: String, _ b: String) -> Bool { a == b || TextMatch.isSimilar(a, b, threshold: 0.75) }
+
+    private static func words(_ text: String) -> [String] {
+        text.split(separator: " ").filter { token in token.contains { $0.isLetter || $0.isNumber } }.map(String.init)
+    }
+
+    /// Okuma ekrandakinin eksik hâli mi: sözcükleri (biri tanınmayabilir) ekrandakinde sırasıyla geçiyor.
+    static func isPartOf(_ reading: String, _ shown: String) -> Bool {
+        let part = reading.split(separator: " ").map(String.init)
+        let whole = shown.split(separator: " ").map(String.init)
+        guard !part.isEmpty, part.count < whole.count else { return false }
+        var at = 0, misses = 0
+        for word in part {
+            guard let found = whole[at...].firstIndex(where: { matches($0, word) }) else {
+                misses += 1
+                if misses > 1 { return false }
+                continue
+            }
+            at = found + 1
+        }
+        return true
+    }
+
+    /// Okumanın bütün sözcükleri ekrandakinde geçiyor ama ekrandakinin bir sözcüğü kayıp (simge onun yerine okunmuş).
+    static func losesWords(_ reading: String, _ shown: String) -> Bool {
+        let have = words(reading)
+        let whole = words(shown)
+        return !have.isEmpty
+            && whole.contains { word in !have.contains { matches($0, word) } }
+            && have.allSatisfy { word in whole.contains { matches($0, word) } }
     }
 
     /// Okumadan çevrilecek parçalar: kumanda ipuçları, yazı tanıma çöpleri ve harfsiz göstergeler ("23m", "9") atılır;
@@ -213,7 +327,7 @@ public final class RegionWatcher {
         let height = region.bottom - region.top
         let heights = boxes.map { ($0.bottom - $0.top) * height }.sorted()
         let lineHeight = heights.isEmpty ? nil : heights[heights.count / 2]
-        var key = TextMatch.normalize(paragraphs.joined(separator: " "))
+        var key = textKey(paragraphs)
         var icons = ScreenTranslation.paragraphIcons(lines)
         // Alanda birbirinden ayrı duran yazılar (başlık ile ayrı sütundaki hedef, alt alta iki bildirim) "Ekranı çevir"deki
         // gibi gruplanır; her grubun çevirisi TV'de kendi yerine konur. Tek grupta (ya da yeri bilinmeyen satır varsa)
@@ -231,13 +345,14 @@ public final class RegionWatcher {
                 start += group.paragraphs.count
             }
             blocks = list
-            key = TextMatch.normalize(paragraphs.joined(separator: " ")) + "|" + list.map { String($0.count) }.joined(separator: ",")
+            key = textKey(paragraphs) + "|" + list.map { String($0.count) }.joined(separator: ",")
         }
         var cut: [[IconSlot]]?
         if let frame, icons.contains(where: { !$0.isEmpty }) {
             cut = icons.map { ButtonIcons.withImages($0, frame: frame) }
         }
-        return Candidate(paragraphs: paragraphs, box: box, lineHeight: lineHeight, key: key, icons: cut, blocks: blocks)
+        return Candidate(paragraphs: paragraphs, box: box, lineHeight: lineHeight, key: key, icons: cut, blocks: blocks,
+                         text: textKey(paragraphs))
     }
 
     /// Kararlı yazı: öncekinden farklıysa çevrilip gönderilir, boşsa kutu kalkar.
@@ -267,8 +382,27 @@ public final class RegionWatcher {
             states[area.id] = state
             return
         }
-        let previousShown = state.shown
-        states[area.id]?.shown = candidate.key
+        if Self.shouldHold(candidate, state) {
+            if state.held != candidate.key {
+                state.held = candidate.key
+                state.holds = 0
+            }
+            state.holds += 1
+            if state.holds <= Self.holdLimit {
+                // Sonraki tur (iz değişmese de) bu okumayı yeniden dener; o hâlde kalırsa sınırda gösterilir.
+                state.candidate = candidate
+                states[area.id] = state
+                return
+            }
+        }
+        state.held = nil
+        state.holds = 0
+        let previous = (shown: state.shown, text: state.shownText, icons: state.shownIcons)
+        state.shown = candidate.key
+        state.shownText = candidate.text
+        state.shownIcons = Self.iconCount(candidate)
+        if !candidate.key.isEmpty { state.remembered = candidate.text }
+        states[area.id] = state
         guard !candidate.key.isEmpty else {
             server.sendRegion(id: area.id, text: "", box: nil, lineHeight: nil)
             states[area.id]?.renderedKey = candidate.key
@@ -280,22 +414,27 @@ public final class RegionWatcher {
             return
         }
         let session = self.session
-        // Simgeler paket aramasında yok sayılır, çeviride uydurma adlarla korunur (`IconText`).
-        let prepared = candidate.paragraphs.map(IconText.protect)
-        let translated: [String?]
-        var fromPack = 0
+        // Önceden istenmiş ya da daha önce gösterilmiş yazı: çevirmene yeniden gidilmez.
+        let ready = translations[Self.translationKey(candidate)] != nil
+        let translation: Translation
         do {
-            translated = try await translate(candidate.paragraphs, prepared: prepared, packHits: &fromPack)
+            translation = try await self.translation(for: candidate).value
         } catch {
             guard session == self.session else { return }
             if states[area.id]?.shown == candidate.key {
-                states[area.id]?.shown = previousShown
+                states[area.id]?.shown = previous.shown
+                states[area.id]?.shownText = previous.text
+                states[area.id]?.shownIcons = previous.icons
                 states[area.id]?.candidate = candidate
             }
             onLog?("ek alan \(area.name): \(SubtitleLog.excerpt(IconText.plain(candidate.paragraphs.joined(separator: " ")))) çevrilemedi (\(error))")
             return
         }
         guard session == self.session, states[area.id]?.shown == candidate.key else { return }
+        let translated = translation.result
+        let fromPack = translation.fromPack
+        // Simgeler çeviride uydurma adlarla korunmuştu (`IconText`); adlar yerlerine konur.
+        let prepared = candidate.paragraphs.map(IconText.protect)
         var slots: [IconSlot] = []
         var text: [String] = []
         for (index, source) in candidate.paragraphs.enumerated() {
@@ -319,7 +458,7 @@ public final class RegionWatcher {
             states[area.id]?.renderedBlocks = nil
             return
         }
-        let origin = fromPack == candidate.paragraphs.count ? "paket" : fromPack > 0 ? "paket+motor" : "motor"
+        let origin = ready ? "hazır çeviri" : fromPack == candidate.paragraphs.count ? "paket" : fromPack > 0 ? "paket+motor" : "motor"
         onLog?("ek alan \(area.name): \(SubtitleLog.excerpt(IconText.plain(candidate.paragraphs.joined(separator: " ")))) → \(origin)")
         let rendered = IconText.render(text.joined(separator: "\n"), slots: slots)
         let icons = rendered.icons.isEmpty ? nil : rendered.icons
@@ -352,11 +491,40 @@ public final class RegionWatcher {
         return result
     }
 
+    /// Saklanan çevirinin anahtarı: paragraflar ayrı ayrı. Aynı yazı başka satırlardan bölünürse paragraf sayısı değişir;
+    /// `candidate.key` aynı kalsa da eski çeviri kullanılmaz (dizinin dışına taşardı).
+    static func translationKey(_ candidate: Candidate) -> String { candidate.paragraphs.joined(separator: "\n") }
+
+    /// Çevirinin görevini başlatır ya da süreni / bitmişi verir. Başarısız çeviri saklanmaz, sonra yeniden denenir.
+    @discardableResult
+    private func translation(for candidate: Candidate) -> Task<Translation, Error> {
+        let key = Self.translationKey(candidate)
+        if let known = translations[key] { return known.task }
+        if translations.count >= Self.translationLimit { translations = translations.filter { !$0.value.finished } }
+        translationTokens += 1
+        let token = translationTokens
+        let paragraphs = candidate.paragraphs
+        let task = Task<Translation, Error> { [weak self] in
+            guard let self else { throw CancellationError() }
+            do {
+                let translation = try await self.translate(paragraphs)
+                if self.translations[key]?.token == token { self.translations[key]?.finished = true }
+                return translation
+            } catch {
+                if self.translations[key]?.token == token { self.translations[key] = nil }
+                throw error
+            }
+        }
+        translations[key] = StoredTranslation(token: token, task: task)
+        return task
+    }
+
     /// Parçalar önce pakette aranır; kalanlar çeviri motoruna gider (yapay zekâda tek istekte). Motora simgeleri adlarla
-    /// korunmuş metin (`prepared`) gider. Çevrilemeyen parça nil kalır.
-    private func translate(_ paragraphs: [String], prepared: [IconText.Protected], packHits: inout Int) async throws -> [String?] {
+    /// korunmuş metin gider (`IconText`; simgeler paket aramasında yok sayılır). Çevrilemeyen parça nil kalır.
+    private func translate(_ paragraphs: [String]) async throws -> Translation {
+        let prepared = paragraphs.map(IconText.protect)
         var result = paragraphs.map { packLookup?(IconText.plain($0))?.text }
-        packHits = result.compactMap { $0 }.count
+        let fromPack = result.compactMap { $0 }.count
         // Zaten Türkçe olan parça çevrilmez: aslı kalır, tümü öyleyse kutu gösterilmez.
         for index in result.indices where result[index] == nil && skipsTurkish && TurkishText.isSure(paragraphs[index]) {
             result[index] = paragraphs[index]
@@ -364,11 +532,11 @@ public final class RegionWatcher {
         let missing = result.indices.filter { result[$0] == nil }
         if !missing.isEmpty {
             let texts = missing.map { prepared[$0].text }
-            let translations = translator.translatesTogether ? try await translator.translateAll(texts)
+            let translated = translator.translatesTogether ? try await translator.translateAll(texts)
                 : try await sequential(texts)
-            for (index, translation) in zip(missing, translations) { result[index] = translation }
+            for (index, translation) in zip(missing, translated) { result[index] = translation }
         }
-        return result
+        return Translation(result: result, fromPack: fromPack)
     }
 
     private func sequential(_ texts: [String]) async throws -> [String] {
@@ -383,6 +551,7 @@ public final class RegionWatcher {
         running?.cancel()
         running = nil
         lastPass = nil
+        translations.removeAll()
         let anyShown = states.values.contains { !$0.shown.isEmpty }
         states.removeAll()
         if anyShown { server.clearRegions() }

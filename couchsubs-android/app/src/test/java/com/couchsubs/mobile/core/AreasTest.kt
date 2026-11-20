@@ -245,7 +245,7 @@ class AreasTest {
             { "TR: $it" }, recorder, clock = { now })
         val area = ExtraArea(id = "q", name = "Quest", region = ExtraAreaPreset.QUEST.region)
         for (step in 0..20) {
-            now = step * 100L
+            now = step * RegionWatcher.DEFAULT_INTERVAL_MS / 10
             watcher.offer(listOf(area), { RegionWatcher.Crop(Unit, signature(10)) }) { it.run() }
         }
         assertEquals(3, watcher.passes)
@@ -354,6 +354,104 @@ class AreasTest {
         assertEquals("n" to "", recorder.sent.last())
         watcher.reset()
         assertEquals(0, recorder.cleared)
+    }
+
+    /** Görev alanı: [text] okunur, çevirmene gidenler [calls]'a yazılır (Windows RegionWatcherTests ile aynı durumlar). */
+    private inner class Scene(prefetch: Boolean = false) {
+        var text = ""
+        val calls = mutableListOf<String>()
+        val recorder = Recorder()
+        val watcher = RegionWatcher({ Reading.fromText(text) }, { calls.add(it); "TR: $it" }, recorder)
+            .apply { prefetchesTranslations = prefetch }
+
+        val sent: List<String> get() = recorder.sent.map { it.second }
+
+        fun pass(shade: Int) = watcher.pass(setOf(quest.id), listOf(quest to RegionWatcher.Crop(Unit, signature(shade))))
+
+        /** Kararlı okunup gösterilen yazı (iki tur aynı iz). */
+        fun show(text: String, shade: Int) {
+            this.text = text
+            pass(shade)
+            pass(shade)
+        }
+    }
+
+    /** Görev yazısı arada kaybolup yeniden çıkınca çevirmene yeniden gidilmez. */
+    @Test
+    fun reappearingTextUsesTheEarlierTranslation() {
+        val scene = Scene()
+        scene.show("Find the blacksmith", 10)
+        scene.show("", 90)
+        scene.show("Find the blacksmith", 170)
+        assertEquals(listOf("Find the blacksmith"), scene.calls)
+        assertEquals(listOf("TR: Find the blacksmith", "", "TR: Find the blacksmith"), scene.sent)
+    }
+
+    /** Önceden çeviri açıkken çeviri yazı kararlı mı diye beklenirken istenir; gösterimde yeniden istenmez. */
+    @Test
+    fun prefetchedTranslationIsReusedWhenTheTextIsConfirmed() {
+        val scene = Scene(prefetch = true)
+        scene.text = "Find the blacksmith"
+        scene.pass(10)
+        assertEquals(listOf("Find the blacksmith"), scene.calls)
+        assertTrue(scene.sent.isEmpty())
+        scene.pass(10)
+        assertEquals(listOf("Find the blacksmith"), scene.calls)
+        assertEquals(listOf("TR: Find the blacksmith"), scene.sent)
+    }
+
+    /**
+     * Yazı belirirken renkli sözcük geç geliyor: az önce gösterilen yazının başı okunursa tamamı beklenir; görev iki kez
+     * çevrilip değişmez.
+     */
+    @Test
+    fun partialReadingOfTheLastTextWaitsForTheWholeText() {
+        val scene = Scene()
+        scene.show("Fly to a drop point", 10)
+        scene.show("", 90)
+        scene.show("Fly to a", 170)
+        scene.text = "Fly to a drop point"
+        scene.pass(250)
+        scene.pass(250)
+        assertEquals(listOf("Fly to a drop point"), scene.calls)
+        assertEquals(listOf("TR: Fly to a drop point", "", "TR: Fly to a drop point"), scene.sent)
+    }
+
+    /** Arka plan oynarken ekrandakinin harfi bozuk okuması kutuyu değiştirmez. */
+    @Test
+    fun nearlySameReadingKeepsTheShownText() {
+        val scene = Scene()
+        scene.show("SET DESTINATION EXIT", 10)
+        scene.show("SET DESTINATIPN EXIT", 90)
+        scene.show("SET DESTINATION EXIT", 170)
+        assertEquals(listOf("SET DESTINATION EXIT"), scene.calls)
+        assertEquals(1, scene.sent.size)
+    }
+
+    /** Yalnız bir sözcüğü değişen görev, o hâlde kalırsa birkaç tur sonra gösterilir. */
+    @Test
+    fun nearlySameTextThatStaysIsShownAfterTheHoldLimit() {
+        val scene = Scene()
+        scene.show("Go to the barn", 10)
+        scene.show("Go to the bank", 90)
+        assertEquals(1, scene.sent.size)
+        repeat(RegionWatcher.HOLD_LIMIT) { scene.pass(90) }
+        assertEquals(listOf("TR: Go to the barn", "TR: Go to the bank"), scene.sent)
+    }
+
+    @Test
+    fun partialAndWordLosingReadingsAreRecognised() {
+        assertTrue(RegionWatcher.isPartOf("add marker set destination", "add marker set destination exit"))
+        assertFalse(RegionWatcher.isPartOf("talk to arthur", "meet arthur at the barn"))
+        assertTrue(RegionWatcher.losesWords("find ${ButtonIcons.MARKER}", "find donnie"))
+        assertFalse(RegionWatcher.losesWords("hold ${ButtonIcons.MARKER} to climb", "hold to climb"))
+    }
+
+    @Test
+    fun textKeyKeepsButtonIcons() {
+        val marker = ButtonIcons.MARKER
+        assertEquals("set destination $marker exit", RegionWatcher.textKey(listOf("SET DESTINATION $marker EXIT")))
+        assertTrue(RegionWatcher.textKey(listOf("SET DESTINATION")) != RegionWatcher.textKey(listOf("SET DESTINATION $marker")))
     }
 
     @Test

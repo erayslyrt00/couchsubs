@@ -177,10 +177,12 @@ class TranslationService : Service() {
     @Volatile private var region = CropRegion()
     @Volatile private var extraAreas: List<com.couchsubs.mobile.core.ExtraArea> = emptyList()
     @Volatile private var areasListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
-    /** Ek alanları ana altyazıdan ayrı ve seyrek (saniyede bir) okuyan; kendi okuyucusu ve iş parçacığı var. */
+    /** Ek alanları ana altyazıdan ayrı ve seyrek (RegionWatcher.PHONE_INTERVAL_MS'te bir) okuyan; kendi okuyucusu ve iş parçacığı var. */
     @Volatile private var regionWatcher: com.couchsubs.mobile.core.RegionWatcher? = null
     @Volatile private var regionReader: SubtitleReader? = null
     private val regionWork = Executors.newSingleThreadExecutor { Thread(it, "CouchSubs extra areas").apply { isDaemon = true; priority = Thread.MIN_PRIORITY } }
+    /** Ek alan yazısı kararlı mı diye beklenirken çevirisinin önceden istendiği iş parçacığı (turu bekletmesin). */
+    private val regionPrefetch = Executors.newSingleThreadExecutor { Thread(it, "CouchSubs extra area translations").apply { isDaemon = true; priority = Thread.MIN_PRIORITY } }
     private val lifecycle = Any()
     @Volatile private var destroyed = false
     @Volatile private var streaming = false
@@ -377,8 +379,11 @@ class TranslationService : Service() {
         // Ek alanlar aynı paketlerle ve aynı motorla (ayrı bir örnekle; altyazının bağlamına karışmasın) çevrilir; satırları
         // ortak havuza önerilmez (arayüz yazıları havuzu kirletmesin). Mac ve iPhone ile aynı.
         val areaReader = SubtitleReader().also { regionReader = it }
+        // Telefonda tur seyrektir (pil ve ısı); kararlılık beklenirken çeviri önceden istenir (Windows ile aynı).
         regionWatcher = com.couchsubs.mobile.core.RegionWatcher({ crop -> areaReader.read(crop.pixels as RegionPixels) },
-            engineTranslator(free.separate()), subtitleServer).apply {
+            engineTranslator(free.separate()), subtitleServer,
+            intervalMs = com.couchsubs.mobile.core.RegionWatcher.PHONE_INTERVAL_MS, prefetchWork = regionPrefetch).apply {
+            prefetchesTranslations = true
             packLookup = { text ->
                 if (packTitles != null && settings.packsEnabled) {
                     library.setDisabled(settings.disabledPacks)
@@ -420,7 +425,7 @@ class TranslationService : Service() {
                     ocr.execute { read(pixels, area, capturedAt) }
                 }
             }
-            // Ek alanlar saniyede bir, kendi iş parçacığında okunur; altyazı okumasını beklemez, onu bekletmez.
+            // Ek alanlar seyrek (RegionWatcher.PHONE_INTERVAL_MS), kendi iş parçacığında okunur; altyazı okumasını beklemez, onu bekletmez.
             regionWatcher?.offer(extraAreas, { r ->
                 SubtitleReader.copyRegion(frame, r)?.let {
                     com.couchsubs.mobile.core.RegionWatcher.Crop(it, com.couchsubs.mobile.core.RegionSignature.of(it.nv21, it.width, it.height), it.gray)
@@ -790,6 +795,7 @@ class TranslationService : Service() {
         background.shutdownNow()
         ocr.shutdownNow()
         regionWork.shutdownNow()
+        regionPrefetch.shutdownNow()
         screenGeneration.incrementAndGet()
         screenTask?.cancel(true)
         screenWork.shutdownNow()
