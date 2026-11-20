@@ -256,14 +256,8 @@ class RegionWatcher(
     private val prefetchTranslator: TextTranslator = translator,
 ) {
     companion object {
-        /**
-         * İki tur arasındaki en kısa süre. 1 saniyeyken yazı ancak 2–3 saniyede çevriliyordu (bir tur bekleme, bir tur
-         * kararlılık); izi değişmeyen alan yeniden okunmadığı için sık tur işlemciyi yormaz.
-         */
-        const val DEFAULT_INTERVAL_MS = 250L
-
-        /** Telefonda pil ve ısı için daha seyrek tur. */
-        const val PHONE_INTERVAL_MS = 450L
+        /** İki tur arasındaki en kısa süre; iPhone ve Mac ile aynı (saniyede en çok bir tur, pil ve ısı için). */
+        const val DEFAULT_INTERVAL_MS = 1000L
 
         /**
          * Ekrandakinden yalnız biraz farklı (ya da eksik) kararlı okuma en çok bu kadar tur bekletilir; o hâlde kalırsa

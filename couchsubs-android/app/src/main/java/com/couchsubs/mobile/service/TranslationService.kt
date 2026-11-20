@@ -177,7 +177,7 @@ class TranslationService : Service() {
     @Volatile private var region = CropRegion()
     @Volatile private var extraAreas: List<com.couchsubs.mobile.core.ExtraArea> = emptyList()
     @Volatile private var areasListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
-    /** Ek alanları ana altyazıdan ayrı ve seyrek (RegionWatcher.PHONE_INTERVAL_MS'te bir) okuyan; kendi okuyucusu ve iş parçacığı var. */
+    /** Ek alanları ana altyazıdan ayrı ve seyrek (saniyede bir) okuyan; kendi okuyucusu ve iş parçacığı var. */
     @Volatile private var regionWatcher: com.couchsubs.mobile.core.RegionWatcher? = null
     @Volatile private var regionReader: SubtitleReader? = null
     private val regionWork = Executors.newSingleThreadExecutor { Thread(it, "CouchSubs extra areas").apply { isDaemon = true; priority = Thread.MIN_PRIORITY } }
@@ -384,7 +384,7 @@ class TranslationService : Service() {
         val earlyTranslator = if (settings.engine == EngineChoice.FREE && packTitles == null) engineTranslator(free.separate()) else null
         regionWatcher = com.couchsubs.mobile.core.RegionWatcher({ crop -> areaReader.read(crop.pixels as RegionPixels) },
             areaTranslator, subtitleServer,
-            intervalMs = com.couchsubs.mobile.core.RegionWatcher.PHONE_INTERVAL_MS, prefetchWork = regionPrefetch,
+            prefetchWork = regionPrefetch,
             prefetchTranslator = earlyTranslator ?: areaTranslator).apply {
             prefetchesTranslations = earlyTranslator != null
             packLookup = { text ->
@@ -428,7 +428,7 @@ class TranslationService : Service() {
                     ocr.execute { read(pixels, area, capturedAt) }
                 }
             }
-            // Ek alanlar seyrek (RegionWatcher.PHONE_INTERVAL_MS), kendi iş parçacığında okunur; altyazı okumasını beklemez, onu bekletmez.
+            // Ek alanlar saniyede bir, kendi iş parçacığında okunur; altyazı okumasını beklemez, onu bekletmez.
             regionWatcher?.offer(extraAreas, { r ->
                 SubtitleReader.copyRegion(frame, r)?.let {
                     com.couchsubs.mobile.core.RegionWatcher.Crop(it, com.couchsubs.mobile.core.RegionSignature.of(it.nv21, it.width, it.height), it.gray)
