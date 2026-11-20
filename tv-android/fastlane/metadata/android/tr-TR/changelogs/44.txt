@@ -1,0 +1,1 @@
+0.9.40: Windows’ta deneysel GTA 6 telefon çevirisi açıkken mesajlar ve yanıt seçenekleri, telefon ekranından alınan renklerle özgün yazının üzerinde gösterilir.

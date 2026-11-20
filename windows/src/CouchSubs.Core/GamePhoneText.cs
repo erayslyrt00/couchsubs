@@ -1,0 +1,184 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+using System.Text.RegularExpressions;
+
+namespace CouchSubs.Core;
+
+internal static partial class GamePhoneText
+{
+    // Hesap ve etiket satırı zaten telefonun üstünde okunabilir. Çeviri kutusu onu örtmesin.
+    [GeneratedRegex(@"(?<![\p{L}\p{N}_])[@#][\p{L}\p{N}_]+(?:[.-][\p{L}\p{N}_]+)*")]
+    private static partial Regex Identifier();
+
+    internal static bool ContainsIdentifier(string text) =>
+        (text.Contains('@') || text.Contains('#')) && Identifier().IsMatch(text);
+
+    // Sayıyla başlayan gerçek mesaj sözcüklerini altyazı gürültü filtresinden geçir.
+    // @hesap, etiket, ürün ve yer kodlarının içini değiştirme.
+    [GeneratedRegex(@"(?<![\p{L}\p{N}_@#.-])(?:2gether|4u)(?![\p{L}\p{N}_])")]
+    private static partial Regex ChatWord();
+
+    [GeneratedRegex(@"(?<![\p{L}\p{N}_@#])(?:IO|I0|lO|l0)(?=\s+min(?:s|utes?)?\b)")]
+    private static partial Regex MisreadTenMinutes();
+
+    internal static bool IsWrittenChatWord(string token) => (token.Contains('2') || token.Contains('4')) && ChatWord().IsMatch(token);
+
+    internal static string EnglishModelInput(string text)
+    {
+        // Açık bir süre birimi yoksa I/1 veya O/0 hakkında karar verme.
+        if (text.Contains("min", StringComparison.Ordinal)) text = MisreadTenMinutes().Replace(text, "10");
+        return !IsWrittenChatWord(text) ? text :
+            ChatWord().Replace(text, word => word.Value == "2gether" ? "together" : "for you");
+    }
+
+    private static bool IsTag(string word) => word.Length > 1 && word[0] is '@' or '#'
+        && Identifier().Match(word) is { Success: true, Index: 0 } token && token.Length == word.Length;
+
+    internal static string? KeepIdentifiers(string source, string? translation)
+    {
+        if (string.IsNullOrEmpty(translation) || !ContainsIdentifier(source)) return translation;
+        var names = Identifier().Matches(source).Select(m => m.Value).ToList();
+        bool unexpected = false;
+        var restored = Identifier().Replace(translation, match =>
+        {
+            int i = names.FindIndex(n => string.Equals(n, match.Value, StringComparison.OrdinalIgnoreCase));
+            if (i < 0) { unexpected = true; return match.Value; }
+            string original = names[i];
+            names.RemoveAt(i);
+            return original;
+        });
+        // Yanlış kişiye yönlendiren çeviriyi göstermemek için bu bloğun aslı ekranda kalır.
+        return unexpected || names.Count != 0 ? null : restored;
+    }
+
+    internal static Reading ForTranslation(Reading reading)
+    {
+        var lines = new List<TextLine>();
+        foreach (var line in reading.Lines)
+        {
+            var words = line.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (words.Any(IsTag) && words.All(w => IsTag(w) || !w.Any(char.IsLetterOrDigit))) continue;
+            lines.Add(line);
+        }
+
+        // Kişi adını tek başına büyük harften çıkarmak "May" gibi kısa gerçek mesajları kaybettirir.
+        // Yalnız mesaj listesinin başlığı VE aynı sütunda tekrarlanan ad/önizleme düzeni varsa adı yerinde bırak.
+        if (!lines.Any(l => SectionLabel(l.Text) is "Suggested" or "Suggestions" or "Öneriler") ||
+            !lines.Any(l => SectionLabel(l.Text) is "Messages" or "Mesajlar")) return new Reading(lines);
+        lines = lines.Select(l => SectionLabel(l.Text) is { } label ? l with { Text = label } : l).ToList();
+        var ordered = lines.Where(l => LayoutBox(l).HasValue).OrderBy(l => LayoutBox(l)!.Value.Top).ToList();
+        var names = new List<TextLine>();
+        var previews = new HashSet<TextLine>();
+        for (int i = 0; i + 1 < ordered.Count; i++)
+        {
+            var name = ordered[i];
+            var preview = ordered[i + 1];
+            if (!IsContactPair(name, preview)) continue;
+            names.Add(name);
+            previews.Add(preview);
+            i++;
+        }
+        if (names.Count < 3) return new Reading(lines);
+        var first = LayoutBox(names[0])!.Value;
+        var last = LayoutBox(names[^1])!.Value;
+        double slope = (last.Left - first.Left) / (last.Top - first.Top);
+        bool InNameColumn(TextLine line) => LayoutBox(line) is { } box &&
+            Math.Abs(box.Left - (first.Left + slope * (box.Top - first.Top))) <= 0.06;
+        if (!names.All(InNameColumn)) return new Reading(lines);
+        // Önizlemesi boş kişilerin adı da aynı eğik sütunda, aynı satır düzenindedir.
+        var withoutNames = lines.Where(line => previews.Contains(line) ||
+            !(InNameColumn(line) && (names.Contains(line) || LooksLikeName(line.Text))));
+        return new Reading(withoutNames.Select(line => previews.Contains(line) ? PreviewPunctuation(line) : line));
+    }
+
+    private static TextLine PreviewPunctuation(TextLine line)
+    {
+        // Liste sağ kenarda kesme işareti olarak üç nokta kullanıyor. Yalnız noktalama düzeltilir:
+        // kırpılmış sözcüğün harfleri ve "ttv." gibi olası kısaltmalar tahmin edilmez.
+        if (LayoutBox(line) is not { Right: >= .76 }) return line;
+        int end = line.Text.Length, start = end;
+        while (start > 0 && line.Text[start - 1] is '.' or ',' or '„') start--;
+        if (end - start is < 2 or > 3 || start == 0 || !char.IsLetter(line.Text[start - 1])
+            || line.Text[start] != '.' || line.Text.EndsWith("...", StringComparison.Ordinal)) return line;
+        return line with { Text = line.Text[..start] + "..." };
+    }
+
+    private static TextBox? LayoutBox(TextLine line) => line.PhoneBox ?? line.Box;
+
+    private static string? SectionLabel(string text)
+    {
+        var first = 0;
+        while (first < text.Length && !char.IsLetter(text[first])) first++;
+        var value = text[first..].TrimEnd();
+        return value is "Messages" or "Suggested" or "Suggestions" or "Öneriler" or "Mesajlar" ? value : null;
+    }
+
+    private static bool LooksLikeName(string text)
+    {
+        // Rehber, parantez içinde cihaz etiketi de gösterebilir.
+        var label = text.Split('(', 2)[0].Trim();
+        var words = label.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return SectionLabel(label) is null && words.Length is >= 1 and <= 4 && char.IsUpper(words[0][0]) &&
+            words.All(w => (char.IsUpper(w[0]) || w is "de" or "du" or "of") &&
+                           w.All(c => char.IsLetter(c) || c is '-' or '\''));
+    }
+
+    internal static bool IsMessagePreview(string text) =>
+        text.Any(char.IsWhiteSpace) && SectionLabel(text) is null && !LooksLikeName(text);
+
+    private static bool IsContactPair(TextLine name, TextLine preview)
+    {
+        var label = name.Text.Trim();
+        bool lowerName = label.Length is >= 2 and <= 18 && label.All(char.IsLower);
+        if ((!LooksLikeName(label) && !lowerName) || !preview.Text.Trim().Contains(' ')) return false;
+        var a = LayoutBox(name)!.Value;
+        var b = LayoutBox(preview)!.Value;
+        var h = a.Bottom - a.Top;
+        return a.Left is > 0.10 and < 0.48 && Math.Abs(a.Left - b.Left) <= 0.06 &&
+            b.Top > a.Top && b.Top - a.Bottom < h * 0.7 && b.Bottom - b.Top < h * 1.8;
+    }
+
+    // Konuşmada karşı kenara yaslanan yeni balon, önceki satır küçük harfle bitse bile ayrı çevrilir.
+    internal static IReadOnlyList<ScreenTranslation.Group> Groups(Reading reading)
+    {
+        List<ScreenTranslation.Group> groups = [];
+        List<TextLine> run = [];
+        bool flat = reading.Lines.All(l => l.PhoneBox.HasValue);
+        TextBox Layout(TextLine l) => (flat ? l.PhoneBox : l.Box)!.Value;
+        void Finish()
+        {
+            if (run.Count == 0) return;
+            if (flat)
+            {
+                var clean = new Reading(run).WithButtonIcons().WithoutButtonPrompts().WithoutOcrNoise(true).Lines
+                    .Where(l => l.Box.HasValue && ScreenTranslation.IsWords(l.Text)).ToArray();
+                if (clean.Length > 0)
+                {
+                    // Aynı balona sarılan satırlar birlikte çevrilir; TV konumu özgün oyun kutularından gelir.
+                    var box = clean.Select(l => l.Box!.Value).Aggregate((a, b) => a.Union(b));
+                    var heights = run.Select(l => Layout(l).Bottom - Layout(l).Top).Order().ToArray();
+                    var icons = clean.SelectMany(l => l.Icons ?? []).ToArray();
+                    groups.Add(new ScreenTranslation.Group([string.Join(' ', clean.Select(l => l.Text))], box,
+                        heights[heights.Length / 2], icons.Length == 0 ? null : [icons]));
+                }
+            }
+            else groups.AddRange(ScreenTranslation.Groups(new Reading(run), menuRows: false, keepIdentifiers: true));
+            run.Clear();
+        }
+        foreach (var line in reading.Lines.Where(l => l.Box.HasValue).OrderBy(l => Layout(l).Top))
+        {
+            if (run.Count > 0 && BreaksBlock(Layout(run[^1]), Layout(line))) Finish();
+            run.Add(line);
+        }
+        Finish();
+        return groups.Count <= ScreenTranslation.MaxGroups ? groups : groups.GetRange(0, ScreenTranslation.MaxGroups);
+    }
+
+    private static bool BreaksBlock(TextBox previous, TextBox next)
+    {
+        if (next.Top - previous.Bottom > Math.Max(previous.Bottom - previous.Top, next.Bottom - next.Top)) return true;
+        bool alignedLeft = Math.Abs(previous.Left - next.Left) <= 0.08;
+        bool alignedRight = Math.Min(previous.Left, next.Left) > 0.25 && Math.Abs(previous.Right - next.Right) <= 0.045;
+        return !alignedLeft && !alignedRight;
+    }
+}

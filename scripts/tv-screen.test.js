@@ -66,7 +66,8 @@ function render(width, height) {
         return {text: el.textContent, left:b.left, right:b.right, top:b.top, bottom:b.bottom,
           width:b.width, height:b.height, font:parseFloat(getComputedStyle(el).fontSize),
           clientHeight:el.clientHeight, scrollHeight:el.scrollHeight, align:getComputedStyle(el).textAlign,
-          position:getComputedStyle(el).position, background:getComputedStyle(el).backgroundColor};
+          position:getComputedStyle(el).position, background:getComputedStyle(el).backgroundColor,
+          color:getComputedStyle(el).color};
       }
       var regionBlocks = ${JSON.stringify(regionBlocks)};
       showRegion({id:'q', text:'Demirciyi bul\\nAhıra git', box:{left:.62, top:.05, right:.95, bottom:.15}, blocks:regionBlocks});
@@ -90,6 +91,17 @@ function render(width, height) {
       result.fullWidthRegion = regionSample({id:'q', text:'Devam', box:{left:0,top:.05,right:1,bottom:.09}});
       result.denseHelp = regionSample({id:'q', text:'İşaretli güzergâhtaki en eski binanın ön kapısına kadar ilerle. '.repeat(12),
         line:.03, box:{left:.04,top:.08,right:.18,bottom:.11}});
+      showRegion({id:'q', text:'Ahıra git', box:regionBlocks[1].box});
+      var phoneBox = {left:.43,top:.42,right:.52,bottom:.45};
+      var reply = {text:'Yanıt', box:phoneBox, line:.025, surface:{background:'#2575a4',foreground:'#ffffff'}};
+      var next = {text:'Git', box:{left:.49,top:.52,right:.52,bottom:.55}, line:.025,
+        surface:{background:['#ff0000'],foreground:'#ffffff'}};
+      showRegion({id:'game-phone', text:'Yanıt / Git', box:phoneBox, blocks:[reply,next]});
+      result.phone = Array.from($('regions').querySelectorAll('.phone')).map(measure);
+      showRegion({id:'game-phone', text:''});
+      result.afterPhone = $('regions').textContent;
+      showRegion({id:'q', text:'Yanıt', box:phoneBox, blocks:[reply]});
+      result.normalColor = getComputedStyle($('regions').querySelector('.item')).backgroundColor;
       var scenarios = ${JSON.stringify(scenarios)};
       for (var key in scenarios) {
         showScreen(scenarios[key], 10000);
@@ -235,6 +247,19 @@ test('TV ekran çevirisi: ' + width + '×' + height, {skip: !browser && 'Chrome/
   await t.test('kapatma ve normal altyazıdan geçiş korunur', () => {
     assert.equal(r.hidden, 'hidden'); assert.equal(r.count, 0);
     assert.ok(r.hideReasons.every(reason => reason === 'screen'));
+  });
+  await t.test('telefonun bağımsız satırları kaynak renk ve genişliğini korur', () => {
+    const [reply, next] = r.phone;
+    assert.equal(reply.text, 'Yanıt');
+    assert.equal(reply.background, 'rgb(37, 117, 164)');
+    assert.equal(reply.color, 'rgb(255, 255, 255)');
+    assert.equal(next.background, 'rgb(36, 39, 42)');
+    assert.equal(next.text, 'Git');
+    assert.ok(Math.abs(next.left - .489 * width) < 1);
+    assert.ok(Math.abs(next.width - .032 * width) < 1);
+    assert.ok(reply.bottom <= next.top);
+    assert.equal(r.afterPhone, 'Ahıra git');
+    assert.equal(r.normalColor, 'rgba(0, 0, 0, 0.97)');
   });
 });
 

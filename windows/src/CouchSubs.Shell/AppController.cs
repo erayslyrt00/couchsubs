@@ -1989,6 +1989,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         // Yeni oyunda aynı HUD satırının çevirisi ve paketi farklı olabilir.
         regionWatcher?.Reset();
         publishedGame = current;
+        UpdateRegionWatcher();
         services.Pool?.SetGame(current);
         if (current is not null && services.PackUpdates is { } packUpdater) _ = RefreshPacksAsync(packUpdater, maxAge: PackUpdater.GameCheckInterval);
     }
@@ -2141,8 +2142,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         pipeline?.Reset();
         pipeline = null;
         // Ek bölge okuyucusu da yeni dil ve motorla yeniden kurulur.
-        regionWatcher?.Reset();
-        regionWatcher = null;
+        ResetRegionWatcher(discard: true);
         // Eski hatta süren okuma beklenmez; yeni hat ilk karesini hemen alır.
         frameGate.Reset();
         ActiveSourceLanguage = settings.SourceLanguage;
@@ -2196,6 +2196,13 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     /// <summary>Sürekli okunan ek bölgeleri okuyup çeviren; çeviri sürerken ve en az bir bölge sürekli okunurken var.</summary>
     private RegionWatcher? regionWatcher;
+    private readonly object regionGate = new();
+    private IReadOnlyList<WatchedArea> savedWatchedAreas = [];
+    private IReadOnlyList<WatchedArea> watchedAreas = [];
+    private GamePhoneTracker? phoneTracker;
+    private WatchedArea? phoneArea;
+    private CancellationTokenSource? phoneLifetime;
+    private bool watcherRequested;
 
     /// <summary>
     /// Ek bölge okuyucusu gerekiyorsa kurulur, gerekmiyorsa kaldırılır (kutuları TV'den kalkar). Kendi yazı tanıma motoru
@@ -2204,22 +2211,100 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// </summary>
     private void UpdateRegionWatcher()
     {
-        if (pipeline is null || subtitlesPaused || settings.WatchedAreas().Count == 0)
+        lock (regionGate)
         {
+            watcherRequested = false;
+            var running = pipeline is not null && !subtitlesPaused;
+            if (running && settings.AutoReadGamePhone && GameName.Key(gameSense.Current?.Name) == "gta 6")
+                phoneTracker ??= new GamePhoneTracker();
+            else
+            {
+                ClosePhone();
+                phoneTracker = null;
+            }
+            savedWatchedAreas = running ? settings.WatchedAreas() : [];
+            watchedAreas = phoneArea is null ? savedWatchedAreas : [.. savedWatchedAreas, phoneArea];
+            if (watchedAreas.Count == 0)
+            {
+                if (phoneTracker is null)
+                {
+                    regionWatcher?.Reset();
+                    regionWatcher = null;
+                }
+                return;
+            }
+            if (regionWatcher is null)
+            {
+                if (services.MakeReader(settings.SourceLanguage, settings.OcrEngine) is not { } reader)
+                {
+                    // Okuyucu kurulamadıysa her örnekte tekrar açma. Yeni telefon veya ayar değişikliği yeniden dener.
+                    watcherRequested = phoneArea is not null;
+                    return;
+                }
+                regionWatcher = new RegionWatcher(reader, MakeTranslator(), server) { Log = SubtitleLog.Write };
+            }
+            regionWatcher.PackLookup = PacksActive ? services.FindInPacks : null;
+            regionWatcher.SkipsTurkish = settings.TargetLanguage == "tr";
+            regionWatcher.TranslatesUiCommands = settings.SourceLanguage == "en" && settings.TargetLanguage == "tr";
+            regionWatcher.EnglishPhoneMessages = settings.SourceLanguage == "en";
+            regionWatcher.Game = () => gameSense.Current?.Name;
+        }
+    }
+
+    // regionGate altında. Kapanan telefonun geç tamamlanan isteği yeni bir telefona veya diğer alanlara yazamaz.
+    private void ClosePhone()
+    {
+        if (phoneArea is null) return;
+        phoneLifetime!.Cancel();
+        regionWatcher?.RemovePanel(phoneArea.Id);
+        phoneLifetime.Dispose();
+        phoneLifetime = null;
+        phoneArea = null;
+        watcherRequested = false;
+        watchedAreas = savedWatchedAreas;
+    }
+
+    private void ResetRegionWatcher(bool discard)
+    {
+        lock (regionGate)
+        {
+            ClosePhone();
+            phoneTracker?.Reset();
             regionWatcher?.Reset();
-            regionWatcher = null;
-            return;
+            if (discard) regionWatcher = null;
         }
-        if (regionWatcher is null)
+    }
+
+    private void OfferWatchedAreas(Frame frame, long arrived)
+    {
+        if (Volatile.Read(ref regionWatcher) is null && Volatile.Read(ref phoneTracker) is null) return;
+        // Okuyucu ayarlar değişirken kuruluyorsa ana altyazı karesini bekletme.
+        if (!Monitor.TryEnter(regionGate)) return;
+        var requestWatcher = false;
+        try
         {
-            if (services.MakeReader(settings.SourceLanguage, settings.OcrEngine) is not { } reader) return;
-            // Yerel çevirmen altyazıyla aynı bağlamı ve modeli kullanır. Yalnız doğrulanmış yazıyı gönder.
-            regionWatcher = new RegionWatcher(reader, MakeTranslator(), server) { Log = SubtitleLog.Write };
+            if (phoneTracker is not null && phoneTracker.TrySample(frame, arrived, out var region))
+            {
+                if (region is null)
+                    ClosePhone();
+                else
+                {
+                    phoneLifetime ??= new CancellationTokenSource();
+                    var area = phoneTracker.WithPose(new WatchedArea("game-phone", "Phone", region) { PanelLifetime = phoneLifetime.Token });
+                    if (area != phoneArea)
+                    {
+                        phoneArea = area;
+                        watchedAreas = [.. savedWatchedAreas, area];
+                    }
+                }
+                if (region is not null && regionWatcher is null && !watcherRequested)
+                    requestWatcher = watcherRequested = true;
+            }
+            regionWatcher?.Offer(frame, watchedAreas);
         }
-        regionWatcher.PackLookup = PacksActive ? services.FindInPacks : null;
-        regionWatcher.SkipsTurkish = settings.TargetLanguage == "tr";
-        regionWatcher.TranslatesUiCommands = settings.SourceLanguage == "en" && settings.TargetLanguage == "tr";
-        regionWatcher.Game = () => gameSense.Current?.Name;
+        finally { Monitor.Exit(regionGate); }
+        // OCR/çevirmen yalnız doğrulanmış bir panelde gerekir. İlk kuruluş kare iş parçacığını tutmaz.
+        if (requestWatcher) post(UpdateRegionWatcher);
     }
 
     // --- Geçmiş ---
@@ -2449,7 +2534,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (state.Phase == SessionPhase.Disconnected)
         {
             pipeline?.Reset();
-            regionWatcher?.Reset();
+            ResetRegionWatcher(discard: false);
             server.Clear();
             dubber?.Stop();
         }
@@ -2472,7 +2557,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             var current = pipeline;
             if (current is null) return;
             // Ek bölgeler ayrı ve seyrek okunur (saniyede bir, kendi okuyucusuyla); altyazı okumasını beklemez, onu bekletmez.
-            regionWatcher?.Offer(frame, settings.WatchedAreas());
+            OfferWatchedAreas(frame, arrived);
             var entry = frameGate.TryEnter(Environment.TickCount64);
             if (entry.Kind == FrameGate.EntryKind.Stuck)
             {

@@ -22,6 +22,7 @@ public static class ScreenTranslation
     public sealed record Item(string Source, string Translation, TextBox Box, double LineHeight,
                               IReadOnlyList<IconPlacement>? Icons = null)
     {
+        public PhoneTextStyle? Style { get; init; }
         /// <summary>Birden çok parça var: TV satır satır, sola yaslı gösterir.</summary>
         public bool Paragraphs => Translation.Contains('\n');
     }
@@ -129,14 +130,17 @@ public static class ScreenTranslation
     public static IReadOnlyList<Group> Groups(Reading reading, bool menuRows = false) =>
         ReadGroups(reading, menuRows, null);
 
-    private static IReadOnlyList<Group> ReadGroups(Reading reading, bool menuRows, Frame? frame)
+    internal static IReadOnlyList<Group> Groups(Reading reading, bool menuRows, bool keepIdentifiers) =>
+        ReadGroups(reading, menuRows, null, keepIdentifiers);
+
+    private static IReadOnlyList<Group> ReadGroups(Reading reading, bool menuRows, Frame? frame, bool keepIdentifiers = false)
     {
         var marked = reading.WithButtonIcons();
         // Tam ekranda yalnız aksi halde atılacak kumanda ipuçlarında kareye bak.
         if (frame is not null)
             marked = new Reading(marked.Lines.Select(line => line.Icons is not { Count: > 0 } && ButtonPrompts.IsPrompt(line.Text)
                 ? ButtonIcons.MarkFree(line, frame) : line));
-        var lines = marked.WithoutButtonPrompts().WithoutOcrNoise().Lines
+        var lines = marked.WithoutButtonPrompts().WithoutOcrNoise(keepIdentifiers).Lines
             .Where(line => line.Box is not null && IsWords(line.Text))
             .OrderBy(line => line.Box!.Value.Top)
             .ToList();

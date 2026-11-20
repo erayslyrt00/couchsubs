@@ -50,6 +50,41 @@ function render(width, height) {
       fire('subtitle', { text: c.text, duration: 8000, box: c.box });
       result[key] = measure();
     }
+    var box = {left:.43,top:.42,right:.52,bottom:.45};
+    var reply = {text:'Yanıt', box:box, line:.025, surface:{background:'#2575a4',foreground:'#ffffff'}};
+    var next = {text:'Git', box:{left:.49,top:.52,right:.52,bottom:.55}, line:.025,
+      surface:{background:['#ff0000'],foreground:'#ffffff'}};
+    fire('region', {id:'mission', text:'Görev', box:box, blocks:[reply]});
+    fire('region', {id:'game-phone', text:'Yanıt / Git', box:box, blocks:[reply,next]});
+    fire('style', {fontSize:48, backgroundShape:'band'});
+    var regions = document.getElementById('regions');
+    result.phone = Array.from(regions.querySelectorAll('.phone')).map(function(el) {
+      var b = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      return {text:el.textContent, left:b.left, top:b.top, bottom:b.bottom,
+        width:b.width, background:cs.backgroundColor, color:cs.color};
+    });
+    result.mission = regions.querySelector('.region').textContent;
+    fire('region', {id:'game-phone', text:'Eski olay', box:box});
+    result.legacy = regions.lastElementChild.className + ' ' + regions.lastElementChild.textContent;
+    fire('region', {id:'game-phone', text:''});
+    result.afterPhone = regions.textContent;
+    fire('style', {fontSize:48, placement:'cover', backgroundShape:'box'});
+    fire('subtitle', {text:'Konuşma sürüyor.', duration:8000, box:box});
+    var line = document.getElementById('line');
+    // Saydam yayında tıklama kapalıdır. Yalnız testte metinleri hedeflenebilir yapıp gerçek çizim sırasını oku.
+    line.style.pointerEvents = 'auto';
+    function layers() {
+      regions.querySelectorAll('.phone, .region').forEach(function(el) { el.style.pointerEvents = 'auto'; });
+      return document.elementsFromPoint(innerWidth * .475, innerHeight * .435)
+        .filter(function(el) { return el === line || el.matches('#regions .phone, #regions .region'); })
+        .map(function(el) { return el.textContent; });
+    }
+    fire('region', {id:'game-phone', text:'Yanıt', box:box, blocks:[reply]});
+    result.phoneLayers = layers();
+    fire('region', {id:'game-phone', text:'Eski telefon', box:box});
+    result.legacyLayers = layers();
+    fire('region', {id:'game-phone', text:''});
+    result.closedLayers = layers();
     result.viewport = { width: innerWidth, height: innerHeight };
     document.getElementById('result').textContent = btoa(unescape(encodeURIComponent(JSON.stringify(result))));
   </script>`;
@@ -100,6 +135,25 @@ for (const [width, height] of [[1920, 1080], [1280, 720]]) {
       for (const key of ['coverCenter', 'coverRight']) {
         assert.ok(r[key].left >= -1 && r[key].right <= width + 1, key + ' ' + JSON.stringify(r[key]));
       }
+    });
+    await t.test('telefon mesajları kendi yerinde kalır; eski ve normal olaylar çalışır', () => {
+      const [reply, next] = r.phone;
+      assert.equal(reply.text, 'Yanıt');
+      assert.equal(reply.background, 'rgb(37, 117, 164)');
+      assert.equal(reply.color, 'rgb(255, 255, 255)');
+      assert.equal(next.text, 'Git');
+      assert.equal(next.background, 'rgb(36, 39, 42)');
+      assert.ok(Math.abs(next.left - .489 * width) < 1);
+      assert.ok(Math.abs(next.width - .032 * width) < 1);
+      assert.ok(reply.bottom <= next.top);
+      assert.equal(r.mission, 'Görev');
+      assert.equal(r.legacy, 'region Eski olay');
+      assert.equal(r.afterPhone, 'Görev');
+    });
+    await t.test('çakışan telefon yazısı ana altyazının altında kalır', () => {
+      assert.deepEqual(r.phoneLayers, ['Görev', 'Konuşma sürüyor.', 'Yanıt']);
+      assert.deepEqual(r.legacyLayers, ['Görev', 'Konuşma sürüyor.', 'Eski telefon']);
+      assert.deepEqual(r.closedLayers, ['Görev', 'Konuşma sürüyor.']);
     });
   });
 }

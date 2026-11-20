@@ -26,21 +26,26 @@ public interface IRegionSender
 /// <summary>Sürekli okunan ek alan (görev yazısı, telefon mesajı, bildirim).</summary>
 /// <param name="Id">TV'deki kutunun kimliği.</param>
 /// <param name="Name">Günlükte görünen ad.</param>
-public sealed record WatchedArea(string Id, string Name, CropRegion Region);
+public sealed record WatchedArea(string Id, string Name, CropRegion Region)
+{
+    /// <summary>Geçici panel ekran yazısı olarak okunur; kapanınca bekleyen çevirisi geçersiz olur.</summary>
+    public CancellationToken? PanelLifetime { get; init; }
+    internal GamePhoneGeometry.Pose? PhonePose { get; init; }
+}
 
 /// <summary>
 /// Ek alanları ana altyazıdan ayrı ve seyrek okur, çevirip TV'ye kendi yerleriyle gönderir (Mac: RegionWatcher.swift ile
 /// aynı kurallar).
 /// <list type="bullet">
 /// <item>Ana okuma hattını beklemez, onu bekletmez: <see cref="Offer"/> hemen döner, tur arka planda sürer.</item>
-/// <item>En çok <see cref="DefaultIntervalMs"/>'de bir tur atılır; süren tur yalnız en yeni kareyi tutar.</item>
-/// <item>Bölge ve son okunan satırlar değişmedikçe OCR çalışmaz.</item>
-/// <item>Yazı ancak kararlıysa çevrilir: iz bir tur değişmediyse ya da iki okuma aynı yazıyı verdiyse.</item>
+/// <item>Sabit alanlar varsayılan olarak saniyede bir, algılanmış telefon ise en sık 450 ms'de bir okunur.</item>
+/// <item>Bölge izi değişmeyen alan yeniden okunmaz.</item>
+/// <item>Sabit alanlar kararlılık bekler. Telefonda ilk okunabilir balonla çeviri başlar ve bekleyen yanıtın sayfası doğrulanır.</item>
 /// <item>Yazı değişmedikçe yeniden çevrilmez; boşalan alanın kutusu kalkar.</item>
 /// <item>Paket ve çeviri motoru altyazıyla aynıdır; ama ek alan satırları ortak havuza önerilmez.</item>
 /// </list>
 /// </summary>
-public sealed class RegionWatcher
+public sealed partial class RegionWatcher
 {
     /// <summary>Hareketli ek alanlar en fazla saniyede bir normal OCR turuna girer.</summary>
     public const int DefaultIntervalMs = 1000;
@@ -60,6 +65,8 @@ public sealed class RegionWatcher
     private sealed class State
     {
         public byte[]? Signature;
+        public CropRegion? ReadRegion;
+        public GamePhonePage? ReadPhonePage;
         public Frame? LastReadCrop;
         public TextBox[] Lines = [];
         public long LastFullCheck;
@@ -83,11 +90,28 @@ public sealed class RegionWatcher
         public IReadOnlyList<Block>? RenderedLayout;
         /// <summary>Gönderilen bloklar ve her birinin <see cref="Candidate.Blocks"/> içindeki sırası.</summary>
         public IReadOnlyList<(int Group, ScreenTranslation.Item Item)>? RenderedBlocks;
+        // Yalnız açık telefon için. Kısa bir OCR sapmasından veya sohbetten geri dönünce aynı metin yeniden istenmez.
+        public Dictionary<string, string>? PhoneTranslations { get; private set; }
+        private Queue<string>? phoneKeys;
+        public int NextPhoneBlock;
+        public (string Prefix, double X, double Y)[] PhoneOrderAnchors = [];
+
+        public void RememberPhoneTranslation(string source, string translation)
+        {
+            var saved = PhoneTranslations ??= new(StringComparer.Ordinal);
+            if (!saved.ContainsKey(source))
+            {
+                var keys = phoneKeys ??= new Queue<string>();
+                if (keys.Count >= 2 * ScreenTranslation.MaxGroups) saved.Remove(keys.Dequeue());
+                keys.Enqueue(source);
+            }
+            saved[source] = translation;
+        }
     }
 
     /// <summary>Alanda ayrı duran bir yazı grubu: <see cref="Candidate.Paragraphs"/> içinde <paramref name="Start"/>'tan
     /// başlayan <paramref name="Count"/> parça, karedeki yeri ve satır yüksekliği (kareye oranla).</summary>
-    internal sealed record Block(int Start, int Count, TextBox Box, double LineHeight);
+    internal sealed record Block(int Start, int Count, TextBox Box, double LineHeight, PhoneTextStyle? Style = null);
 
     /// <param name="Icons">Her parçadaki kumanda simgeleri (kareden kesilmiş), parçadaki sırasıyla.</param>
     /// <param name="Blocks">Alanda birden çok ayrı yazı grubu varsa grupları; tek grupta null (tek kutu).</param>
@@ -96,6 +120,7 @@ public sealed class RegionWatcher
     {
         /// <summary>Yazının sadeleştirilmiş hâli (simgeler dahil, yerleşim hariç); okumaları karşılaştırmak için.</summary>
         public string Text { get; init; } = "";
+        public GamePhonePage? PhonePage { get; init; }
     }
 
     /// <summary>
@@ -118,6 +143,7 @@ public sealed class RegionWatcher
     private readonly Func<long> now;
     private Dictionary<string, State> states = [];
     private long? lastPass;
+    private long? lastPhonePass;
     private long? confirmAt;
     private readonly object captureGate = new();
     private (Frame Frame, IReadOnlyList<WatchedArea> Areas)? latest;
@@ -132,6 +158,7 @@ public sealed class RegionWatcher
     public bool SkipsTurkish { get; set; } = true;
     /// <summary>İngilizceden Türkçeye çeviride tuş çubuğu komutları, simgeleriyle birlikte, sözlükten gelir.</summary>
     public bool TranslatesUiCommands { get; set; }
+    public bool EnglishPhoneMessages { get; set; }
     /// <summary>Oynanan oyunun adı (bilinmiyorsa null); oyuna özgü yerleşim kuralları için.</summary>
     public Func<string?>? Game { get; set; }
 
@@ -161,7 +188,7 @@ public sealed class RegionWatcher
     public void Offer(Frame frame, IReadOnlyList<WatchedArea> areas)
     {
         var time = now();
-        bool confirmOnly;
+        bool confirmOnly, regularDue, phoneDue;
         int started;
         lock (captureGate)
         {
@@ -171,25 +198,32 @@ public sealed class RegionWatcher
                 return;
             }
             if (areas.Count == 0 && !AnyShown()) return;
-            confirmOnly = lastPass is { } last && time - last < intervalMs;
-            if (confirmOnly)
+            var hasPhone = areas.Any(area => area.PanelLifetime.HasValue);
+            var hasRegular = !hasPhone || areas.Any(area => !area.PanelLifetime.HasValue);
+            regularDue = hasRegular && (lastPass is null || time - lastPass.Value >= intervalMs);
+            phoneDue = hasPhone
+                && (lastPhonePass is null || time - lastPhonePass.Value >= Math.Min(450, intervalMs));
+            confirmOnly = false;
+            if (!regularDue && confirmAt is { } due && time >= due)
             {
-                if (confirmAt is not { } due || time < due) return;
                 confirmAt = null;
                 var map = states;
-                lock (map) if (!map.Values.Any(state => state.Candidate is not null)) return;
+                lock (map) confirmOnly = areas.Any(area => !area.PanelLifetime.HasValue
+                    && map.TryGetValue(area.Id, out var state) && state.Candidate is not null);
             }
-            else
+            if (!regularDue && !phoneDue && !confirmOnly) return;
+            if (regularDue)
             {
                 lastPass = time;
                 confirmAt = time + ConfirmationMs;
             }
+            if (phoneDue) lastPhonePass = time;
             started = Volatile.Read(ref session);
             Volatile.Write(ref busy, 1);
         }
         _ = Task.Run(async () =>
         {
-            try { await PassAsync(frame, areas, started, confirmOnly).ConfigureAwait(false); }
+            try { await PassAsync(frame, areas, started, regularDue, confirmOnly, phoneDue).ConfigureAwait(false); }
             catch (Exception error) { Log?.Invoke($"ek alan turu hata verdi: {error.Message}"); }
             finally
             {
@@ -215,13 +249,13 @@ public sealed class RegionWatcher
 
     /// <summary>Bir tur: kaldırılan alanların kutusu kalkar, her alan gerekirse okunur ve kararlı yazısı çevrilir. Testler doğrudan çağırır.</summary>
     public Task PassAsync(Frame frame, IReadOnlyList<WatchedArea> areas) =>
-        PassAsync(frame, areas, Volatile.Read(ref session), confirmOnly: false);
+        PassAsync(frame, areas, Volatile.Read(ref session), regularDue: true, confirmOnly: false, phoneDue: true);
 
-    private async Task PassAsync(Frame frame, IReadOnlyList<WatchedArea> areas, int started, bool confirmOnly)
+    private async Task PassAsync(Frame frame, IReadOnlyList<WatchedArea> areas, int started, bool regularDue, bool confirmOnly, bool phoneDue)
     {
         if (Volatile.Read(ref session) != started) return;
         var map = states;
-        if (!confirmOnly) Interlocked.Increment(ref passes);
+        if (regularDue || phoneDue) Interlocked.Increment(ref passes);
         var ids = areas.Select(area => area.Id).ToHashSet();
         List<string> removed;
         lock (map)
@@ -233,7 +267,13 @@ public sealed class RegionWatcher
         foreach (var area in areas)
         {
             var current = Latest();
-            if (current is null || current.Value.Areas.Contains(area))
+            if (area.PanelLifetime.HasValue)
+            {
+                if (!phoneDue) continue;
+                var observed = current is null ? area : current.Value.Areas.FirstOrDefault(item => item.PanelLifetime == area.PanelLifetime);
+                if (observed is not null) await VisitPhoneAsync(observed, current?.Frame ?? frame, map, started).ConfigureAwait(false);
+            }
+            else if ((regularDue || confirmOnly) && (current is null || current.Value.Areas.Contains(area)))
                 await VisitAsync(area, current?.Frame ?? frame, map, started, confirmOnly).ConfigureAwait(false);
             if (Volatile.Read(ref session) != started) return;
         }
@@ -416,9 +456,10 @@ public sealed class RegionWatcher
     /// yukarıdan aşağı parçalara toplanır. Yazının içindeki kumanda simgeleri <paramref name="frame"/>'den (okunan alan)
     /// kesilir; çeviride yerleri korunur.
     /// </summary>
-    internal static Candidate MakeCandidate(Reading reading, CropRegion region, Frame? frame = null, bool menuRows = false)
+    internal static Candidate MakeCandidate(Reading reading, CropRegion region, Frame? frame = null, bool menuRows = false, bool phone = false)
     {
-        var lines = (frame is null ? reading.WithButtonIcons() : reading.WithButtonIcons(frame)).WithoutButtonPrompts().WithoutOcrNoise().Lines
+        var marked = frame is null || phone ? reading.WithButtonIcons() : reading.WithButtonIcons(frame);
+        var lines = marked.WithoutButtonPrompts().WithoutOcrNoise(phone).Lines
             .Where(line => ScreenTranslation.IsWords(line.Text))
             .OrderBy(line => line.Box?.Top ?? 0)
             .ToList();
@@ -435,8 +476,9 @@ public sealed class RegionWatcher
         // eskisi gibi tek kutu. Anahtar grup yapısını da içerir: aynı yazı farklı gruplanırsa bloklar yeniden kurulur.
         IReadOnlyList<Block>? blocks = null;
         var key = TextKey(paragraphs);
-        var groups = lines.Count > 1 && boxes.Count == lines.Count ? ScreenTranslation.GroupsFromLines(lines, menuRows) : [];
-        if (groups.Count is > 1 and < ScreenTranslation.MaxGroups)
+        var groups = (phone || lines.Count > 1) && boxes.Count == lines.Count
+            ? (phone ? GamePhoneText.Groups(reading) : ScreenTranslation.GroupsFromLines(lines, menuRows)) : [];
+        if ((phone && groups.Count > 0) || groups.Count is > 1 and < ScreenTranslation.MaxGroups)
         {
             paragraphs = [.. groups.SelectMany(group => group.Paragraphs)];
             icons = [.. groups.SelectMany(group => group.Icons
@@ -445,7 +487,8 @@ public sealed class RegionWatcher
             var start = 0;
             foreach (var group in groups)
             {
-                list.Add(new Block(start, group.Paragraphs.Count, group.Box.PlacedIn(place), group.LineHeight * height));
+                var style = phone && frame is not null ? GamePhonePalette.Sample(frame, group.Box) : null;
+                list.Add(new Block(start, group.Paragraphs.Count, group.Box.PlacedIn(place), group.LineHeight * height, style));
                 start += group.Paragraphs.Count;
             }
             blocks = list;
@@ -453,6 +496,8 @@ public sealed class RegionWatcher
         }
         IReadOnlyList<IReadOnlyList<IconSlot>>? cut = frame is null || icons.All(list => list.Count == 0) ? null
             : [.. icons.Select(list => ButtonIcons.WithImages(list, frame))];
+        if (phone && paragraphs.Count > 0)
+            key = string.Join('\n', paragraphs) + (blocks is null ? "" : "|" + string.Join(',', blocks.Select(block => block.Count)));
         return new Candidate(paragraphs, box, lineHeight, key, cut, blocks) { Text = TextKey(paragraphs) };
     }
 
@@ -588,11 +633,31 @@ public sealed class RegionWatcher
         state.Remembered = candidate.Text;
         var (result, readyCount) = (translation.Result, translation.ReadyCount);
         var prepared = candidate.Paragraphs.Select(IconText.Protect).ToList();
+        Publish(area, state, started, candidate, result, readyCount, prepared, cached: cached is not null);
+    }
+
+    private void SendCurrent(WatchedArea area, State state, int started, string text, TextBox? box,
+                             double? lineHeight = null, IReadOnlyList<IconPlacement>? icons = null,
+                             IReadOnlyList<ScreenTranslation.Item>? blocks = null)
+    {
+        var map = states;
+        lock (map)
+        {
+            if (Volatile.Read(ref session) != started || area.PanelLifetime is { IsCancellationRequested: true }
+                || !map.TryGetValue(area.Id, out var current) || !ReferenceEquals(state, current)) return;
+            server.SendRegion(area.Id, text, box, lineHeight, icons, blocks);
+        }
+    }
+
+    private void Publish(WatchedArea area, State state, int started, Candidate candidate, string?[] result, int readyCount,
+                         IReadOnlyList<(string Text, IReadOnlyList<string> Names)> prepared, bool cached = false, bool partialPhone = false)
+    {
         var slots = new List<IconSlot>();
         var text = new List<string>(candidate.Paragraphs.Count);
         for (var i = 0; i < candidate.Paragraphs.Count; i++)
         {
             var source = candidate.Paragraphs[i];
+            if (area.PanelLifetime.HasValue) result[i] = GamePhoneText.KeepIdentifiers(source, result[i]);
             text.Add(result[i]?.Trim() is not { Length: > 0 } translated ? IconText.Indexed(source, slots.Count)
                 : translated.Contains(ButtonIcons.Marker) ? IconText.Indexed(translated, slots.Count)
                 : IconText.Restore(translated, prepared[i].Names, slots.Count));
@@ -604,7 +669,7 @@ public sealed class RegionWatcher
             .ToList();
         if (similar.All(same => same))
         {
-            server.SendRegion(area.Id, "", null);
+            SendCurrent(area, state, started, "", null);
             state.RenderedKey = candidate.Key;
             state.RenderedText = "";
             state.RenderedBox = null;
@@ -613,16 +678,23 @@ public sealed class RegionWatcher
             state.RenderedBlocks = null;
             return;
         }
-        var origin = cached is not null ? "hazır çeviri" : readyCount == candidate.Paragraphs.Count ? "hazır çeviri" : readyCount > 0 ? "hazır çeviri+motor" : "motor";
+        var origin = cached || readyCount == candidate.Paragraphs.Count ? "hazır çeviri" : readyCount > 0 ? "hazır çeviri+motor" : "motor";
         Log?.Invoke($"ek alan {area.Name}: {SubtitleLog.Excerpt(IconText.Plain(string.Join(' ', candidate.Paragraphs)))} → {origin}");
         var (shown, icons) = IconText.Render(string.Join('\n', text), slots);
         var blocks = candidate.Blocks is { } layout ? RenderBlocks(candidate, layout, text, similar, slots) : null;
-        server.SendRegion(area.Id, shown, candidate.Box, candidate.LineHeight, icons.Count > 0 ? icons : null,
+        var box = candidate.Box;
+        if (partialPhone && blocks is { Count: > 0 })
+        {
+            shown = string.Join('\n', blocks.Select(block => block.Item.Translation));
+            box = blocks.Select(block => block.Item.Box).Aggregate((first, next) => first.Union(next));
+            icons = []; // Her görünür bloğun kendi simgeleri ve konumları Item içinde taşınır.
+        }
+        SendCurrent(area, state, started, shown, box, candidate.LineHeight, icons.Count > 0 ? icons : null,
                           blocks?.Select(block => block.Item).ToList());
         state.RenderedKey = candidate.Key;
         state.RenderedText = shown;
         state.RenderedIcons = icons.Count > 0 ? icons : null;
-        state.RenderedBox = candidate.Box;
+        state.RenderedBox = box;
         state.RenderedLineHeight = candidate.LineHeight;
         state.RenderedLayout = candidate.Blocks;
         state.RenderedBlocks = blocks;
@@ -651,7 +723,7 @@ public sealed class RegionWatcher
             var (translation, icons) = IconText.Render(string.Join('\n', range.Select(i => text[i])), slots);
             var source = string.Join('\n', range.Select(i => IconText.Plain(candidate.Paragraphs[i])));
             result.Add((g, new ScreenTranslation.Item(source, translation, block.Box, block.LineHeight,
-                                                      icons.Count > 0 ? icons : null)));
+                                                      icons.Count > 0 ? icons : null) { Style = block.Style }));
         }
         return result;
     }
@@ -697,6 +769,7 @@ public sealed class RegionWatcher
         lock (captureGate)
         {
             lastPass = null;
+            lastPhonePass = null;
             confirmAt = null;
             latest = null;
         }

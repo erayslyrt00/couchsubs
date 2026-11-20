@@ -29,7 +29,7 @@ public sealed class StreamWindow : Window
     private readonly DispatcherTimer timer = new();
     private readonly StackPanel linesPanel = new() { VerticalAlignment = VerticalAlignment.Bottom };
     /// <summary>Ek alanların (görev, telefon mesajı, bildirim) çevirileri; saydam penceredeki gibi üstte, alanın yanına yaslı.</summary>
-    private readonly StackPanel regionsPanel = new() { VerticalAlignment = VerticalAlignment.Top };
+    private readonly DesktopRegionsPanel regionsPanel;
     private readonly Dictionary<string, (string Text, CouchSubs.Core.TextBox? Box)> regions = [];
     private readonly Border linesHost;
     private readonly Dictionary<int, Border> boxes = [];
@@ -76,6 +76,7 @@ public sealed class StreamWindow : Window
         // Video kaynağında renkli alt piksel yumuşatma kenarda renk saçağı bırakır; gri tonlu yumuşatma keskin kalır.
         TextOptions.SetTextRenderingMode(this, TextRenderingMode.Grayscale);
         var layers = new Grid();
+        regionsPanel = new DesktopRegionsPanel(linesPanel);
         layers.Children.Add(regionsPanel);
         layers.Children.Add(linesPanel);
         linesHost = new Border { Child = layers };
@@ -168,8 +169,7 @@ public sealed class StreamWindow : Window
     {
         var now = Now;
         var lines = stack.Lines(now).ToList();
-        regionsPanel.Children.Clear();
-        foreach (var (text, area) in regions.Values.OrderBy(region => region.Box?.Top ?? 0)) regionsPanel.Children.Add(MakeRegionBox(text, area));
+        regionsPanel.ShowRegions(regions, MakeRegionBox);
         linesPanel.Children.Clear();
         foreach (var id in boxes.Keys.Except(lines.Select(l => l.Id)).ToList()) boxes.Remove(id);
         foreach (var line in lines)

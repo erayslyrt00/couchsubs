@@ -11,9 +11,19 @@ public class RegionWatcherTests
     {
         public List<TextLine> Lines { get; set; } = [];
         public int Count;
+        public int ScreenReads;
+        public List<(int Width, int Height)> Sizes { get; } = [];
         public int FailuresRemaining;
         public Action? OnRead;
+        public Func<Frame, List<TextLine>>? ScreenLines;
         public string Read(Frame image) => string.Join('\n', Lines.Select(line => line.Text));
+        public Reading ReadScreen(Frame image)
+        {
+            ScreenReads++;
+            Sizes.Add((image.Width, image.Height));
+            var reading = ReadLines(image, false);
+            return ScreenLines is null ? reading : new Reading(ScreenLines(image));
+        }
         public Reading ReadLines(Frame image, bool deep)
         {
             Interlocked.Increment(ref Count);
@@ -227,6 +237,458 @@ public class RegionWatcherTests
         watcher.Offer(next, [Hud]);
         await WaitForPass(watcher);
         Assert.Equal("Kışkırt", Assert.Single(server.Sent).Text);
+    }
+
+    [Fact]
+    public async Task ClosingPhoneKeepsQuestAndRepeatingThePhoneReadsItAgain()
+    {
+        var reader = new Reader { Lines = [Line("Call me.")] };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, new Translator(), server);
+        using var first = new CancellationTokenSource();
+        var open = Phone with { PanelLifetime = first.Token };
+        await watcher.PassAsync(Shade(10), [Quest, open]);
+        await watcher.PassAsync(Shade(10), [Quest, open]);
+        first.Cancel();
+        watcher.RemovePanel(open.Id);
+        await watcher.PassAsync(Shade(10), [Quest, open]); // sıraya daha önce giren eski kare
+        using var next = new CancellationTokenSource();
+        var reopened = Phone with { PanelLifetime = next.Token };
+        await watcher.PassAsync(Shade(10), [Quest, reopened]);
+        await watcher.PassAsync(Shade(10), [Quest, reopened]);
+
+        Assert.Equal([("p", "TR: Call me."), ("q", "TR: Call me."), ("p", ""), ("p", "TR: Call me.")],
+            server.Sent.Select(s => (s.Id, s.Text)));
+        var phoneCrop = RegionCropper.Crop(Shade(10), open.Region);
+        Assert.Equal(3, reader.Count);
+        Assert.Equal(2, reader.Sizes.Count(size => size == (phoneCrop.Width, phoneCrop.Height)));
+        Assert.Equal(0, server.Clears);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ClosingPhoneDropsAnInFlightTranslationEvenWhenTheEngineIgnoresCancellation(bool honorsCancellation)
+    {
+        var reader = new Reader { Lines = [Line("Call me.")] };
+        var server = new Server();
+        var translator = new WaitingPhoneTranslator(honorsCancellation);
+        var watcher = new RegionWatcher(reader, translator, server);
+        using var lifetime = new CancellationTokenSource();
+        var panel = Phone with { PanelLifetime = lifetime.Token };
+        var pending = watcher.PassAsync(Shade(10), [panel]);
+        Assert.False(pending.IsCompleted);
+        lifetime.Cancel();
+        watcher.RemovePanel(panel.Id);
+        if (!honorsCancellation) translator.Release.SetResult();
+        await pending.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal([""], server.Sent.Select(s => s.Text));
+        Assert.Equal(0, server.Clears);
+    }
+
+    [Fact]
+    public async Task MovingThePhoneMovesItsBoxWithoutRetranslatingTheSameMessage()
+    {
+        var reader = new Reader { Lines = [Line("Call me.")] };
+        var translator = new Translator();
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        using var lifetime = new CancellationTokenSource();
+        var open = Phone with { PanelLifetime = lifetime.Token, Region = new CropRegion(0.15, 0.85, 0.3, 0.6) };
+        await watcher.PassAsync(Shade(10), [open]);
+        await watcher.PassAsync(Shade(10), [open]);
+        var moved = open with { Region = new CropRegion(0.15, 0.85, 0.35, 0.65) };
+        await watcher.PassAsync(Shade(10), [moved]);
+        Assert.Single(translator.Calls);
+        Assert.Equal(2, server.Sent.Count);
+        Assert.Equal(0.05, server.Sent[1].Box!.Value.Left - server.Sent[0].Box!.Value.Left, 5);
+    }
+
+    private sealed class WaitingPhoneTranslator(bool honorsCancellation = true, bool together = false, string? waitFor = null) : ITextTranslator
+    {
+        public bool TranslatesTogether => together;
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<string> Calls { get; } = [];
+        public async Task<string> TranslateAsync(string text, CancellationToken cancellationToken = default)
+        {
+            Calls.Add(text);
+            if (waitFor is null || text == waitFor)
+            {
+                Started.TrySetResult();
+                await Release.Task.WaitAsync(honorsCancellation ? cancellationToken : CancellationToken.None);
+            }
+            return "TR: " + text;
+        }
+    }
+
+    private static Frame ChangedPhoneLabel()
+    {
+        var frame = Shade(10);
+        // A small glyph stroke between the scan lines of the whole-region signature, inside the second bubble.
+        for (int y = 121; y <= 124; y++) Array.Fill(frame.Pixels, (byte)220, y * frame.Stride + 168 * 4, 2 * 4);
+        Assert.Equal(RegionCropper.Signature(Shade(10)), RegionCropper.Signature(frame));
+        return frame;
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ChangedPhoneLabelWithdrawsTheOldTranslationBeforeItsReplacementIsReady(bool keepOtherBubble)
+    {
+        using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var panel = Phone with { PanelLifetime = lifetime.Token, Region = new CropRegion(0, 1, 0, 1) };
+        List<TextLine> Page(string label) => keepOtherBubble
+            ? [Line("Wait outside.", .1, .05), Line(label, .65, .05)] : [Line(label, .65, .05)];
+        var reader = new Reader { Lines = Page("Greet") };
+        var translator = new WaitingPhoneTranslator(together: true, waitFor: "Antagonize");
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        await watcher.PassAsync(Shade(10), [panel]);
+        Assert.Contains("TR: Greet", Assert.Single(server.Sent).Text);
+        reader.Lines = Page("Antagonize");
+        var changed = ChangedPhoneLabel();
+        var pass = watcher.PassAsync(changed, [panel]);
+        try
+        {
+            Assert.Equal(2, reader.ScreenReads);
+            await translator.Started.Task.WaitAsync(lifetime.Token);
+            Assert.Equal(keepOtherBubble ? "TR: Wait outside." : "", server.Sent[^1].Text);
+            if (keepOtherBubble) Assert.Equal(.1, Assert.Single(server.Blocks[^1]!).Box.Top, 5);
+        }
+        finally { translator.Release.TrySetResult(); }
+        await pass;
+        Assert.Contains("TR: Antagonize", server.Sent[^1].Text);
+        for (int i = 0; i < 12; i++) await watcher.PassAsync(changed, [panel]);
+        Assert.Equal(2, reader.ScreenReads);
+        Assert.Single(translator.Calls, text => text == "Antagonize");
+    }
+
+    [Fact]
+    public async Task TinyChangeWhilePhoneLabelIsBeingTranslatedNeverPublishesTheStaleLabel()
+    {
+        using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var panel = Phone with { PanelLifetime = lifetime.Token, Region = new CropRegion(0, 1, 0, 1) };
+        var reader = new Reader { Lines = [Line("Greet", .65, .05)] };
+        var translator = new WaitingPhoneTranslator(waitFor: "Greet");
+        var server = new Server();
+        long clock = 0;
+        var watcher = new RegionWatcher(reader, translator, server, clock: () => clock);
+        watcher.Offer(Shade(10), [panel]);
+        await translator.Started.Task.WaitAsync(lifetime.Token);
+        var changed = ChangedPhoneLabel();
+        reader.Lines = [Line("Antagonize", .65, .05)];
+        watcher.Offer(changed, [panel]);
+        translator.Release.SetResult();
+        while (watcher.IsBusy) await Task.Delay(4, lifetime.Token);
+        Assert.DoesNotContain(server.Sent, sent => sent.Text.Contains("TR: Greet"));
+        clock = 1000;
+        watcher.Offer(changed, [panel]);
+        while (watcher.IsBusy) await Task.Delay(4, lifetime.Token);
+        Assert.Equal("TR: Antagonize", server.Sent[^1].Text);
+        Assert.Equal(2, reader.ScreenReads);
+    }
+
+    [Fact]
+    public async Task SlowManualAreaThenPhoneReadsOnlyTheNewestOfferedFrame()
+    {
+        using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var phone = Phone with { PanelLifetime = lifetime.Token, Region = new CropRegion(0, 1, 0, 1) };
+        var reader = new Reader
+        {
+            Lines = [Line("Visit the docks")],
+            ScreenLines = image => [Line(image.Width != 320 ? "Visit the docks" : image.Pixels[0] < 100 ? "Greet" : "Antagonize")]
+        };
+        var server = new Server();
+        var translator = new WaitingPhoneTranslator(waitFor: "Visit the docks");
+        long clock = 0;
+        var watcher = new RegionWatcher(reader, translator, server, clock: () => clock);
+        await watcher.PassAsync(Shade(10), [Quest]); // Bir sonraki normal turda görev çevrilecek.
+        watcher.Offer(Shade(10), [Quest, phone]);
+        await translator.Started.Task.WaitAsync(lifetime.Token);
+        watcher.Offer(Shade(90), [Quest, phone]);
+        watcher.Offer(Shade(180), [Quest, phone]);
+        translator.Release.SetResult();
+        while (watcher.IsBusy) await Task.Delay(4, lifetime.Token);
+        Assert.Equal("TR: Antagonize", Assert.Single(server.Sent, item => item.Id == phone.Id).Text);
+        Assert.Contains(server.Sent, item => item.Id == Quest.Id && item.Text == "TR: Visit the docks");
+        Assert.DoesNotContain("Greet", translator.Calls);
+        Assert.Single(reader.Sizes, size => size.Width == 320);
+    }
+
+    [Theory]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    public async Task StableManualAreasConfirmAt250msIndependentlyOfThePhone(int count, bool phoneOpen)
+    {
+        using var lifetime = new CancellationTokenSource();
+        var reader = new Reader { Lines = [Line("Check the map")] };
+        var server = new Server();
+        long clock = 0;
+        var watcher = new RegionWatcher(reader, new Translator(), server, clock: () => clock);
+        var areas = new List<WatchedArea> { Quest };
+        if (count == 2) areas.Add(Quest with { Id = "help" });
+        if (phoneOpen) areas.Add(Phone with { PanelLifetime = lifetime.Token });
+        var frame = Shade(12);
+        watcher.Offer(frame, areas);
+        await WaitForPass(watcher);
+        Assert.Equal(phoneOpen ? 1 : 0, server.Sent.Count);
+        var reads = watcher.Reads;
+        Assert.Equal(areas.Count, reads);
+        clock = 249;
+        watcher.Offer(frame, areas);
+        await WaitForPass(watcher);
+        Assert.DoesNotContain(server.Sent, item => item.Id != Phone.Id);
+        clock = 250;
+        watcher.Offer(frame, areas);
+        await WaitForPass(watcher);
+        foreach (var area in areas) Assert.Single(server.Sent, item => item.Id == area.Id && item.Text == "TR: Check the map");
+        Assert.Equal(reads, watcher.Reads);
+    }
+
+    [Fact]
+    public async Task MildVideoNoiseAndAnIsolatedPixelDoNotRereadAStablePhoneLabel()
+    {
+        using var lifetime = new CancellationTokenSource();
+        var phone = Phone with { PanelLifetime = lifetime.Token, Region = new CropRegion(0, 1, 0, 1) };
+        var reader = new Reader { Lines = [Line("Greet", .65, .05)] };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, new Translator(), server);
+        var first = Shade(60);
+        await watcher.PassAsync(first, [phone]);
+        for (int i = 0; i < 20; i++)
+        {
+            var noise = Shade((byte)(i % 2 == 0 ? 54 : 66));
+            Array.Fill(noise.Pixels, (byte)130, (121 + i % 3) * noise.Stride + 169 * 4, 4);
+            await watcher.PassAsync(noise, [phone]);
+        }
+        Assert.Equal(1, reader.ScreenReads);
+        Assert.Single(server.Sent);
+    }
+
+    [Theory]
+    [InlineData("Meet Chase at 15.", "Meet Chase at 50.")]
+    [InlineData("Meet Chase at noon.", "Meet May at noon.")]
+    [InlineData("I can do that.", "I can't do that.")]
+    public async Task PhonePublishesOnlyUnchangedBubblesThenFillsNewTextWithoutRetranslatingTheRest(string oldText, string newText)
+    {
+        const string common = "Wait outside.";
+        var reader = new Reader { Lines = [Line(common, .1, .05), Line(oldText, .65, .05)] };
+        var translator = new WaitingPhoneTranslator(together: true);
+        var server = new Server();
+        long clock = 0;
+        var watcher = new RegionWatcher(reader, translator, server, clock: () => clock);
+        using var lifetime = new CancellationTokenSource();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var panel = Phone with { PanelLifetime = lifetime.Token, Region = new CropRegion(0, 1, 0, 1) };
+        watcher.Offer(Shade(10), [panel]);
+        await translator.Started.Task.WaitAsync(timeout.Token);  // İlk okunabilir telefon karesi.
+        reader.Lines = [Line(common, .13, .05), Line(newText, .68, .05)];
+        watcher.Offer(Shade(65), [panel]);
+        translator.Release.SetResult();
+        while (watcher.IsBusy) await Task.Delay(4, timeout.Token);
+
+        Assert.Equal("TR: Wait outside.", Assert.Single(server.Sent).Text);
+        Assert.Equal(.13, Assert.Single(server.Blocks[0]!).Box.Top, 5);
+        clock = 1000;
+        watcher.Offer(Shade(65), [panel]);
+        while (watcher.IsBusy) await Task.Delay(4, timeout.Token);
+        Assert.Equal([common, oldText, newText], translator.Calls);
+        Assert.Equal(["TR: " + common, "TR: " + newText], server.Blocks[^1]!.Select(item => item.Translation));
+    }
+
+    [Fact]
+    public async Task LocalPhonePublishesTheMessageBeforeTranslatingTheHeaderAndRemainingBubble()
+    {
+        var reader = new Reader { Lines = [Line("Inbox", .1, .025), Line("Wait outside.", .35, .025), Line("Call me.", .67, .025)] };
+        var translator = new Translator();
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        using var lifetime = new CancellationTokenSource();
+        var panel = Phone with { PanelLifetime = lifetime.Token };
+        await watcher.PassAsync(Shade(10), [panel]);
+        Assert.Equal(["Wait outside."], translator.Calls);
+        Assert.Equal("TR: Wait outside.", Assert.Single(server.Sent).Text);
+
+        await watcher.PassAsync(Shade(10), [panel]);
+        Assert.Equal(["Wait outside.", "Inbox", "Call me."], translator.Calls);
+        Assert.Equal(["TR: Inbox", "TR: Wait outside.", "TR: Call me."], server.Blocks[^1]!.Select(i => i.Translation));
+    }
+
+    [Fact]
+    public async Task FasterOpenPhonePassesDoNotAccelerateOrClearRegularAreas()
+    {
+        var reader = new Reader { Lines = [Line("One message.")] };
+        var server = new Server();
+        using var lifetime = new CancellationTokenSource();
+        var phone = Phone with { PanelLifetime = lifetime.Token };
+        long clock = 0;
+        var watcher = new RegionWatcher(reader, new Translator(), server, clock: () => clock);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        foreach (var time in new[] { 0, 330, 450, 900, 1000 })
+        {
+            clock = time;
+            watcher.Offer(Shade((byte)(time / 5)), [Quest, phone]);
+            while (watcher.IsBusy) await Task.Delay(4, timeout.Token);
+        }
+        var phoneCrop = RegionCropper.Crop(Shade(10), phone.Region);
+        Assert.Equal(5, reader.ScreenReads);
+        Assert.Equal(3, reader.Sizes.Count(size => size == (phoneCrop.Width, phoneCrop.Height)));
+        Assert.DoesNotContain(server.Sent, item => item.Id == Quest.Id && item.Text.Length == 0);
+    }
+
+    [Fact]
+    public async Task ChangingEndOfFirstPreviewCannotStarveOtherMessagesOrPrioritizeContactNames()
+    {
+        var reader = new Reader();
+        var translator = new Translator();
+        var watcher = new RegionWatcher(reader, translator, new Server());
+        using var lifetime = new CancellationTokenSource();
+        var phone = Phone with { PanelLifetime = lifetime.Token };
+        foreach (var (tail, shade) in new[] { ("th.,", 20), ("ttv", 60), ("th.w", 100) })
+        {
+            reader.Lines = [Line("Suggested", .02, .025), Line("Sally Jones", .15, .025),
+                Line("Her rent just came " + tail, .33, .025), Line("Call me soon.", .55, .025), Line("Do we have time?", .75, .025)];
+            await watcher.PassAsync(Shade((byte)shade), [phone]);
+        }
+        Assert.Equal(["Her rent just came th.,", "Call me soon.", "Do we have time?"], translator.Calls);
+    }
+
+    [Fact]
+    public async Task OpeningAnotherChatStartsWithItsFirstMessageEvenIfAListPreviewReappearsFurtherDown()
+    {
+        var reader = new Reader();
+        var translator = new Translator();
+        var watcher = new RegionWatcher(reader, translator, new Server());
+        using var lifetime = new CancellationTokenSource();
+        var phone = Phone with { PanelLifetime = lifetime.Token };
+        reader.Lines = [Line("Suggested", .02, .025), Line("Sally Jones", .16, .025),
+            Line("Her rent just came th.,", .33, .025), Line("Bring the car.", .55, .025), Line("Do we have time?", .78, .025)];
+        await watcher.PassAsync(Shade(20), [phone]);
+        // Aynı listenin başka önizlemeleri yenilendi; ilk hücrenin sonundaki OCR farkı sırayı başa alamaz.
+        reader.Lines = [Line("Suggested", .02, .025), Line("Sally Jones", .16, .025),
+            Line("Her rent just came ttv.", .33, .025), Line("I'll wait here.", .55, .025), Line("Leave now.", .78, .025)];
+        await watcher.PassAsync(Shade(60), [phone]);
+        reader.Lines = [Line("The first new message is important.", .12, .025), Line("Call me soon.", .34, .025),
+            Line("Do you need me?", .55, .025), Line("Her rent just came through.", .78, .025)];
+        await watcher.PassAsync(Shade(100), [phone]);
+        Assert.Equal(["Her rent just came th.,", "I'll wait here.", "The first new message is important."], translator.Calls);
+    }
+
+    [Theory]
+    [InlineData("The rent just came th.,", "The rent just came th...")]
+    [InlineData("The rent just came th.„", "The rent just came th...")]
+    [InlineData("The rent just came ttv.", "The rent just came ttv.")]
+    [InlineData("Call May at 06:40.", "Call May at 06:40.")]
+    public void OnlyTrailingEllipsisPunctuationIsNormalizedAtTheEdgeOfAConfirmedList(string preview, string expected)
+    {
+        static TextLine Row(string value, double y) => new(value, new TextBox(.2, y, .91, y + .03));
+        var reading = new Reading([Row("Suggested", .02), Row("Brian", .14), Row(preview, .175),
+            Row("Joey", .28), Row("Call me soon.", .315), Row("Messages", .48),
+            Row("May", .57), Row("Do we have time?", .605)]);
+        Assert.Contains(GamePhoneText.ForTranslation(reading).Lines, l => l.Text == expected);
+        Assert.Equal(preview, Assert.Single(GamePhoneText.ForTranslation(new Reading([Row(preview, .2)])).Lines).Text);
+    }
+
+    [Fact]
+    public async Task ReturningToASeenMessageReusesOnlyItsExactTextUntilThePhoneCloses()
+    {
+        var reader = new Reader();
+        var translator = new Translator();
+        var watcher = new RegionWatcher(reader, translator, new Server());
+        using var lifetime = new CancellationTokenSource();
+        var phone = Phone with { PanelLifetime = lifetime.Token };
+        foreach (var (message, shade) in new[] { ("Meet May at 15.", 20), ("Meet May at 50.", 80), ("Meet May at 15.", 20) })
+        {
+            reader.Lines = [Line(message)];
+            await watcher.PassAsync(Shade((byte)shade), [phone]);
+        }
+        lifetime.Cancel();
+        watcher.RemovePanel(phone.Id);
+        using var reopened = new CancellationTokenSource();
+        await watcher.PassAsync(Shade(20), [phone with { PanelLifetime = reopened.Token }]);
+        Assert.Equal(["Meet May at 15.", "Meet May at 50.", "Meet May at 15."], translator.Calls);
+    }
+
+    [Fact]
+    public async Task ClosingPhoneBetweenDetectorSamplesNeverReadsGameplayOrPublishesPendingMessage()
+    {
+        var phone = GamePhoneTrackerTests.PhoneFrame();
+        var tracker = new GamePhoneTracker();
+        tracker.TrySample(phone, 0, out _);
+        tracker.TrySample(phone, 400, out var region);
+        Assert.NotNull(region);
+        using var lifetime = new CancellationTokenSource();
+        var area = tracker.WithPose(Phone with { Region = region, PanelLifetime = lifetime.Token });
+        var reader = new Reader { Lines = [Line("Read my message.")] };
+        var translator = new WaitingPhoneTranslator();
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        watcher.Offer(phone, [area]);
+        await translator.Started.Task.WaitAsync(timeout.Token);
+
+        // The text area still looks the same. The phone itself is already gone.
+        var gameplay = Frame.Blank(phone.Width, phone.Height);
+        Array.Fill(gameplay.Pixels, (byte)195);
+        reader.Lines = [Line("Return to the main menu.")];
+        watcher.Offer(gameplay, [area]);
+        translator.Release.SetResult();
+        while (watcher.IsBusy) await Task.Delay(4, timeout.Token);
+        await watcher.PassAsync(gameplay, [area]);
+        await watcher.PassAsync(gameplay, [area]);
+        Assert.Equal(1, reader.ScreenReads);
+        Assert.Equal(["Read my message."], translator.Calls);
+        Assert.DoesNotContain(server.Sent, sent => sent.Text.Length > 0);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PendingPhoneTranslationRechecksChangedTextButNotVideoOutsideTheText(bool changeText)
+    {
+        var first = Shade(10);
+        var next = Shade(10);
+        var top = changeText ? 36 : 118;
+        for (var y = top; y < top + 17; y++) Array.Fill(next.Pixels, (byte)220, y * next.Stride + 32 * 4, 255 * 4);
+        using var lifetime = new CancellationTokenSource();
+        var area = Phone with { PanelLifetime = lifetime.Token, Region = new CropRegion(0, 1, 0, 1) };
+        var reader = new Reader { Lines = [Line("Where are you?")] };
+        var server = new Server();
+        var translator = new WaitingPhoneTranslator();
+        long clock = 0;
+        var watcher = new RegionWatcher(reader, translator, server, clock: () => clock);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        async Task WaitUntilIdle()
+        {
+            while (watcher.IsBusy) await Task.Delay(4, timeout.Token);
+        }
+        watcher.Offer(first, [area]);
+        await translator.Started.Task.WaitAsync(timeout.Token);
+        if (changeText) reader.Lines = [Line("Meet me outside.")];
+        watcher.Offer(Shade(125), [area]); // Ara kare birikmemeli, son sayfa geçerlidir.
+        watcher.Offer(next, [area]); // Çevirmen meşgulken gelen yeni kare.
+        translator.Release.SetResult();
+        await WaitUntilIdle();
+
+        if (changeText)
+        {
+            Assert.DoesNotContain(server.Sent, sent => sent.Text == "TR: Where are you?");
+            clock = 2000;
+            watcher.Offer(next, [area]);
+            await WaitUntilIdle();
+            Assert.Contains(server.Sent, sent => sent.Text == "TR: Meet me outside.");
+            Assert.Equal(["Where are you?", "Meet me outside."], translator.Calls);
+            Assert.Equal(2, reader.ScreenReads);
+        }
+        else
+        {
+            Assert.Equal("TR: Where are you?", Assert.Single(server.Sent).Text);
+            Assert.Single(translator.Calls);
+            Assert.Equal(1, reader.ScreenReads);
+        }
     }
 
     [Fact]

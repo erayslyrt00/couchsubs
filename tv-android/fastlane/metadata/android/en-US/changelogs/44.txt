@@ -1,0 +1,1 @@
+0.9.40: With experimental GTA 6 phone translation enabled on Windows, messages and reply options appear over their original text with colors sampled from the phone screen.

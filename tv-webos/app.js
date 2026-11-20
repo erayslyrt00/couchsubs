@@ -6,7 +6,7 @@
   'use strict';
 
   // TV uygulamasının sürümü: appinfo.json, tv-tizen/config.xml ve tv-android/app/build.gradle ile aynı tutulur.
-  var APP_VERSION = '0.9.40';
+  var APP_VERSION = '0.9.41';
   var t = window.t;
   var config = window.COUCHSUBS_CONFIG || {};
   var platform = window.COUCHSUBS_PLATFORM;
@@ -762,52 +762,68 @@
   var SCREEN_PAD = 0.004;
   var SCREEN_MIN_FONT = 14;
 
+  function phoneColor(value) {
+    return typeof value === 'string' && value.length === 7 && /^#[0-9a-f]{6}$/i.test(value);
+  }
+
   // Yalnız aşağıdaki bağımsız kutular büyümeyi sınırlar; kaynakta zaten üst üste olan
   // kutuların yerini değiştirmeyiz. Aynı hesap bütün sonuçlar için yapılır, sıra önemli değildir.
-  function screenBottom(items, box, left, width, screenWidth, screenHeight) {
+  function screenBottom(items, box, left, width, screenWidth, screenHeight, pad, minWidth) {
     var bottom = screenHeight;
     for (var j = 0; j < items.length; j++) {
       var other = items[j];
       var next = validBox(other && other.box);
       if (!next || !other.text || next.top < box.bottom) continue;
-      var nextLeft = Math.max(0, next.left - SCREEN_PAD) * screenWidth;
-      var nextWidth = Math.max(80, (Math.min(1, next.right + SCREEN_PAD) * screenWidth - nextLeft));
+      var nextLeft = Math.max(0, next.left - pad) * screenWidth;
+      var nextWidth = Math.max(minWidth, (Math.min(1, next.right + pad) * screenWidth - nextLeft));
       if (left < nextLeft + nextWidth && left + width > nextLeft)
-        bottom = Math.min(bottom, Math.max(0, next.top - SCREEN_PAD) * screenHeight);
+        bottom = Math.min(bottom, Math.max(0, next.top - pad) * screenHeight);
     }
     return bottom;
   }
 
   // Yeriyle gelen çevirileri (ekranı çevir öğeleri, ek alan blokları) kendi İngilizce yazılarının üstüne koyar.
-  function placeItems(host, items, regionBlocks) {
+  function placeItems(host, items, regionId) {
+    var phone = regionId === 'game-phone';
     var width = window.innerWidth || 1920;
     var height = window.innerHeight || 1080;
+    var pad = phone ? 0.001 : SCREEN_PAD;
+    var minWidth = phone ? 1 : 80;
     for (var i = 0; i < (items || []).length; i++) {
       var item = items[i];
       var box = validBox(item && item.box);
       if (!box || !item.text) continue;
       var el = document.createElement('div');
       el.className = item.paragraphs === true ? 'item paragraphs' : 'item';
+      if (phone) {
+        el.className += ' phone';
+        var surface = item.surface;
+        if (surface && phoneColor(surface.background) && phoneColor(surface.foreground)) {
+          el.style.backgroundColor = surface.background;
+          el.style.color = surface.foreground;
+        }
+      }
       fillText(el, item.text, item.icons);
-      var left = Math.max(0, box.left - SCREEN_PAD);
-      var top = Math.max(0, box.top - SCREEN_PAD);
-      var boxHeight = (box.bottom - box.top + 2 * SCREEN_PAD) * height;
-      var itemWidth = Math.max(80, (Math.min(1, box.right + SCREEN_PAD) - left) * width);
-      if (regionBlocks) itemWidth = Math.min(itemWidth, (1 - left) * width);
+      var left = Math.max(0, box.left - pad);
+      var top = Math.max(0, box.top - pad);
+      var boxHeight = (box.bottom - box.top + 2 * pad) * height;
       el.style.left = (left * 100) + '%';
       el.style.top = (top * 100) + '%';
+      var itemWidth = Math.max(minWidth, (Math.min(1, box.right + pad) - left) * width);
+      if (regionId) itemWidth = Math.min(itemWidth, (1 - left) * width);
       el.style.width = itemWidth + 'px';
       // Bir piksel pay, tarayıcının kesirli koordinat/scrollHeight yuvarlamasını karşılar.
-      var available = Math.max(0, Math.floor(screenBottom(items, box, left * width, itemWidth, width, height) - top * height) - 1);
+      var available = Math.max(0, Math.floor(screenBottom(items, box, left * width, itemWidth, width, height, pad, minWidth) - top * height) - 1);
       el.style.minHeight = Math.min(Math.round(boxHeight), available) + 'px';
       var line = typeof item.line === 'number' && item.line > 0 ? item.line * height : box.bottom * height - box.top * height;
-      var size = Math.max(SCREEN_MIN_FONT, Math.min(96, Math.round(line * 0.95)));
+      var floor = phone ? Math.max(10, Math.round(12 * height / 1080)) : SCREEN_MIN_FONT;
+      var size = Math.max(floor, Math.min(96, Math.round(line * 0.95)));
       el.style.fontSize = size + 'px';
       host.appendChild(el);
       // Türkçe çoğu zaman İngilizceden uzundur: kutu biraz uzayabilir, daha fazlası için yazı küçülür.
-      var limit = Math.min(available, Math.max(boxHeight * 1.5, line * 2.6));
-      while (el.scrollHeight > limit && size > SCREEN_MIN_FONT) {
-        size = Math.max(SCREEN_MIN_FONT, size - 2);
+      var limit = Math.min(available, phone ? boxHeight + 1 : Math.max(boxHeight * 1.5, line * 2.6));
+      while (el.scrollHeight > limit && size > floor) {
+        size = Math.max(floor, size - 2);
         el.style.fontSize = size + 'px';
       }
       // En küçük okunabilir boyutta da sığmayan metni kesmeyiz/gizlemeyiz.
@@ -868,7 +884,7 @@
     }
     $('regions').className = '';
     if (kind === 'region-blocks') {
-      placeItems(el, blocks, true);
+      placeItems(el, blocks, id);
       return;
     }
     var width = window.innerWidth || 1920;

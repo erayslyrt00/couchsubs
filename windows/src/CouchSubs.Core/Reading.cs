@@ -37,7 +37,11 @@ public readonly record struct TextBox(double Left, double Top, double Right, dou
 /// kumanda simgesini bulmak için (<see cref="ButtonIcons"/>).</param>
 /// <param name="Icons">Metindeki her <see cref="ButtonIcons.Marker"/> için, sırasıyla, simgenin yeri ve okunan hali.</param>
 public sealed record TextLine(string Text, TextBox? Box = null, double? Confidence = null,
-                              IReadOnlyList<TextWord>? Words = null, IReadOnlyList<IconSlot>? Icons = null);
+                              IReadOnlyList<TextWord>? Words = null, IReadOnlyList<IconSlot>? Icons = null)
+{
+    // Balonlar düz telefon ekranında gruplanır; Box, TV'de gösterim için oyun görüntüsündeki kutudur.
+    internal TextBox? PhoneBox { get; init; }
+}
 
 /// <summary>Yazı tanımanın bulduğu bir sözcük ve yeri (okunan alanın kenarlarına oranla).</summary>
 public sealed record TextWord(string Text, TextBox Box);
@@ -103,7 +107,9 @@ public sealed class Reading
     /// Yazı tanımanın uydurduğu sözcük çöpleri ("ou$3e", "waters2aljd") ayıklanmış hali; çevirmen bunları olduğu
     /// gibi taşıyıp TV'de anlamsız harfler gösteriyordu.
     /// </summary>
-    public Reading WithoutOcrNoise() => new(Lines.Select(line => line with { Text = OcrNoise.Clean(line.Text) }));
+    public Reading WithoutOcrNoise() => WithoutOcrNoise(false);
+    internal Reading WithoutOcrNoise(bool keepIdentifiers) =>
+        new(Lines.Select(line => line with { Text = OcrNoise.Clean(line.Text, keepIdentifiers) }));
 
     /// <summary>
     /// Aynı satırda yan yana okunan parçalar soldan sağa tek satır olur. Renkli konuşan adını ("Arthur:", RDR2) yazı

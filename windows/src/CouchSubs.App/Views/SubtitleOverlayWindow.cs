@@ -43,7 +43,7 @@ public sealed partial class SubtitleOverlayWindow : Window
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private readonly DispatcherTimer timer = new();
     private readonly StackPanel linesPanel = new() { VerticalAlignment = VerticalAlignment.Bottom };
-    private readonly StackPanel regionsPanel = new() { VerticalAlignment = VerticalAlignment.Top, IsHitTestVisible = false };
+    private readonly DesktopRegionsPanel regionsPanel;
     /// <summary>Görünen satırların kutuları; solan satırın animasyonu yeniden çizimde baştan başlamasın.</summary>
     private readonly Dictionary<int, Border> boxes = [];
     private readonly Grid adjustLayer = new() { Visibility = Visibility.Collapsed };
@@ -75,6 +75,7 @@ public sealed partial class SubtitleOverlayWindow : Window
         topmost = new TopmostKeeper(this);
 
         var root = new Grid();
+        regionsPanel = new DesktopRegionsPanel(linesPanel, 8 * Scale);
         root.Children.Add(adjustLayer);
         root.Children.Add(new Border { Padding = new Thickness(24 * Scale, 0, 24 * Scale, 8 * Scale), Child = linesPanel });
         root.Children.Add(new Border { Padding = new Thickness(24 * Scale, 8 * Scale, 24 * Scale, 0), Child = regionsPanel });
@@ -236,8 +237,7 @@ public sealed partial class SubtitleOverlayWindow : Window
             linesPanel.Children.Add(box);
         }
 
-        regionsPanel.Children.Clear();
-        foreach (var (text, area) in regions.Values.OrderBy(region => region.Box?.Top ?? 0)) regionsPanel.Children.Add(MakeRegionBox(text, area));
+        regionsPanel.ShowRegions(regions, MakeRegionBox);
 
         var visible = controller.ShowsOnComputer && (lines.Count > 0 || regions.Count > 0);
         if (visible && !IsVisible) Show();

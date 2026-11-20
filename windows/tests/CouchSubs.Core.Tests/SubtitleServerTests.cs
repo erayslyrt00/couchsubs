@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 using System.Net;
+using System.Text.Json;
 using CouchSubs.Core;
 
 namespace CouchSubs.Core.Tests;
@@ -135,6 +136,33 @@ public class SubtitleServerTests
                         "{\"box\":{\"bottom\":0.2,\"left\":0.6,\"right\":0.7,\"top\":0.15},\"line\":0.04,\"text\":\"Go\"}]," +
                         "\"box\":{\"bottom\":0.2,\"left\":0.6,\"right\":0.95,\"top\":0.05},\"id\":\"q\",\"line\":0.03,\"text\":\"Find\\nGo\"}", lines);
         Assert.Contains("data: {\"id\":\"q\",\"text\":\"\"}", lines);
+    }
+
+    [Fact]
+    public async Task OnlyPhoneBlocksSendValidColorsAndKeepTheLegacyText()
+    {
+        using var server = new SubtitleServer(0);
+        var port = await server.StartAsync();
+        using var response = await Http.GetAsync($"http://127.0.0.1:{port}/events", HttpCompletionOption.ResponseHeadersRead);
+        await WaitUntil(() => server.ConnectedClients == 1);
+        var box = new TextBox(0.4, 0.2, 0.6, 0.25);
+        var item = new ScreenTranslation.Item("Reply", "Yanıt", box, 0.025) { Style = new("#2173AD", "#FFFFFF") };
+        server.SendRegion("game-phone", "Yanıt", box, 0.025, null, [item]);
+        server.SendRegion("area1", "Yanıt", box, 0.025, null, [item]);
+        server.SendRegion("game-phone", "Yanıt", box, 0.025, null, [item with { Style = new("transparent", "#FFFFFF") }]);
+        server.ClearRegions();
+
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+        var events = (await ReadLines(reader, "event: region-clear")).Where(l => l.StartsWith("data: ") && l.Contains("\"blocks\"")).ToList();
+        Assert.Equal(3, events.Count);
+        using var phone = JsonDocument.Parse(events[0][6..]);
+        Assert.Equal("game-phone", phone.RootElement.GetProperty("id").GetString());
+        Assert.Equal("Yanıt", phone.RootElement.GetProperty("text").GetString()); // Older receivers use the joined text.
+        var surface = phone.RootElement.GetProperty("blocks")[0].GetProperty("surface");
+        Assert.Equal("#2173AD", surface.GetProperty("background").GetString());
+        Assert.Equal("#FFFFFF", surface.GetProperty("foreground").GetString());
+        Assert.DoesNotContain("surface", events[1]);
+        Assert.DoesNotContain("surface", events[2]);
     }
 
     /// <summary>Eşleştirilmiş TV anahtarlı bağlantıda da ek alan bloklarını (<c>blocks</c>) aynen alır; eski (anahtarsız)

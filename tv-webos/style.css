@@ -69,6 +69,16 @@ html, body {
   overflow: hidden;
 }
 #screen .item.paragraphs, #regions .region-blocks .item.paragraphs { text-align: left; white-space: pre-line; }
+#regions .region-blocks .item.phone {
+  padding: 1px 2px;
+  border-radius: 2px;
+  background: #24272a;
+  color: #fff;
+  line-height: 1.1;
+  font-weight: 500;
+  text-align: left;
+  text-shadow: none;
+}
 /* Çevirinin içindeki kumanda simgesi (oyun karesinden kesilmiş): yazı boyunda, satırın ortasında. */
 #screen .icon, #regions .icon {
   height: 1.15em;
