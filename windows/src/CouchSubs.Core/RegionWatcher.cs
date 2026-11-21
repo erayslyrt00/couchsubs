@@ -82,6 +82,8 @@ public sealed partial class RegionWatcher
         public byte[]? Signature;
         public CropRegion? ReadRegion;
         public GamePhonePage? ReadPhonePage;
+        public IReadOnlyList<ScreenTranslation.Item>? SentPhoneBlocks;
+        public double PhoneScale;
         public Frame? LastReadCrop;
         public TextBox[] Lines = [];
         public long LastFullCheck;
@@ -103,6 +105,7 @@ public sealed partial class RegionWatcher
         public TextBox? RenderedBox;
         public double? RenderedLineHeight;
         public IReadOnlyList<Block>? RenderedLayout;
+        public IReadOnlyList<string>? RenderedPhoneParagraphs;
         /// <summary>Gönderilen bloklar ve her birinin <see cref="Candidate.Blocks"/> içindeki sırası.</summary>
         public IReadOnlyList<(int Group, ScreenTranslation.Item Item)>? RenderedBlocks;
         // Yalnız açık telefon için. Kısa bir OCR sapmasından veya sohbetten geri dönünce aynı metin yeniden istenmez.
@@ -822,8 +825,62 @@ public sealed partial class RegionWatcher
         {
             if (Volatile.Read(ref session) != started || area.PanelLifetime is { IsCancellationRequested: true }
                 || !map.TryGetValue(area.Id, out var current) || !ReferenceEquals(state, current)) return;
+            if (area.PanelLifetime.HasValue)
+            {
+                double scale = area.Region.Bottom - area.Region.Top;
+                // Telefon gerçekten yakınlaşıp uzaklaşınca yeni boyutlar hemen kullanılır.
+                if (Math.Abs(scale - state.PhoneScale) > state.PhoneScale * 0.03)
+                {
+                    state.PhoneScale = scale;
+                    state.SentPhoneBlocks = null;
+                }
+                if (blocks is not null && state.SentPhoneBlocks is { } previous)
+                    blocks = StablePhoneBlocks(blocks, previous);
+                state.SentPhoneBlocks = blocks;
+            }
             server.SendRegion(area.Id, text, box, lineHeight, icons, blocks);
         }
+    }
+
+    // Aynı balon hareket ederken konumu her pakette izlenir. Küçük OCR kutu farkları punto ve satır
+    // kırılımını, renk örneklemesi de zemini sürekli değiştirmesin. Esas alınan değer son çizilendir.
+    internal static IReadOnlyList<ScreenTranslation.Item> StablePhoneBlocks(IReadOnlyList<ScreenTranslation.Item> items,
+                                                                           IReadOnlyList<ScreenTranslation.Item> previous)
+    {
+        return items.Select(item =>
+        {
+            ScreenTranslation.Item? match = null;
+            foreach (var old in previous)
+            {
+                if (old.Source != item.Source || old.Translation != item.Translation
+                    || Math.Abs(old.Box.Left - item.Box.Left) > .05 || Math.Abs(old.Box.Top - item.Box.Top) > .05) continue;
+                if (match is not null) return item; // Aynı yerdeki iki eş mesaj ayırt edilemiyor.
+                match = old;
+            }
+            if (match is null) return item;
+            var box = item.Box;
+            double width = box.Right - box.Left, height = box.Bottom - box.Top;
+            double oldWidth = match.Box.Right - match.Box.Left, oldHeight = match.Box.Bottom - match.Box.Top;
+            if (oldWidth > 0 && Math.Abs(width - oldWidth) <= oldWidth * .05)
+                box = box with { Right = Math.Min(1, box.Left + oldWidth) };
+            if (oldHeight > 0 && Math.Abs(height - oldHeight) <= oldHeight * .10)
+                box = box with { Bottom = Math.Min(1, box.Top + oldHeight) };
+            double line = Math.Abs(item.LineHeight - match.LineHeight) <= match.LineHeight * .15 ? match.LineHeight : item.LineHeight;
+            var style = item.Style;
+            if (style is not null && match.Style is { } before)
+            {
+                // Ön ve arka renkler bağımsızdır: seçimin gerçek yazı/zemin rengi değişimi korunur.
+                style = style with
+                {
+                    Foreground = NearColor(style.Foreground, before.Foreground, 16) ? before.Foreground : style.Foreground,
+                    Background = NearColor(style.Background, before.Background, 16) ? before.Background : style.Background
+                };
+                // Farklı iki okunabilir paletin karışımı kontrastı düşürebilir. Bu durumda güncel çifti kullan.
+                if (style != before && style != item.Style && DesignTokens.Contrast(style.Background, style.Foreground) < 4.5)
+                    style = item.Style;
+            }
+            return item with { Box = box, LineHeight = line, Style = style };
+        }).ToList();
     }
 
     private void Publish(WatchedArea area, State state, int started, Candidate candidate, string?[] result, int readyCount,

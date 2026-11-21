@@ -10,6 +10,28 @@ internal static partial class GamePhoneText
     [GeneratedRegex(@"(?<![\p{L}\p{N}_])[@#][\p{L}\p{N}_]+(?:[.-][\p{L}\p{N}_]+)*")]
     private static partial Regex Identifier();
 
+    // Aynı uzun mesajda yan yana iki kısa sözcükte birer harf oynamış ("it out" → "ct ocut").
+    // Tek kelimelik seçenekler, eklenen/silinen sözcükler, sayılar ve olumsuzluklar doğrudan işlenir.
+    internal static bool HasAdjacentOcrEdits(string shown, string next)
+    {
+        var before = TextMatch.Normalize(shown).Split(' ');
+        var after = TextMatch.Normalize(next).Split(' ');
+        if (before.Length < 9 || before.Length != after.Length) return false;
+        int first = 0, last = before.Length - 1;
+        while (first <= last && before[first] == after[first]) first++;
+        while (last > first && before[last] == after[last]) last--;
+        if (last != first + 1) return false;
+        for (int i = first; i <= last; i++)
+        {
+            var a = before[i];
+            var b = after[i];
+            int length = Math.Max(a.Length, b.Length);
+            if (Math.Min(a.Length, b.Length) < 2 || length > 6 || !a.All(char.IsLetter) || !b.All(char.IsLetter)
+                || !TextMatch.IsSimilar(a, b, 1.0 - 1.0 / length)) return false;
+        }
+        return !TextMatch.AddsMeaning(next, shown) && !TextMatch.AddsMeaning(shown, next);
+    }
+
     internal static bool ContainsIdentifier(string text) =>
         (text.Contains('@') || text.Contains('#')) && Identifier().IsMatch(text);
 
@@ -73,7 +95,7 @@ internal static partial class GamePhoneText
         {
             var name = ordered[i];
             var preview = ordered[i + 1];
-            if (!IsContactPair(name, preview)) continue;
+            if (!preview.Text.Trim().Contains(' ') || !IsContactPair(name, preview)) continue;
             names.Add(name);
             previews.Add(preview);
             i++;
@@ -85,6 +107,18 @@ internal static partial class GamePhoneText
         bool InNameColumn(TextLine line) => LayoutBox(line) is { } box &&
             Math.Abs(box.Left - (first.Left + slope * (box.Top - first.Top))) <= 0.06;
         if (!names.All(InNameColumn)) return new Reading(lines);
+        // Listeyi uzun önizlemeler doğruladı. Aynı satır düzenindeki "Okay" gibi kısa bir yanıtı
+        // tek başına kişi adına benziyor diye filtreleme. Başlı başına duran rehber adları elenir.
+        for (int i = 0; i + 1 < ordered.Count; i++)
+        {
+            var name = ordered[i];
+            var preview = ordered[i + 1];
+            if (!InNameColumn(name) || previews.Contains(name) || names.Contains(preview) ||
+                preview.Text.Trim().Contains(' ') || !LooksLikeName(preview.Text) || !IsContactPair(name, preview)) continue;
+            names.Add(name);
+            previews.Add(preview);
+            i++;
+        }
         // Önizlemesi boş kişilerin adı da aynı eğik sütunda, aynı satır düzenindedir.
         var withoutNames = lines.Where(line => previews.Contains(line) ||
             !(InNameColumn(line) && (names.Contains(line) || LooksLikeName(line.Text))));
@@ -98,9 +132,12 @@ internal static partial class GamePhoneText
         if (LayoutBox(line) is not { Right: >= .76 }) return line;
         int end = line.Text.Length, start = end;
         while (start > 0 && line.Text[start - 1] is '.' or ',' or '„') start--;
-        if (end - start is < 2 or > 3 || start == 0 || !char.IsLetter(line.Text[start - 1])
-            || line.Text[start] != '.' || line.Text.EndsWith("...", StringComparison.Ordinal)) return line;
-        return line with { Text = line.Text[..start] + "..." };
+        if (end - start is < 2 or > 3 || line.Text[start] != '.') return line;
+        int wordEnd = start;
+        while (wordEnd > 0 && char.IsWhiteSpace(line.Text[wordEnd - 1])) wordEnd--;
+        if (wordEnd == 0 || !char.IsLetter(line.Text[wordEnd - 1])) return line;
+        if (wordEnd == start && line.Text.EndsWith("...", StringComparison.Ordinal)) return line;
+        return line with { Text = line.Text[..wordEnd] + "..." };
     }
 
     private static TextBox? LayoutBox(TextLine line) => line.PhoneBox ?? line.Box;
@@ -130,7 +167,7 @@ internal static partial class GamePhoneText
     {
         var label = name.Text.Trim();
         bool lowerName = label.Length is >= 2 and <= 18 && label.All(char.IsLower);
-        if ((!LooksLikeName(label) && !lowerName) || !preview.Text.Trim().Contains(' ')) return false;
+        if (!LooksLikeName(label) && !lowerName) return false;
         var a = LayoutBox(name)!.Value;
         var b = LayoutBox(preview)!.Value;
         var h = a.Bottom - a.Top;
@@ -167,16 +204,25 @@ internal static partial class GamePhoneText
         }
         foreach (var line in reading.Lines.Where(l => l.Box.HasValue).OrderBy(l => Layout(l).Top))
         {
-            if (run.Count > 0 && BreaksBlock(Layout(run[^1]), Layout(line))) Finish();
+            if (run.Count > 0)
+            {
+                var previous = run[^1];
+                if (BreaksBlock(Layout(previous), Layout(line), flat && EndsSentence(previous.Text))) Finish();
+            }
             run.Add(line);
         }
         Finish();
         return groups.Count <= ScreenTranslation.MaxGroups ? groups : groups.GetRange(0, ScreenTranslation.MaxGroups);
     }
 
-    private static bool BreaksBlock(TextBox previous, TextBox next)
+    private static bool EndsSentence(string text) => text.TrimEnd().LastOrDefault() is '.' or '!' or '?';
+
+    private static bool BreaksBlock(TextBox previous, TextBox next, bool afterFlatSentence)
     {
-        if (next.Top - previous.Bottom > Math.Max(previous.Bottom - previous.Top, next.Bottom - next.Top)) return true;
+        // Düzeltilmiş telefon görüntüsünde satır arası dar, ardışık balonlar arasındaki boşluk daha geniştir.
+        // Cümle sonunda bu aralığı kullan; aynı balonda alt satıra geçen ikinci cümle birlikte kalır.
+        var lineHeight = Math.Max(previous.Bottom - previous.Top, next.Bottom - next.Top);
+        if (next.Top - previous.Bottom > lineHeight * (afterFlatSentence ? 0.65 : 1)) return true;
         bool alignedLeft = Math.Abs(previous.Left - next.Left) <= 0.08;
         bool alignedRight = Math.Min(previous.Left, next.Left) > 0.25 && Math.Abs(previous.Right - next.Right) <= 0.045;
         return !alignedLeft && !alignedRight;

@@ -38,7 +38,7 @@ public sealed partial class RegionWatcher
             if (state.Candidate is { } stable)
             {
                 state.Candidate = null;
-                await CommitPhoneAsync(stable, area, state, started).ConfigureAwait(false);
+                await CommitPhoneAsync(stable, area, state, started, frame).ConfigureAwait(false);
             }
             return;
         }
@@ -54,6 +54,18 @@ public sealed partial class RegionWatcher
             return;
         }
         if (Volatile.Read(ref session) != started || area.PanelLifetime is { IsCancellationRequested: true }) return;
+        // Yerinde duran iki komşu arasından düşen balon veya uzun mesajdaki birkaç bozuk harf tek okumada silinmesin.
+        // Sonraki olağan tur mutlaka yeniden okur; aynı görünen gerçek bir değişiklik de bu turda ilerler.
+        if (state.Held is null && !moved && state.RenderedKey == state.Shown && state.Shown != candidate.Key
+            && !string.IsNullOrEmpty(state.RenderedText)
+            && (MissingInteriorPhoneBubble(state, candidate)
+                || (SamePhoneLayout(state, candidate, frame) && GamePhoneText.HasAdjacentOcrEdits(state.Shown, candidate.Key))))
+        {
+            state.Held = candidate.Key;
+            state.Signature = null;
+            return;
+        }
+        state.Held = null;
         state.ReadRegion = area.Region;
         state.ReadPhonePage = candidate.PhonePage;
         // Telefonun açılışı iki geometri örneğiyle doğrulandı. Okunan sayfayı çevirmeye hemen başla;
@@ -62,12 +74,14 @@ public sealed partial class RegionWatcher
         {
             state.LastRead = candidate.Key;
             state.Candidate = null;
-            await CommitPhoneAsync(candidate, area, state, started).ConfigureAwait(false);
+            await CommitPhoneAsync(candidate, area, state, started, frame).ConfigureAwait(false);
         }
         else
         {
             state.LastRead = candidate.Key;
-            state.Candidate = candidate;
+            state.Candidate = null;
+            // Boş sonuç bir kez daha OCR ile doğrulanır; aynı pikseller ilk okumada kaçan mesajı gizlememeli.
+            state.Signature = null;
         }
     }
 
@@ -122,15 +136,80 @@ public sealed partial class RegionWatcher
         state.PhoneOrderAnchors = [.. anchors];
     }
 
-    private async Task CommitPhoneAsync(Candidate candidate, WatchedArea area, State state, int started)
+    // Yalnız tek iç balon eksilmiş olmalı. Kalanların yazısı ve kutuları aynı sırada aynı yerdeyse
+    // bu bir OCR atlaması olabilir. Kaydırma, yeni metin veya sayfa kapanması bu denetime takılmaz.
+    private static bool MissingInteriorPhoneBubble(State state, Candidate candidate)
+    {
+        if (state.RenderedLayout is not { } previous || state.RenderedPhoneParagraphs is not { } sources
+            || candidate.Blocks is not { Count: >= 2 } current || previous.Count != current.Count + 1) return false;
+        // Özgün dilinde kalan kişi adı üst metinde bulunur ama TV bloklarına girmez. OCR gruplarını karşılaştır.
+        bool SameText(Block a, Block b) => a.Count == b.Count &&
+            sources.Skip(a.Start).Take(a.Count).SequenceEqual(candidate.Paragraphs.Skip(b.Start).Take(b.Count));
+        bool missing = false;
+        for (int i = 0; i < current.Count; i++)
+        {
+            var block = current[i];
+            var prior = previous[missing ? i + 1 : i];
+            if (!SameText(prior, block))
+            {
+                if (missing || i == 0 || state.RenderedBlocks?.Any(b => b.Group == i) != true) return false;
+                missing = true;
+                prior = previous[i + 1];
+                if (!SameText(prior, block)) return false;
+            }
+            if (Math.Abs(block.Box.Left - prior.Box.Left) > 0.012
+                || Math.Abs(block.Box.Right - prior.Box.Right) > 0.012 || Math.Abs(block.Box.Top - prior.Box.Top) > 0.012
+                || Math.Abs(block.Box.Bottom - prior.Box.Bottom) > 0.012) return false;
+        }
+        return missing;
+    }
+
+    private static bool SamePhoneLayout(State state, Candidate candidate, Frame frame)
+    {
+        // Her turu son okuma ile değil son gönderimle karşılaştır: telefonun gerçek hareketi birikince yayımlanır.
+        double dx = 2.0 / frame.Width, dy = 2.0 / frame.Height;
+        bool SameBox(TextBox? a, TextBox? b) => a == b || a is { } old && b is { } current
+            && Math.Abs(old.Left - current.Left) <= dx && Math.Abs(old.Right - current.Right) <= dx
+            && Math.Abs(old.Top - current.Top) <= dy && Math.Abs(old.Bottom - current.Bottom) <= dy;
+        if (!SameBox(state.RenderedBox, candidate.Box)
+            || Math.Abs(state.RenderedLineHeight.GetValueOrDefault() - candidate.LineHeight.GetValueOrDefault()) > dy)
+            return false;
+        if (state.RenderedLayout is not { } previous || candidate.Blocks is not { } current)
+            return state.RenderedLayout is null && candidate.Blocks is null;
+        if (previous.Count != current.Count) return false;
+        for (int i = 0; i < current.Count; i++)
+        {
+            var a = previous[i];
+            var b = current[i];
+            if (a.Start != b.Start || a.Count != b.Count || !SameBox(a.Box, b.Box)
+                || Math.Abs(a.LineHeight - b.LineHeight) > dy || !SameSurface(a.Style, b.Style)) return false;
+        }
+        return true;
+    }
+
+    private static bool SameSurface(PhoneTextStyle? a, PhoneTextStyle? b) => a == b || a is not null && b is not null
+        && NearColor(a.Background, b.Background) && NearColor(a.Foreground, b.Foreground);
+
+    private static bool NearColor(string a, string b, int tolerance = 8)
+    {
+        // GamePhonePalette kanalları sekizli basamaklara yuvarlar. Bir basamaklık fark sıkıştırma titreşimidir.
+        if (a == b) return true;
+        for (int i = 1; i < 7; i += 2)
+        {
+            const System.Globalization.NumberStyles hex = System.Globalization.NumberStyles.HexNumber;
+            if (Math.Abs(byte.Parse(a.AsSpan(i, 2), hex) - byte.Parse(b.AsSpan(i, 2), hex)) > tolerance) return false;
+        }
+        return true;
+    }
+
+    private async Task CommitPhoneAsync(Candidate candidate, WatchedArea area, State state, int started, Frame frame)
     {
         if (area.PanelLifetime is { IsCancellationRequested: true }) return;
         if (!translator.TranslatesTogether) FollowPhonePage(state, candidate, area.Region);
         if (state.Shown == candidate.Key)
         {
             if (state.RenderedKey != candidate.Key || string.IsNullOrEmpty(state.RenderedText)) return;
-            if (state.RenderedBox == candidate.Box && state.RenderedLineHeight == candidate.LineHeight
-                && SameLayout(state.RenderedLayout, candidate.Blocks)) return;
+            if (SamePhoneLayout(state, candidate, frame)) return;
             // Aynı yazı kaydı: çeviriler korunur, bloklar yeni yerlerine taşınır (anahtar aynıysa grup sayısı da aynıdır).
             var moved = state.RenderedBlocks is { } rendered && candidate.Blocks is { } current
                 ? rendered.Select(block => (Group: block.Group, Item: block.Item with
@@ -246,7 +325,7 @@ public sealed partial class RegionWatcher
                         && (PhoneMissing(newer.Frame, newer.Area) || fresh?.PhonePage?.Changed(newer.Frame, newer.Area.Region) == true)) fresh = null;
                     state.ReadRegion = latest.Area.Region;
                     state.ReadPhonePage = fresh?.PhonePage;
-                    state.Signature = fresh is null ? null : RegionCropper.Signature(crop);
+                    state.Signature = fresh is { Key.Length: > 0 } ? RegionCropper.Signature(crop) : null;
                     if (fresh?.Key != candidate.Key)
                     {
                         state.LastRead = fresh?.Key;
@@ -291,6 +370,7 @@ public sealed partial class RegionWatcher
         if (Volatile.Read(ref session) != started || state.Shown != candidate.Key) return;
         if (partialPhone) state.Shown = ""; // Sonraki tur, yeni okumanın yalnız eksik kalan balonlarını tamamlar.
         Publish(area, state, started, candidate, result, fromPack, prepared, partialPhone: partialPhone);
+        state.RenderedPhoneParagraphs = partialPhone || string.IsNullOrEmpty(state.RenderedText) ? null : candidate.Paragraphs;
     }
 
     /// <summary>Ömrü iptal edilen panelin eski okumasını ve yalnız o panelin kutusunu kaldırır.</summary>

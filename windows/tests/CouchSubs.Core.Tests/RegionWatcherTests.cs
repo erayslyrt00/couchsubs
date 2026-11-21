@@ -5,7 +5,7 @@ using CouchSubs.Core;
 namespace CouchSubs.Core.Tests;
 
 /// <summary>Ek alanlar: ana altyazıdan ayrı, seyrek okunur; yazı kararlıysa ve değiştiyse çevrilir (Mac: RegionWatcherTests.swift).</summary>
-public class RegionWatcherTests
+public partial class RegionWatcherTests
 {
     private sealed class Reader : ITextReader
     {
@@ -113,6 +113,64 @@ public class RegionWatcherTests
     // Hazır alan (GTA 6 yardım kutusu) bölgenin tamamını kaplayan kare: zemin düz panel ya da oyun dünyası.
     private static Frame PresetFrame(bool panel) => UiPanelTests.Region(panel ? (_, _) => 28 : null, 240, width: 320, height: 180);
     private static readonly WatchedArea PresetHelp = new("preset-help", "Help", new CropRegion(0, 1, 0, 1)) { RequiresPanel = true };
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LongPhoneMessageConfirmsAdjacentOcrTyposOnce(bool realChange)
+    {
+        const string original = "Cool. I'll check it out. Would be nice to clear my head for a second.";
+        const string alternate = "Cool. I'll check ct ocut. Would be nice to clear my head for a second.";
+        using var lifetime = new CancellationTokenSource();
+        var phone = Phone with { PanelLifetime = lifetime.Token, Region = new CropRegion(0, 1, 0, 1) };
+        var reader = new Reader { Lines = [Line(original)] };
+        var translator = new Translator { Map = text => text == original ? "Gidip bakarım." : "Değişen mesaj." };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        await watcher.PassAsync(Shade(32), [phone]);
+        Assert.Equal("Gidip bakarım.", Assert.Single(server.Sent).Text);
+
+        var next = Shade(32);
+        Array.Fill(next.Pixels, (byte)200, next.Stride * 100, next.Stride * 60);
+        reader.Lines = [Line(alternate)];
+        await watcher.PassAsync(next, [phone]);
+        Assert.Equal(2, reader.ScreenReads);
+        Assert.Single(server.Sent);
+        Assert.Single(translator.Calls);
+
+        reader.Lines = [Line(realChange ? alternate : original)];
+        await watcher.PassAsync(next, [phone]);
+        await watcher.PassAsync(next, [phone]);
+        Assert.Equal(3, reader.ScreenReads);
+        Assert.Equal(realChange ? 2 : 1, translator.Calls.Count);
+        Assert.Equal(realChange ? "Değişen mesaj." : "Gidip bakarım.", server.Sent[^1].Text);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OmittingOneBubbleBetweenUnchangedNeighborsRequiresASecondRead(bool stillMissing)
+    {
+        using var lifetime = new CancellationTokenSource();
+        var phone = Phone with { PanelLifetime = lifetime.Token, Region = new CropRegion(0, 1, 0, 1) };
+        List<TextLine> full = [Line("Lucia!", .05, .035), Line("How's work?", .25, .04), Line("Not great.", .45, .04), Line("See you.", .7, .04)];
+        var reader = new Reader { Lines = full };
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, new Translator(), server)
+            { PackLookup = source => new PackMatch(source switch { "Lucia!" => "Lucia!", "How's work?" => "İş nasıl?", "Not great." => "Pek iyi değil.", _ => "Görüşürüz." }, []) };
+        await watcher.PassAsync(Shade(20), [phone]);
+        Assert.Contains("Lucia!", server.Sent[^1].Text);
+        Assert.Equal(3, server.Blocks[^1]?.Count);
+        var sends = server.Sent.Count;
+        reader.Lines = [full[0], full[1], full[3]];
+        await watcher.PassAsync(Shade(170), [phone]);
+        Assert.Equal(sends, server.Sent.Count);
+        if (!stillMissing) reader.Lines = full;
+
+        await watcher.PassAsync(Shade(170), [phone]);
+        Assert.Equal(stillMissing ? 2 : 3, server.Blocks[^1]?.Count);
+        Assert.DoesNotContain(server.Blocks, blocks => blocks?.Count == 2 && !stillMissing);
+    }
 
     [Fact]
     public async Task PresetAreaWithoutAnInterfacePanelIsNeverReadOrShown()
@@ -324,6 +382,52 @@ public class RegionWatcherTests
         await pending.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal([""], server.Sent.Select(s => s.Text));
         Assert.Equal(0, server.Clears);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FirstEmptyPhoneReadingGetsOneOcrRetryOnTheSameFrame(bool recover)
+    {
+        using var lifetime = new CancellationTokenSource();
+        var phone = Phone with { PanelLifetime = lifetime.Token };
+        var reader = new Reader();
+        var translator = new Translator();
+        var watcher = new RegionWatcher(reader, translator, new Server());
+        var frame = Shade(70);
+        await watcher.PassAsync(frame, [phone]);
+        if (recover) reader.Lines = [Line("Call me.")];
+        for (int i = 0; i < 5; i++) await watcher.PassAsync(frame, [phone]);
+        Assert.Equal(2, reader.ScreenReads);
+        Assert.Equal(recover ? 1 : 0, translator.Calls.Count);
+    }
+
+    [Fact]
+    public async Task SamePhoneBubbleIgnoresSubpixelNoiseButTracksMovementAndTheme()
+    {
+        using var lifetime = new CancellationTokenSource();
+        var phone = Phone with { PanelLifetime = lifetime.Token, Region = new CropRegion(0, 1, 0, 1) };
+        var reader = new Reader { Lines = [Line("Call me.")] };
+        var translator = new Translator();
+        var server = new Server();
+        var watcher = new RegionWatcher(reader, translator, server);
+        await watcher.PassAsync(Shade(32), [phone]);
+
+        // Değişen bir arayüz pikseli OCR tetikler; yer ve yüzey örneği çok az oynar.
+        var noise = Shade(40);
+        Array.Fill(noise.Pixels, (byte)200, 0, 4);
+        reader.Lines = [Line("Call me.", .2 + 1.5 / 180)];
+        await watcher.PassAsync(noise, [phone]);
+        Assert.Equal(2, reader.ScreenReads);
+        Assert.Single(server.Sent);
+
+        reader.Lines = [Line("Call me.", .2 + 3.0 / 180)];
+        await watcher.PassAsync(Shade(40), [phone]);
+        Assert.Equal(2, server.Sent.Count);
+        Assert.Equal(.2 + 3.0 / 180, server.Sent[^1].Box!.Value.Top, 5);
+        await watcher.PassAsync(Shade(180), [phone]);
+        Assert.Equal(3, server.Sent.Count);
+        Assert.Single(translator.Calls);
     }
 
     [Fact]
@@ -729,6 +833,39 @@ public class RegionWatcherTests
             Assert.Single(translator.Calls);
             Assert.Equal(1, reader.ScreenReads);
         }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task EmptyRecheckDuringPhoneTranslationGetsOneRealReadOnUnchangedPixels(bool recovers)
+    {
+        using var lifetime = new CancellationTokenSource();
+        var phone = Phone with { PanelLifetime = lifetime.Token, Region = new CropRegion(0, 1, 0, 1) };
+        var reader = new Reader { Lines = [Line("Old message.")] };
+        var translator = new WaitingPhoneTranslator();
+        var server = new Server();
+        long clock = 0;
+        var watcher = new RegionWatcher(reader, translator, server, clock: () => clock);
+        watcher.Offer(Shade(10), [phone]);
+        await translator.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        reader.Lines = [];
+        var next = Shade(180);
+        watcher.Offer(next, [phone]);
+        translator.Release.SetResult();
+        await WaitForPass(watcher);
+        Assert.Equal(2, reader.ScreenReads);
+        Assert.DoesNotContain(server.Sent, item => item.Text.Length > 0);
+
+        if (recovers) reader.Lines = [Line("New message.")];
+        for (int i = 0; i < 3; i++)
+        {
+            clock += 2000;
+            watcher.Offer(next, [phone]);
+            await WaitForPass(watcher);
+        }
+        Assert.Equal(3, reader.ScreenReads);
+        Assert.Equal(recovers ? new[] { "TR: New message." } : [], server.Sent.Where(x => x.Text.Length > 0).Select(x => x.Text));
     }
 
     [Fact]
