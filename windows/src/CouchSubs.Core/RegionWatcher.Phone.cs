@@ -43,7 +43,7 @@ public sealed partial class RegionWatcher
             return;
         }
         Candidate candidate;
-        try { candidate = ReadPhoneCandidate(frame, area, crop); }
+        try { candidate = ReadPhoneCandidate(frame, area, crop, state); }
         catch
         {
             // OCR hatası boş alan değildir. Eski kutuyu koru; aynı kareyi sonraki normal turda yeniden oku.
@@ -85,10 +85,10 @@ public sealed partial class RegionWatcher
         }
     }
 
-    private Candidate ReadPhoneCandidate(Frame frame, WatchedArea area, Frame crop)
+    private Candidate ReadPhoneCandidate(Frame frame, WatchedArea area, Frame crop, State state)
     {
         var clock = now();
-        var reading = area.PhonePose is { } pose ? GamePhoneReader.Read(frame, area.Region, pose, reader)
+        var reading = area.PhonePose is { } pose ? (state.PhoneReader ??= new()).Read(frame, area.Region, pose, reader)
             : reader.ReadScreen(crop);
         area.PanelLifetime?.ThrowIfCancellationRequested();
         Interlocked.Increment(ref reads);
@@ -318,7 +318,7 @@ public sealed partial class RegionWatcher
                     // Telefon açıkken sayfa kaydırılmış olabilir. Yalnız yazı pikselleri değiştiyse bir kez daha oku.
                     var crop = RegionCropper.Crop(latest.Frame, latest.Area.Region);
                     Candidate? fresh = null;
-                    try { fresh = ReadPhoneCandidate(latest.Frame, latest.Area, crop); }
+                    try { fresh = ReadPhoneCandidate(latest.Frame, latest.Area, crop, state); }
                     catch { /* Okunamayan yeni kare eski çeviriyi doğrulayamaz. */ }
                     if (Volatile.Read(ref session) != started || area.PanelLifetime is { IsCancellationRequested: true }) return;
                     if (LatestPhone(area) is { } newer && !ReferenceEquals(newer.Frame, latest.Frame)

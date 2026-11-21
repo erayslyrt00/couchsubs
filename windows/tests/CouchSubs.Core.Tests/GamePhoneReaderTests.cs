@@ -23,7 +23,7 @@ public class GamePhoneReaderTests
         }
         var reader = new ProbeReader();
         var region = pose.Bounds;
-        var reading = GamePhoneReader.Read(frame, region, pose, reader);
+        var reading = new GamePhoneReader().Read(frame, region, pose, reader);
         Assert.Equal(1, reader.Calls);
         Assert.Equal(4, reader.Samples.Count);
         var line = Assert.Single(reading.Lines);
@@ -54,6 +54,68 @@ public class GamePhoneReaderTests
         Assert.Equal(["That was quite a surprise!", "Did you see it?", "Ask later", "No problem"],
             groups.Select(group => Assert.Single(group.Paragraphs)));
         Assert.Equal(reading.Lines[0].Box!.Value.Union(reading.Lines[1].Box!.Value), groups[0].Box);
+    }
+
+    [Theory]
+    [InlineData(true, false, true, 2, true)]
+    [InlineData(true, false, true, 2, false, true)]
+    [InlineData(true, false, false, 2, false)]
+    [InlineData(false, false, true, 1, false)]
+    [InlineData(true, true, true, 1, false)]
+    public void ChecksOnlyAnUnreadStripAndRequiresTheSameTailInTheCurrentFrame(
+        bool hasInk, bool complete, bool anchorMatches, int calls, bool recovered, bool partial = false)
+    {
+        var frame = Frame.Blank(200, 300);
+        if (hasInk)
+            for (int y = 244; y < 266; y++)
+            for (int x = 40; x < 150; x++)
+                Array.Fill(frame.Pixels, (byte)((x / 3 % 2) * 180), y * frame.Stride + x * 4, 3);
+        var anchor = new TextLine("around. Be good", new(.20, .88, .67, .94), Confidence: .98);
+        var upper = new TextLine("Just passing through", new(.20, .83, .85, .89), Confidence: .96);
+        List<TextLine> lines = [new("Friends", new(.1, .12, .3, .18)), new("See you soon.", new(.1, .49, .6, .54)), anchor];
+        if (complete) lines.Add(upper);
+        if (partial) lines.Add(new TextLine("passing through", new(.41, .83, .85, .89)));
+        var reader = new StripReader(new Reading(lines), crop =>
+        {
+            Assert.True(crop.Height < frame.Height);
+            // Crop includes both lines, and uses the full width of the phone.
+            int start = (int)Math.Floor((.88 - 1.6 * (.94 - .88)) * frame.Height);
+            int end = (int)Math.Ceiling((.94 + .35 * (.94 - .88)) * frame.Height);
+            TextBox Local(TextBox b) => b with { Top = (b.Top * frame.Height - start) / (end - start),
+                Bottom = (b.Bottom * frame.Height - start) / (end - start) };
+            var upperBox = Local(upper.Box!.Value);
+            return new Reading([upper with { Box = upperBox, Words = [new("passing", upperBox)] },
+                anchor with { Text = anchorMatches ? anchor.Text : "around the corner", Box = Local(anchor.Box!.Value) }]);
+        });
+        var phone = new GamePhoneReader();
+        var result = phone.ReadMessages(frame, reader);
+        Assert.Equal(calls, reader.Calls);
+        Assert.Single(result.Lines, l => l.Text == anchor.Text);
+        var found = result.Lines.Where(l => l.Text == upper.Text).ToList();
+        Assert.Equal(complete || recovered ? 1 : 0, found.Count);
+        if (calls == 2 && !anchorMatches)
+        {
+            // A failed rescue cannot start another OCR pass on each visit to the same chat.
+            Assert.Same(result, phone.ReadMessages(frame, reader));
+            Assert.Equal(3, reader.Calls);
+        }
+        if (recovered)
+        {
+            var line = Assert.Single(found);
+            Assert.Equal(upper.Box!.Value.Top, line.Box!.Value.Top, 5);
+            Assert.Equal(line.Box, Assert.Single(line.Words!).Box);
+        }
+    }
+
+    private sealed class StripReader(Reading full, Func<Frame, Reading> strip) : ITextReader
+    {
+        public int Calls { get; private set; }
+        public string Read(Frame image) => throw new NotSupportedException();
+        public Reading ReadScreen(Frame image)
+        {
+            Calls++;
+            return image.Height == 300 ? full : strip(image);
+        }
     }
 
     private sealed class ProbeReader : ITextReader

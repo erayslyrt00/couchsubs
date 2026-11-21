@@ -82,6 +82,7 @@ public sealed partial class RegionWatcher
         public byte[]? Signature;
         public CropRegion? ReadRegion;
         public GamePhonePage? ReadPhonePage;
+        public GamePhoneReader? PhoneReader;
         public IReadOnlyList<ScreenTranslation.Item>? SentPhoneBlocks;
         public double PhoneScale;
         public Frame? LastReadCrop;
